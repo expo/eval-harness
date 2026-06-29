@@ -1,0 +1,8 @@
+{
+  "expo": {
+    "name": "eval-experiments",
+    "slug": "eval-experiments",
+    "version": "1.0.0",
+    "platforms": ["ios", "android"]
+  }
+}

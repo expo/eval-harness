@@ -1,0 +1,8 @@
+{
+  "name": "eval-experiments",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "expo": "~56.0.12"
+  }
+}
