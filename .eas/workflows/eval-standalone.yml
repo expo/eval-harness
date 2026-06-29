@@ -1,0 +1,20 @@
+# Standalone agentic-evaluator run on a macOS worker: one primitive (test_insert)
+# against the `notes` reference app in Expo Go. Stage-gated (doubles as the capability
+# probe for running a sim REPL inside EAS). Manual trigger only.
+#   eas workflow:run .eas/workflows/eval-standalone.yml
+name: eval-standalone
+
+jobs:
+  eval_standalone:
+    runs_on: macos-medium
+    # auto-injects ANTHROPIC_API_KEY (used by the evaluator's claude-agent-sdk loop)
+    environment: production
+    steps:
+      - uses: eas/checkout
+
+      - name: Check ANTHROPIC_API_KEY bound
+        run: |
+          if [ -n "${ANTHROPIC_API_KEY:-}" ]; then echo "ANTHROPIC_API_KEY bound (len ${#ANTHROPIC_API_KEY})"; else echo "MISSING"; exit 1; fi
+
+      - name: Run standalone agentic evaluator
+        run: bash ./scripts/setup-eval.sh

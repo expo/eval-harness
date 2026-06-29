@@ -1,0 +1,33 @@
+{
+  "expo": {
+    "name": "Notes",
+    "slug": "notes-mvp",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "notes",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "platforms": [
+      "ios",
+      "android",
+      "web"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.example.notesmvp"
+    },
+    "android": {
+      "package": "com.example.notesmvp"
+    },
+    "web": {
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-asset"
+    ],
+    "experiments": {
+      "typedRoutes": false
+    }
+  }
+}

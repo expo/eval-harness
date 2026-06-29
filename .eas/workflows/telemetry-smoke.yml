@@ -1,0 +1,39 @@
+# Phase-1: prove we can capture Claude Code + Codex telemetry inside an EAS Workflow.
+# Run manually:  eas workflow:run .eas/workflows/telemetry-smoke.yml
+# (No auto-trigger on purpose — free tier is 60 CI-min/month, so we never run on push.)
+name: telemetry-smoke
+
+jobs:
+  telemetry_smoke:
+    runs_on: linux-medium
+    # Declaring `environment` auto-injects that environment's variables (incl.
+    # secrets) into every run-step shell as $VAR. Do NOT map them via an env: block
+    # with ${{ env.X }} — that templating is NOT applied to secret vars and gets
+    # passed through literally (the string "${{ env.ANTHROPIC_API_KEY }}"), which
+    # is exactly what 401'd both agents on earlier runs.
+    environment: production
+    steps:
+      - uses: eas/checkout
+
+      # Fail fast (seconds, before the costly npm install) if secrets aren't bound.
+      # Prints presence + length only — never the value.
+      - name: Check secrets bound
+        run: |
+          fail=0
+          if [ -n "${ANTHROPIC_API_KEY:-}" ]; then echo "ANTHROPIC_API_KEY: bound (len ${#ANTHROPIC_API_KEY})"; else echo "ANTHROPIC_API_KEY: MISSING"; fail=1; fi
+          if [ -n "${OPENAI_API_KEY:-}" ]; then echo "OPENAI_API_KEY: bound (len ${#OPENAI_API_KEY})"; else echo "OPENAI_API_KEY: MISSING"; fail=1; fi
+          [ "$fail" = 0 ] || { echo "Secret(s) not bound to this job — check 'environment:' and that the vars exist with secret visibility."; exit 1; }
+
+      - name: Install agent CLIs
+        run: npm install -g @anthropic-ai/claude-code @openai/codex
+
+      - name: Run telemetry smoke
+        # ANTHROPIC_API_KEY / OPENAI_API_KEY arrive via `environment: production`
+        # injection above — no env: mapping needed. Model overrides (CC_MODEL /
+        # CODEX_MODEL) default inside run-smoke.sh.
+        run: bash ./scripts/run-smoke.sh
+        # NOTE: eas/upload_artifact is NOT available in workflow custom jobs
+        # ("Uploading build artifacts outside of builds is not supported"), so
+        # telemetry is exfiltrated via the stdout dump inside run-smoke.sh (read it
+        # from this job's logs). A durable file-artifact path (external object store)
+        # is a follow-up once we move past smoke-sized payloads.
