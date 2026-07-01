@@ -32,8 +32,17 @@ jobs:
         # injection above — no env: mapping needed. Model overrides (CC_MODEL /
         # CODEX_MODEL) default inside run-smoke.sh.
         run: bash ./scripts/run-smoke.sh
-        # NOTE: eas/upload_artifact is NOT available in workflow custom jobs
-        # ("Uploading build artifacts outside of builds is not supported"), so
-        # telemetry is exfiltrated via the stdout dump inside run-smoke.sh (read it
-        # from this job's logs). A durable file-artifact path (external object store)
-        # is a follow-up once we move past smoke-sized payloads.
+
+      # tar ourselves → clean `telemetry/` root (upload_artifact bakes in abs paths)
+      - name: Package telemetry
+        if: ${{ always() }}
+        run: tar -czf telemetry.tar.gz telemetry
+
+      # type: other = generic artifact (build types 400 outside a build)
+      - name: Upload telemetry artifact
+        if: ${{ always() }}
+        uses: eas/upload_artifact
+        with:
+          type: other
+          name: telemetry
+          path: telemetry.tar.gz
