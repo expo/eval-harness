@@ -58,6 +58,11 @@ on:
         default: true
         required: false
         description: Run the skill-eval analyzer job
+      materialize_skill_case:
+        type: boolean
+        default: false
+        required: false
+        description: Author from a skill-eval case PRD variant instead of the requested PRD
       skill_case_spec:
         type: string
         default: evaluator/skill_eval_cases/core5/native-data-fetching.json
@@ -91,7 +96,7 @@ jobs:
 
       - name: Author app with coding agent
         run: |
-          if [ '${{ inputs.run_eval_skill }}' = 'true' ] && [ -n '${{ inputs.skill_case_spec }}' ]; then
+          if [ '${{ inputs.materialize_skill_case }}' = 'true' ] && [ -n '${{ inputs.skill_case_spec }}' ]; then
             bash ./scripts/skill-eval/run-scenario.sh \
               --case '${{ inputs.skill_case_spec }}' \
               --scenario '${{ inputs.skill_scenario }}' \
