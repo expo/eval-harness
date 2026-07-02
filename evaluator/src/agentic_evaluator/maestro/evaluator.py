@@ -106,6 +106,7 @@ class MaestroEvaluator:
         result = TestPlanResult(score=0, full_points=plan["full_points"])
 
         tracer = Tracer(plan_stem=test_plan_path.stem, root=_trace_root_for(test_plan_path))
+        os.environ["EVAL_SCREENSHOT_DIR"] = str(tracer.root / "screenshots")
         tracer.capture_console()
         tracer.log(
             "plan_start",

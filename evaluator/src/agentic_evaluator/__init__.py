@@ -1,18 +1,11 @@
 """Agentic evaluator for Expo / React Native apps.
 
-Public API re-exported for convenience:
-
-    from agentic_evaluator import AgentDeviceEvaluator, MaestroEvaluator
+Heavy evaluator classes are imported lazily so lightweight offline helpers
+(for example skill-eval trace/static analyzers) do not require simulator or
+Claude SDK dependencies just to import this package.
 """
 
-from .maestro.evaluator import MaestroEvaluator
-from .agent_device.evaluator import AgentDeviceEvaluator
-from .core.scoring import (
-    TestPlanResult,
-    StepResult,
-    SoftAssertionResult,
-    AssertionResult,
-)
+from .core.scoring import AssertionResult, SoftAssertionResult, StepResult, TestPlanResult
 
 __all__ = [
     "MaestroEvaluator",
@@ -22,3 +15,13 @@ __all__ = [
     "SoftAssertionResult",
     "AssertionResult",
 ]
+
+
+def __getattr__(name):
+    if name == "MaestroEvaluator":
+        from .maestro.evaluator import MaestroEvaluator
+        return MaestroEvaluator
+    if name == "AgentDeviceEvaluator":
+        from .agent_device.evaluator import AgentDeviceEvaluator
+        return AgentDeviceEvaluator
+    raise AttributeError(name)

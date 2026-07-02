@@ -63,6 +63,23 @@ def build_tools(ctx: ToolContext):
         except Exception as e:
             return _err(f"capture failed: {e}")
 
+    @tool(
+        "capture_screenshot",
+        "Capture a PNG screenshot of the current simulator screen and return the "
+        "path on disk. Use this for visual evidence after navigating to a "
+        "feature-relevant screen. The harness saves screenshots under the "
+        "current evaluator trace directory when available.",
+        {},
+    )
+    async def capture_screenshot(args: dict) -> dict:
+        try:
+            r = ctx.bridge.capture_screenshot()
+            if r.success:
+                return _ok(f"screenshot: {r.output}")
+            return _err(f"capture_screenshot failed: {r.error or r.output[:200]}")
+        except Exception as e:
+            return _err(f"capture_screenshot failed: {e}")
+
     # ----- Act: taps -----
 
     @tool(
@@ -416,7 +433,7 @@ def build_tools(ctx: ToolContext):
         return _err(f"cancel_dialog failed: {r.error or r.output[:200]}")
 
     tool_funcs = [
-        capture_screen,
+        capture_screen, capture_screenshot,
         tap_element, tap_by_text, tap_at_point,
         fill_field, erase_text,
         scroll, scroll_until_visible, swipe, long_press,

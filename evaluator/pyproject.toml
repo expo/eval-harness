@@ -12,6 +12,7 @@ dependencies = [
 
 [project.scripts]
 agentic-evaluator = "agentic_evaluator.main:main"
+agentic-skill-eval = "agentic_evaluator.skill_eval.cli:main"
 
 [build-system]
 requires = ["hatchling"]

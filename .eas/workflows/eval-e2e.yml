@@ -2,6 +2,7 @@
 #   macOS: PRD → coding agent authors an Expo app → upload authored-app artifact
 #   macOS: download authored app → dev-build + serve → evaluator scores it →
 #          upload eval output artifact.
+#   linux: download authored app → analyze skill trigger quality + static uptake
 # Manual trigger only (consumes CI minutes + does a native dev build).
 #   eas workflow:run .eas/workflows/eval-e2e.yml
 #
@@ -47,6 +48,30 @@ on:
         default: dev-client
         required: false
         description: iOS app mode to build for evaluation
+      run_eval_ios:
+        type: boolean
+        default: false
+        required: false
+        description: Run the native iOS evaluator job
+      run_eval_skill:
+        type: boolean
+        default: true
+        required: false
+        description: Run the skill-eval analyzer job
+      skill_case_spec:
+        type: string
+        default: evaluator/skill_eval_cases/core5/native-data-fetching.json
+        required: false
+        description: Skill-eval case spec path
+      skill_scenario:
+        type: choice
+        options:
+          - skills_off_tools_on
+          - skills_available_unmentioned
+          - skills_available_mentioned
+        default: skills_available_unmentioned
+        required: false
+        description: Skill-eval scenario label and capability mode
 
 jobs:
   author_app:
@@ -65,7 +90,17 @@ jobs:
           if [ -n "${ANTHROPIC_API_KEY:-}" ]; then echo "ANTHROPIC_API_KEY bound (len ${#ANTHROPIC_API_KEY})"; else echo "MISSING"; exit 1; fi
 
       - name: Author app with coding agent
-        run: bash ./scripts/author-app.sh
+        run: |
+          if [ -n '${{ inputs.skill_case_spec }}' ]; then
+            bash ./scripts/skill-eval/run-scenario.sh \
+              --case '${{ inputs.skill_case_spec }}' \
+              --scenario '${{ inputs.skill_scenario }}' \
+              --agent '${{ inputs.agent }}' \
+              --agent-model '${{ inputs.agent_model }}' \
+              --script ./scripts/author-app.sh
+          else
+            bash ./scripts/author-app.sh
+          fi
 
       # Carries both the authored workspace and author-side diagnostics to macOS.
       - name: Package authored app
@@ -95,6 +130,7 @@ jobs:
           path: authored-app.tar.gz
 
   eval_ios:
+    if: ${{ inputs.run_eval_ios }}
     needs: [author_app]
     runs_on: macos-medium
     environment: production
@@ -155,3 +191,40 @@ jobs:
           type: other
           name: eval-e2e-output
           path: eval-out.tar.gz
+
+  eval_skill:
+    if: ${{ inputs.run_eval_skill }}
+    needs: [author_app]
+    runs_on: linux-medium
+    environment: production
+    steps:
+      - uses: eas/checkout
+
+      - name: Download authored app
+        uses: eas/download_artifact
+        id: download_author
+        with:
+          name: authored-app
+
+      - name: Analyze authored app for skill eval
+        run: |
+          mkdir -p skill-eval-report
+          AUTHORED_ARTIFACT='${{ steps.download_author.outputs.artifact_path }}'
+          bash ./scripts/skill-eval/analyze-artifacts.sh \
+            --case '${{ inputs.skill_case_spec }}' \
+            --authored-artifact "$AUTHORED_ARTIFACT" \
+            --scenario '${{ inputs.skill_scenario }}' \
+            --out-dir skill-eval-report
+          find skill-eval-report -maxdepth 3 -type f -print | sort
+
+      - name: Package skill-eval report
+        if: ${{ always() }}
+        run: tar -czf skill-eval-report.tar.gz skill-eval-report
+
+      - name: Upload skill-eval report
+        if: ${{ always() }}
+        uses: eas/upload_artifact
+        with:
+          type: other
+          name: skill-eval-report
+          path: skill-eval-report.tar.gz

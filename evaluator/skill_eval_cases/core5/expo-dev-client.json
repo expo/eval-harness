@@ -1,0 +1,17 @@
+{
+  "id": "expo-dev-client",
+  "feature_focus": "dev-client-ready app configuration with native module support",
+  "expected_skills": ["expo-dev-client"],
+  "prd_variants": {
+    "unmentioned": "Build an Expo app that uses a native module and can run as a development build.",
+    "mentioned": "Build an Expo app using expo-dev-client guidance. It should use a native module and be configured for a development build."
+  },
+  "scenarios": ["skills_off_tools_on", "skills_available_unmentioned", "skills_available_mentioned"],
+  "static_uptake_checks": [
+    {"id": "depends_expo_dev_client", "kind": "package_dependency", "target": "expo-dev-client"},
+    {"id": "has_scheme", "kind": "text", "target": "scheme"},
+    {"id": "has_ios_bundle_id", "kind": "text", "target": "bundleIdentifier"}
+  ],
+  "test_plan": "test_plans/primitives/test_insert.txt",
+  "screenshot_targets": [{"label": "Home", "test_id": "screen-home"}]
+}
