@@ -31,6 +31,9 @@ Technical Requirements
 - Must include index.js as entry point that registers the root component
 - Must include a custom URL scheme for Expo dev-client runs
 - Use bundled local fixture data for flavours and locations
+- Use safe-area aware screen layout. Inputs and primary buttons must not be
+  placed under or visually collide with the iOS status bar, Dynamic Island,
+  home indicator, keyboard, or navigation chrome.
 
 ## Data Model
 
@@ -223,6 +226,12 @@ Errors:
 
 ## Accessibility and Testability
 
+Core interactive controls must be reachable by native iOS automation. Add both
+stable `testID` props and meaningful accessibility labels/roles where React
+Native supports them. Prefer standard React Native controls such as `TextInput`,
+`Pressable`, `Button`, `Switch`, and `FlatList` over custom gesture-only wrappers
+for primary flows.
+
 Core interactive controls must have stable labels and test IDs:
 - Primary tabs: flavours-tab, locations-tab, map-tab, about-tab
 - Flavour search input: flavour-search-input
@@ -237,3 +246,9 @@ Core interactive controls must have stable labels and test IDs:
 - Locate me action: locate-me-button
 
 Touch targets should be at least 44x44 points on iOS.
+
+Search inputs must be standard editable `TextInput` elements with visible
+placeholder text, enough vertical padding to tap reliably, and no overlapping
+absolute-positioned views. Filter sheets, empty-state actions, and tab controls
+must remain discoverable in the accessibility tree and tappable by label or
+testID.

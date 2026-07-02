@@ -6,13 +6,13 @@ empty workspace).
 ## What you must produce
 
 A self-contained Expo project that the harness can build and run with
-`npx expo run:ios` (a debug **dev build**, not just Expo Go) and serve over Metro:
+`npx expo run:ios` as a native iOS simulator app, not just Expo Go:
 
 - `package.json` with all dependencies the app needs (use `npx expo install <pkg>`
   semantics so versions are SDK-compatible).
 - `app.json` (or `app.config.js`) with a valid `expo.name`, `expo.slug`, an iOS
-  `bundleIdentifier`, and a **`scheme`** (REQUIRED — the harness deep-links the dev
-  client via `<scheme>://expo-development-client/?url=http://localhost:8081`).
+  `bundleIdentifier`, and a **`scheme`** (REQUIRED for native launch and the
+  harness's dev-client fallback mode).
 - An app entry point and all screens/components/state/storage needed to satisfy
   **every** behavior in the PRD. No placeholders, no `TODO`, no stubbed screens.
 
@@ -26,13 +26,18 @@ A self-contained Expo project that the harness can build and run with
 - Add clear, stable `testID` props to the primary interactive and content elements
   (inputs, buttons, list rows, screen containers). This is how the app is driven
   and verified later; descriptive testIDs materially improve testability.
+- Make primary flows native-automation friendly: use safe-area aware layout,
+  standard editable `TextInput` controls for text entry, real pressable/button
+  controls for actions, and useful `accessibilityLabel` / `accessibilityRole`
+  values. Do not place tappable inputs under the status bar or behind decorative
+  overlays.
 - The code must `npm install` cleanly and compile. Implement real persistence,
   real navigation, and the exact rules in the PRD (values, copy, error states).
 
 ## How to work
 
-- Use the **Expo MCP server** and **Expo skills** that are installed in this
-  environment: read the current Expo docs, check API usage, and add libraries the
+- Use the installed **Expo skills** and, when available, the **Expo MCP server**:
+  read the current Expo docs, check API usage, and add libraries the
   Expo-recommended way rather than guessing versions.
 - Do **not** hand-pin guessed Expo/React/React Native/native-module versions.
   Use Expo tooling (`npx create-expo-app`, `npx expo install`, or current Expo

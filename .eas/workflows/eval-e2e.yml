@@ -1,9 +1,9 @@
 # End-to-end Evaluation Harness I, split across two workers:
-#   macOS: PRD → coding agent authors an Expo app → upload authored-app artifact
-#   macOS: download authored app → dev-build + serve → evaluator scores it →
+#   linux: PRD → coding agent authors an Expo app → upload authored-app artifact
+#   macOS: download authored app → native iOS build → evaluator scores it →
 #          upload eval output artifact.
 #   linux: download authored app → analyze skill trigger quality + static uptake
-# Manual trigger only (consumes CI minutes + does a native dev build).
+# Manual trigger only (consumes CI minutes + does a native iOS build).
 #   eas workflow:run .eas/workflows/eval-e2e.yml
 #
 # Secrets come ONLY from the `production` environment (auto-injected as $VAR).
@@ -45,7 +45,7 @@ on:
         options:
           - dev-client
           - release
-        default: dev-client
+        default: release
         required: false
         description: iOS app mode to build for evaluation
       run_eval_ios:
@@ -75,7 +75,7 @@ on:
 
 jobs:
   author_app:
-    runs_on: macos-medium
+    runs_on: linux-medium
     environment: production
     env:
       AGENT: ${{ inputs.agent || 'claude' }}
@@ -91,7 +91,7 @@ jobs:
 
       - name: Author app with coding agent
         run: |
-          if [ -n '${{ inputs.skill_case_spec }}' ]; then
+          if [ '${{ inputs.run_eval_skill }}' = 'true' ] && [ -n '${{ inputs.skill_case_spec }}' ]; then
             bash ./scripts/skill-eval/run-scenario.sh \
               --case '${{ inputs.skill_case_spec }}' \
               --scenario '${{ inputs.skill_scenario }}' \
@@ -139,7 +139,7 @@ jobs:
       AGENT_MODEL: ${{ inputs.agent_model || '' }}
       PRD_OVERRIDE: ${{ inputs.prd || '' }}
       TEST_PLAN_OVERRIDE: ${{ inputs.test_plan || '' }}
-      EVAL_IOS_APP_MODE: ${{ inputs.ios_app_mode || 'dev-client' }}
+      EVAL_IOS_APP_MODE: ${{ inputs.ios_app_mode || 'release' }}
     steps:
       - uses: eas/checkout
 
@@ -159,7 +159,7 @@ jobs:
           echo "download_author artifact_path=$artifact_path"
           if [ -d "$artifact_path" ]; then
             echo "downloaded artifact directory contents:"
-            find "$artifact_path" -maxdepth 2 -mindepth 1 -print | sort | head -200
+            find "$artifact_path" -maxdepth 2 -mindepth 1 -print | sort | head -40
             if [ -f "$artifact_path/authored-app.tar.gz" ]; then
               tar -xzf "$artifact_path/authored-app.tar.gz"
             elif [ -d "$artifact_path/agent-workspace" ] || [ -d "$artifact_path/eval-out" ]; then

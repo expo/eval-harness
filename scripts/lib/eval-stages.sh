@@ -28,7 +28,13 @@ _EVAL_STAGES_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # ----------------------------------------------------------------------------
 
 eval::gate() { # rc label
-  if [ "${1}" = 0 ]; then echo "  ✅ STAGE OK:   ${2}"; else echo "  ❌ STAGE FAIL: ${2} (rc=${1})"; fi
+  local ts
+  ts="$(date '+%Y-%m-%dT%H:%M:%S%z' 2>/dev/null || date)"
+  if [ "${1}" = 0 ]; then
+    echo "  [$ts] ✅ STAGE OK:   ${2}"
+  else
+    echo "  [$ts] ❌ STAGE FAIL: ${2} (rc=${1})"
+  fi
 }
 
 eval::fix_java_home() {
@@ -405,6 +411,15 @@ exporter = { otlp-http = { endpoint = "http://127.0.0.1:$otlp", protocol = "bina
 trace_exporter = { otlp-http = { endpoint = "http://127.0.0.1:$otlp", protocol = "binary" } }
 metrics_exporter = "none"
 EOF
+  if [ -n "${EXPO_MCP_BEARER_TOKEN:-}" ]; then
+    cat >> "$codex_home/config.toml" <<EOF
+
+[mcp_servers.expo]
+url = "https://mcp.expo.dev/mcp"
+bearer_token_env_var = "EXPO_MCP_BEARER_TOKEN"
+enabled = true
+EOF
+  fi
 }
 
 # Runs the selected coding agent. Globals it reads when agent=codex:
@@ -421,15 +436,20 @@ eval::run_coding_agent() { # agent root workspace prd_file out_dir [model]
     export CODEX_HOME="${CODEX_HOME:-$out/codex-home}"
     eval::_write_codex_config "$CODEX_HOME" "${model:-${CODEX_MODEL:-gpt-5-mini}}" \
       "${OPENAI_PROXY_PORT:-8082}" "${OTLP_PORT:-4318}"
-    # Install the Expo plugin (skills + tools) into the Codex config; best-effort.
-    # Some workers start with a stale marketplace snapshot, so refresh/list first
-    # to make the failure mode diagnosable in c-plugin.log.
+    # Install Expo skills into the authored workspace. A fresh CI CODEX_HOME
+    # does not have the reserved openai-curated marketplace configured, so use
+    # Expo's generic skills installer. Expo MCP requires OAuth; wire it only
+    # when a dedicated MCP bearer token has been provided.
     {
-      codex plugin marketplace upgrade openai-curated || true
-      codex plugin list --marketplace openai-curated || true
-      codex plugin add expo@openai-curated
+      if [ -n "${EXPO_MCP_BEARER_TOKEN:-}" ]; then
+        echo "Expo MCP configured with EXPO_MCP_BEARER_TOKEN"
+      else
+        echo "Expo MCP not configured: set EXPO_MCP_BEARER_TOKEN to enable it"
+      fi
+      codex mcp list --json || true
+      ( cd "$workspace" && npx -y skills add expo/skills )
     } >"$out/c-plugin.log" 2>&1 || \
-      echo "  ⚠️  codex plugin add expo@openai-curated failed (continuing; see c-plugin.log)"
+      echo "  ⚠️  npx skills add expo/skills failed (continuing; see c-plugin.log)"
     ( cd "$workspace" && $TO codex exec "$prompt" ) 2>&1 | tee "$out/c-agent.log"
     local rc=${PIPESTATUS[0]}
     eval::gate $rc "codex authored app"

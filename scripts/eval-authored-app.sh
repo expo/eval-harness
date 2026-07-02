@@ -46,6 +46,10 @@ OTLP_PORT=4318
 export OTLP_PORT
 
 export CI=1 EXPO_NO_TELEMETRY=1
+# Keep workflow logs readable by default. The evaluator still writes the complete
+# verbose transcript to eval-out/<RUN_ID>/s7-eval.log, which is uploaded as an
+# artifact. Set EVAL_STREAM_LOGS=1 for live evaluator token/tool logs.
+export EVAL_STREAM_LOGS="${EVAL_STREAM_LOGS:-0}"
 eval::fix_java_home
 eval::env_banner
 echo "RUN_ID=$RUN_ID  WORKSPACE=$WORKSPACE"
@@ -77,7 +81,7 @@ if [ ! -f "$WORKSPACE/package.json" ]; then
   exit 0
 fi
 
-echo "================= STAGE D: npm install + resolve app config + dev build ================="
+echo "================= STAGE D: npm install + resolve app config + native iOS build ================="
 if ! eval::npm_install "$WORKSPACE" "$OUT"; then
   echo "  ❌ authored app failed a clean npm install on the eval worker; skipping build/eval and collecting diagnostics"
   exit 0
