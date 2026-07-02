@@ -1,0 +1,59 @@
+<test_plan>
+
+<purpose>
+Primitive: Surface → Safe area and keyboard avoidance → Keyboard avoiding view + Keyboard dismiss (APP-AGNOSTIC).
+Verify that when a text input would sit behind the soft keyboard, the layout shifts to keep that input visible (keyboard avoidance), and that the keyboard can be dismissed by the documented gesture (tapping outside the input or scrolling the containing view).
+
+This bundles two tightly-coupled keyboard primitives that share one surface. Safe-area inset correctness (notch / home indicator) is a separate, geometry-based primitive not covered here.
+
+This test plan is APP-AGNOSTIC. Use the supplied App PRD to determine a screen with a text input positioned low enough that the keyboard would otherwise obscure it (a long form, a comment box near the bottom, a chat composer).
+</purpose>
+
+<seeding_and_precondition>
+Read the supplied App PRD to determine:
+
+- A LOW INPUT: a screen with a text input that sits in the lower portion of the screen — far enough down that the on-screen keyboard would cover it if the layout did not adjust. A multi-field form (where lower fields are near the keyboard band) or a bottom-anchored composer is ideal.
+- DISMISS GESTURE: how the PRD expects the keyboard to be dismissed (tap outside the input, scroll the view, a "Done" affordance).
+
+Setup for the formal test:
+- Navigate to the screen with the low input (signed-in / unlocked, form opened as needed). Do not focus the input yet.
+
+If the PRD indicates the app has no text-input screens where the keyboard would obscure an input (e.g. all inputs sit in the upper half, or the app has no text entry), record this primitive as not-applicable and immediately call complete_step with the note "N/A: PRD indicates no keyboard-avoidance scenario applies."
+</seeding_and_precondition>
+
+<steps>
+<step>
+
+<name>
+test_keyboard_avoidance_keeps_input_visible
+</name>
+
+Identify a text input low on the screen. Tap into it to bring up the keyboard. (Recall: tapping a field taps it at its on-screen coordinates; if the target sits below the keyboard band, swipe UP first so it is reachable.)
+
+Verify:
+- After the keyboard appears, the focused text input remains VISIBLE above the keyboard — the layout shifted / scrolled to keep the active input in view rather than leaving it hidden behind the keyboard
+- The input is usable in this state (it shows the caret / accepts focus and, when characters are typed, they appear in the field above the keyboard line)
+
+<points>4</points>
+</step>
+
+<step>
+
+<name>
+test_keyboard_dismisses_on_documented_gesture
+</name>
+
+With the keyboard still up, perform the PRD-documented dismiss gesture — tap a non-interactive area outside the input (a header / title / empty space above the keyboard), or scroll the containing scroll view, per the PRD.
+
+Verify:
+- The keyboard is dismissed (it animates away and is no longer occupying the lower portion of the screen)
+- After dismissal, the screen layout returns to its normal (non-shifted) state and previously keyboard-obscured content / affordances at the bottom are reachable again
+- (non-fatal) Any text already entered into the input is retained after the keyboard dismisses (dismissing did not clear the field)
+
+<points>3</points>
+</step>
+</steps>
+
+<full_points>7</full_points>
+
+</test_plan>

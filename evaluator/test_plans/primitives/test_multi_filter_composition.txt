@@ -1,0 +1,62 @@
+<test_plan>
+
+<purpose>
+Primitive: Data → Filtered query → Equality / set-membership / array-containment / multi-filter composition (also exercises Surface → Component library → Filter chip) (APP-AGNOSTIC).
+Verify that the app's categorical filtering narrows a collection correctly: activating a filter restricts results to records satisfying that criterion, and when multiple filters are active simultaneously the results satisfy ALL active filters (an intersection), not merely any one of them. Also verifies the filter control (chip / toggle / segmented control) reflects its active vs. inactive state.
+
+A black-box UI evaluator cannot distinguish the underlying query operator (equality vs. set-membership vs. array-containment) — those collapse into one observable behavior: "applying a categorical filter narrows results, and multiple filters compose." This plan tests that observable behavior.
+
+This test plan is APP-AGNOSTIC. Use the supplied App PRD to determine which screen exposes categorical filters, what categories exist, and how to construct records that distinguish single-filter from multi-filter results.
+</purpose>
+
+<seeding_and_precondition>
+Read the supplied App PRD to determine:
+
+- FILTER SURFACE: which screen exposes categorical filters (filter chips, a filter sheet, toggles, a segmented control) over a list / feed / catalog, and what the filter dimensions are (category, status, type, tag).
+- DATA NEEDED: enough records to show composition — ideally records such that filter A alone returns more rows than filter A AND filter B together, so the intersection is observable.
+
+Setup for the formal test:
+- Reach the filter-capable screen, signing in / unlocking first if the PRD gates content.
+- Ensure the collection contains records spanning at least two filter dimensions such that combining two filters yields a strict subset. Create records with known attributes if the app is not pre-seeded with enough variety.
+- Leave the formal test on the screen with no filters active (full collection visible).
+
+If the PRD indicates the app has no categorical filter UI (only a free-text search, or no filtering at all), record this primitive as not-applicable and immediately call complete_step with the note "N/A: PRD indicates app has no categorical filter surface." (Free-text-only search is covered by the text-search-filter primitive instead.)
+</seeding_and_precondition>
+
+<steps>
+<step>
+
+<name>
+test_single_filter_narrows_and_control_reflects_active_state
+</name>
+
+Activate ONE filter (tap a chip / toggle / segment) for a category you know at least one record matches and at least one record does not.
+
+Verify:
+- The results now show only records matching the activated filter; at least one record known NOT to match is excluded
+- The filter control reflects its ACTIVE state visually (the chip / toggle / segment is styled distinctly from its inactive peers)
+- (non-fatal) Deactivating the filter (tapping the active chip again, where the PRD supports toggling off) restores the excluded records — the filter is reversible
+
+<points>3</points>
+</step>
+
+<step>
+
+<name>
+test_multiple_filters_compose_as_intersection
+</name>
+
+With the first filter still active, activate a SECOND, compatible filter on a different dimension such that the combination should yield a strict subset of the first filter's results.
+
+Verify:
+- The results satisfy BOTH active filters simultaneously — every visible record matches filter A AND filter B
+- At least one record that matched the first filter ALONE but does NOT match the second is now excluded (confirming intersection / AND semantics, not union / OR)
+- (non-fatal) Both filter controls show their active state concurrently, so the user can see which criteria are applied
+
+<points>3</points>
+</step>
+</steps>
+
+<full_points>6</full_points>
+
+</test_plan>

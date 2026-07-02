@@ -416,6 +416,11 @@ def _seed_prompt(seeding: str, budget: int, prd: str = "") -> str:
         "more state was needed.\n"
         "- When the setup is complete, call `complete_step` with a brief summary of "
         "what you did. The first formal test step will then follow.\n\n"
+        "- If setup becomes impossible because a required text field cannot be filled "
+        "and no alternate non-text route can prepare the requested state, stop setup "
+        "instead of retrying indefinitely. Call `complete_step` with a summary "
+        "starting `SETUP BLOCKED:` and cite the field/tool error. The formal steps "
+        "will then score the observable app state.\n\n"
         f"{seeding_block}"
         f"Budget: up to {budget} tool-emitting turns for the setup phase."
     )

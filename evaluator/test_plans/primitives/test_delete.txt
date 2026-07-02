@@ -1,0 +1,51 @@
+<test_plan>
+
+<purpose>
+Primitive: Data → Record CRUD → Delete (APP-AGNOSTIC).
+Verify that deleting a record removes it: after the delete completes (confirming through any confirmation dialog), the record's row / item / card no longer appears in the list / feed / catalog, and it does not reappear on a fresh read of that surface.
+
+This test plan is APP-AGNOSTIC. Use the supplied App PRD to determine the app's primary entity, how a record is deleted (a delete button, swipe-to-delete, a menu action), and whether deletion is guarded by a confirmation modal.
+</purpose>
+
+<seeding_and_precondition>
+Read the supplied App PRD to determine:
+
+- ENTITY + DELETE AFFORDANCE: the primary record type and how the app exposes deletion (a trash / delete button on the detail or row, swipe-to-delete, a long-press menu, etc.).
+- CONFIRMATION: whether the PRD specifies a confirmation step before deletion (an "are you sure" modal). If so, you WILL confirm it in this test (unlike the modal-present primitive, delete here proceeds to completion).
+
+Setup for the formal test:
+- Reach the list / feed / catalog, signing in / unlocking first if the PRD gates content.
+- Create a record with a KNOWN, unique identifying value (e.g. a distinctive title) specifically so its disappearance is unambiguous. Do not reuse a pre-seeded record whose identity you cannot distinguish from others.
+- Confirm that record's row is visible in the list before the formal step. Do NOT delete it during setup.
+
+If the PRD indicates records cannot be deleted by the user (no delete affordance anywhere), record this primitive as not-applicable and immediately call complete_step with the note "N/A: PRD indicates records cannot be deleted."
+</seeding_and_precondition>
+
+<steps>
+<step>
+
+<name>
+test_delete_removes_record_from_list
+</name>
+
+Note the identifying value of the target record. Trigger its delete affordance. If a confirmation dialog appears, confirm / proceed with the deletion (here you DO complete the destructive action).
+
+After the delete completes, return to the list / feed / catalog if you are not already on it.
+
+Verify:
+- The deleted record's row / item / card (identified by its unique value) is NO LONGER visible in the list / feed / catalog
+- The list otherwise still renders correctly (other records, if any, are still present; the screen did not crash or go blank as a side effect of the delete)
+
+To confirm the deletion persisted rather than only being hidden from the current render, force a fresh read of the surface — navigate away and back, or restart the app per what the PRD supports.
+
+Verify:
+- On the fresh read, the deleted record is still absent (it did not reappear, confirming it was removed from storage rather than merely de-rendered)
+- (non-fatal) If the list is now empty as a result, an appropriate empty state is shown rather than a blank area or a stale ghost row
+
+<points>4</points>
+</step>
+</steps>
+
+<full_points>4</full_points>
+
+</test_plan>

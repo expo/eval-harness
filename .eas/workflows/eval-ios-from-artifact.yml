@@ -1,0 +1,107 @@
+# Replay only the iOS/evaluator half of eval-e2e from a prior authored-app
+# artifact. This is useful after changing evaluator/dev-client handshake code:
+# no coding-agent authoring pass, but still rebuilds + serves + evaluates the
+# same authored Expo project.
+#
+# Example:
+#   eas workflow:run .eas/workflows/eval-ios-from-artifact.yml \
+#     -F authored_app_url='https://wf-artifacts.eascdn.net/.../authored-app.tar.gz?...'
+name: eval-ios-from-artifact
+
+on:
+  workflow_dispatch:
+    inputs:
+      authored_app_artifact_id:
+        type: string
+        required: false
+        description: EAS artifact ID for an authored-app artifact
+      authored_app_url:
+        type: string
+        required: false
+        description: Signed download URL for an authored-app.tar.gz artifact
+      prd:
+        type: string
+        default: prds/hot_chocolate/prd/mvp.txt
+        required: false
+        description: PRD path under evaluator/
+      test_plan:
+        type: string
+        default: test_plans/primitives
+        required: false
+        description: Test plan file or directory under evaluator/
+      ios_app_mode:
+        type: choice
+        options:
+          - dev-client
+          - release
+        default: dev-client
+        required: false
+        description: iOS app mode to build for evaluation
+
+jobs:
+  eval_ios:
+    runs_on: macos-medium
+    environment: production
+    env:
+      PRD_OVERRIDE: ${{ inputs.prd || '' }}
+      TEST_PLAN_OVERRIDE: ${{ inputs.test_plan || '' }}
+      EVAL_IOS_APP_MODE: ${{ inputs.ios_app_mode || 'dev-client' }}
+    steps:
+      - uses: eas/checkout
+
+      - name: Check ANTHROPIC_API_KEY bound
+        run: |
+          if [ -n "${ANTHROPIC_API_KEY:-}" ]; then echo "ANTHROPIC_API_KEY bound (len ${#ANTHROPIC_API_KEY})"; else echo "MISSING"; exit 1; fi
+
+      - name: Download authored app by artifact ID
+        uses: eas/download_artifact
+        id: download_author
+        if: ${{ inputs.authored_app_artifact_id }}
+        with:
+          artifact_id: ${{ inputs.authored_app_artifact_id }}
+
+      - name: Download authored app by signed URL
+        id: download_author_from_url
+        if: ${{ !inputs.authored_app_artifact_id && inputs.authored_app_url }}
+        run: |
+          AUTHORED_APP_URL='${{ inputs.authored_app_url }}'
+          mkdir -p authored-app-download
+          curl --fail --location --show-error "$AUTHORED_APP_URL" --output authored-app-download/authored-app.tar.gz
+          set-output artifact_path "$(pwd)/authored-app-download/authored-app.tar.gz"
+
+      - name: Unpack authored app
+        run: |
+          artifact_path="${{ steps.download_author.outputs.artifact_path || steps.download_author_from_url.outputs.artifact_path }}"
+          echo "download_author artifact_path=$artifact_path"
+          if [ -d "$artifact_path" ]; then
+            echo "downloaded artifact directory contents:"
+            find "$artifact_path" -maxdepth 2 -mindepth 1 -print | sort | head -200
+            if [ -f "$artifact_path/authored-app.tar.gz" ]; then
+              tar -xzf "$artifact_path/authored-app.tar.gz"
+            elif [ -d "$artifact_path/agent-workspace" ] || [ -d "$artifact_path/eval-out" ]; then
+              cp -R "$artifact_path"/. .
+            else
+              echo "Could not locate authored app contents in $artifact_path"
+              exit 1
+            fi
+          else
+            ls -lah "$artifact_path"
+            tar -xzf "$artifact_path"
+          fi
+
+      - name: Build, run, and evaluate authored app
+        run: bash ./scripts/eval-authored-app.sh
+
+      - name: Package eval output
+        if: ${{ always() }}
+        run: |
+          mkdir -p eval-out
+          tar -czf eval-out.tar.gz eval-out
+
+      - name: Upload eval output
+        if: ${{ always() }}
+        uses: eas/upload_artifact
+        with:
+          type: other
+          name: eval-ios-replay-output
+          path: eval-out.tar.gz

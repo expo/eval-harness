@@ -1,0 +1,60 @@
+<test_plan>
+
+<purpose>
+Primitive: Navigation → Stack navigation (push + pop) (APP-AGNOSTIC).
+Verify that the app supports basic stack-based navigation: tapping a row / item / link from a parent screen pushes a detail or sub-screen onto the stack, and the back affordance pops back to the parent screen with the parent's state intact.
+
+This test plan is APP-AGNOSTIC. Use the supplied App PRD to determine the specific shape of this app's parent / detail relationship: which screen is a list, feed, or landing surface (the "parent") and which screen is a per-item detail or sub-screen (the "detail").
+</purpose>
+
+<seeding_and_precondition>
+Read the supplied App PRD to determine the parent → detail navigation pair to test:
+
+- PARENT screen: a list, feed, or landing screen that contains tappable items / rows / cards that lead to a detail or sub-screen. Examples per PRD: a notes list, a feed of posts, a venue search results screen, a logbook list, a category-selection screen.
+- DETAIL screen: the screen reached by tapping an item from the parent. Examples: a note editor, a post detail, a venue details page, a flight detail / edit, a quiz game screen.
+- HOW TO REACH THE PARENT FROM A FRESH LAUNCH: navigation needed before the parent is visible (e.g. unlock with credentials per PRD, sign in, dismiss onboarding, etc.).
+- ITEM PRESENCE: does the parent screen need at least one item present for the push test? If yes, create / seed an item per PRD instructions before the formal test.
+
+Perform any setup needed so the formal steps start with the PARENT screen visible AND at least one tappable item / row / card present (creating one if necessary using the PRD's "create" affordance).
+
+If the PRD indicates the app has no parent → detail stack hierarchy at all (rare; would mean a single-screen app), record this primitive as not-applicable and immediately call complete_step with the note "N/A: PRD indicates app has no stack-based navigation surface." No further action needed.
+</seeding_and_precondition>
+
+<steps>
+<step>
+
+<name>
+test_push_to_detail_screen
+</name>
+
+From the PARENT screen, tap a row / item / card that should push to the DETAIL screen.
+
+Verify:
+- After the tap, the DETAIL screen is visible (its testID-bearing element from the PRD / accessibility tree is present, OR identifying content from that screen is present)
+- The PARENT screen's primary content (its list of items) is no longer the main content area on screen — the detail has replaced it on top of the stack
+- (non-fatal) The transition was animated (slide-in, fade, or other navigation animation) rather than an instantaneous swap
+
+<points>3</points>
+</step>
+
+<step>
+
+<name>
+test_pop_back_to_parent_preserves_state
+</name>
+
+From the DETAIL screen just pushed, use the back affordance (back button, swipe-back gesture, or platform equivalent) to pop back to the PARENT screen.
+
+Verify:
+- After the back action, the PARENT screen is visible again (its testID-bearing element is present, OR its primary content like the list of items is visible)
+- The DETAIL screen is no longer the main content area
+- The item the agent tapped to push is still present on the parent (the parent's state was preserved across the round-trip — no spurious deletion or reset)
+- (non-fatal) If any in-progress UI state on the parent existed before the push (e.g., a search query in a filter field, a scroll position), it is intact after the pop
+
+<points>4</points>
+</step>
+</steps>
+
+<full_points>7</full_points>
+
+</test_plan>

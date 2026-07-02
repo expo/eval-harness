@@ -1,0 +1,61 @@
+<test_plan>
+
+<purpose>
+Primitive: Navigation → Tab navigation (bar rendering + switching + active indicator + state preservation) (APP-AGNOSTIC).
+Verify that root-level section switching works via a persistent tab bar: the tab bar is visible on root screens, tapping a tab shows that tab's screen, the active tab is visually distinguished (and only one is active at a time), and switching away from a tab and back preserves that tab's prior state (scroll position / in-tab navigation).
+
+This bundles the four tightly-coupled primitives of the Tab-navigation pattern, which share one surface and are naturally verified together.
+
+This test plan is APP-AGNOSTIC. Use the supplied App PRD to determine the app's top-level tabs (their labels / order) and which tab has scrollable or stateful content suitable for the state-preservation check.
+</purpose>
+
+<seeding_and_precondition>
+Read the supplied App PRD to determine:
+
+- TABS: the app's root-level tabs (their labels and what each contains). The app must have at least two top-level tabs for this primitive to apply.
+- STATEFUL TAB: a tab whose content can hold visible state across a switch — ideally a scrollable list long enough to scroll, or a tab with an in-tab navigation push, so "state preserved on return" is observable.
+
+Setup for the formal test:
+- Reach the app's root (signed-in / unlocked, on a top-level tab) so the tab bar is visible.
+- If needed for the state-preservation step, ensure the stateful tab has enough content to scroll (create records if the PRD requires and the app is empty).
+
+If the PRD indicates the app has no tab bar / no multiple top-level sections (it is a single-stack or single-screen app), record this primitive as not-applicable and immediately call complete_step with the note "N/A: PRD indicates app has no tab navigation."
+</seeding_and_precondition>
+
+<steps>
+<step>
+
+<name>
+test_tab_bar_renders_and_switching_changes_screen
+</name>
+
+Observe the root screen and its tab bar. Identify the currently active tab. Then tap a DIFFERENT tab.
+
+Verify:
+- A persistent tab bar with the app's top-level tabs is visible on the root screen
+- After tapping the other tab, that tab's screen / content is now shown (the destination section's identifying content is visible), and the tab bar is STILL visible during/after the switch (tab switching did not push a full-screen view that hides the bar)
+- The active-tab indicator moved to the newly-selected tab, and exactly ONE tab appears active at a time (the previously-active tab is no longer styled active)
+- (non-fatal) The switch was an instant section swap with no stack push animation (tab switches do not slide in like a detail push)
+
+<points>4</points>
+</step>
+
+<step>
+
+<name>
+test_tab_state_preserved_across_switch
+</name>
+
+Go to the stateful tab. Establish observable state in it: scroll its list partway down (note a record visible only after scrolling), OR push an in-tab detail screen per the PRD. Then switch to a different tab, and then switch BACK to the stateful tab.
+
+Verify:
+- On return, the stateful tab is restored to the state it held before leaving it — the same scroll position (the record noted after scrolling is still visible without re-scrolling), OR the in-tab pushed screen is still on top — rather than being reset to the top / root
+- (non-fatal) The round-trip did not reload or visibly flash the tab's content (state was preserved, not re-fetched from scratch)
+
+<points>3</points>
+</step>
+</steps>
+
+<full_points>7</full_points>
+
+</test_plan>

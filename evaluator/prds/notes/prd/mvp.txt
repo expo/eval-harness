@@ -17,7 +17,7 @@ A single-user notes application for quickly creating, editing, and viewing text 
 - Must work on iOS and Android
 
 Technical Requirements
-- Framework: React Native with Expo SDK 52.x
+- Framework: React Native with Expo SDK 57.x
 - Must include package.json with expo, react, and react-native dependencies
 - Must include app.json with Expo configuration
 - Must include index.js as entry point that registers the root component

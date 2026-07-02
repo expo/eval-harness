@@ -30,6 +30,13 @@ def _err(text: str) -> dict[str, Any]:
     return {"content": [{"type": "text", "text": text}], "is_error": True}
 
 
+def _driver_error(prefix: str, error: str | None, output: str, limit: int = 1200) -> dict[str, Any]:
+    detail = (error or output or "").strip()
+    if len(detail) > limit:
+        detail = detail[:limit] + "... [truncated]"
+    return _err(f"{prefix}: {detail or 'unknown error'}")
+
+
 def build_tools(ctx: ToolContext):
     """
     Build the set of tools that close over `ctx` (AgentDeviceBridge + StepState).
@@ -117,7 +124,14 @@ def build_tools(ctx: ToolContext):
         r = ctx.bridge.fill(args["id"], args["text"])
         if r.success:
             return _ok(f"typed {len(args['text'])} chars into id={args['id']!r}")
-        return _err(f"fill_field failed: {r.error or r.output[:200]}")
+        return _driver_error(
+            "TERMINAL_TEXT_ENTRY_FAILURE: fill_field failed after trying id, "
+            "snapshot-ref, coordinate, and type fallbacks. Do not retry this "
+            "field/search route; if setup depends on this text entry and no "
+            "non-text route works, call complete_step with SETUP BLOCKED",
+            r.error,
+            r.output,
+        )
 
     @tool(
         "erase_text",
@@ -238,14 +252,19 @@ def build_tools(ctx: ToolContext):
     @tool(
         "restart_app",
         "Restart the app on the device. Use this when the app is in an unrecoverable "
-        "state, or when you see no targetable elements on screen. Does NOT clear app "
-        "data — only restarts the process. Returns once the app is back on screen.",
+        "state, or when you see no targetable elements on screen. On Expo dev-client "
+        "runs this performs a clean reset that clears app data before relaunching, "
+        "because process-only restarts can strand dev-client in its launcher. On "
+        "non-dev-client runs it only restarts the process. Returns once the app is "
+        "back on screen; after a clean reset, re-navigate/re-seed any state you need.",
         {},
     )
     async def restart_app(args: dict) -> dict:
-        r = ctx.bridge.restart_app(clear_state=False)
+        deep_link = ctx.bridge.config.get("deep_link", "")
+        clear_state = "expo-development-client" in deep_link
+        r = ctx.bridge.restart_app(clear_state=clear_state)
         if r.success:
-            return _ok("app restarted")
+            return _ok("app restarted with clean reset" if clear_state else "app restarted")
         return _err(f"restart_app failed: {r.error or r.output[:200]}")
 
     # ----- Verify: hard assertions (engine executes) -----

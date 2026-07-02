@@ -5,6 +5,7 @@ description = "Agentic evaluator for Expo Agent–built mobile apps"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "braintrust>=0.3.0",
     "claude-agent-sdk>=0.0.1",
     "python-dotenv>=1.0.0",
 ]

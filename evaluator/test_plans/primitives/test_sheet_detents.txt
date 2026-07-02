@@ -1,0 +1,50 @@
+<test_plan>
+
+<purpose>
+Primitive: Navigation → Modal presentation → Sheet detents (APP-AGNOSTIC).
+Verify that a modal presented as a resizable sheet appears at its initial detent (snap height) and can be dragged to another configured detent — i.e. the sheet supports multiple snap heights rather than being a single fixed-height overlay.
+
+This test plan is APP-AGNOSTIC. Use the supplied App PRD to determine which surface is presented as a multi-detent sheet (e.g. a form sheet, a filter sheet, a detail sheet with a small and large snap point).
+</purpose>
+
+<seeding_and_precondition>
+Read the supplied App PRD to determine:
+
+- DETENT SHEET: a surface the PRD specifies should be presented as a sheet with MORE THAN ONE allowed detent (e.g. a half-height and a full-height snap, or small/medium/large). A plain full-screen modal with a single height does NOT exercise this primitive.
+- HOW TO PRESENT IT and the expected initial detent.
+
+Setup for the formal test:
+- Reach the screen from which the detent sheet is presented (signed-in / unlocked, any required records seeded).
+- Do NOT present the sheet during setup — the formal step presents it and manipulates its detents.
+
+If the PRD does NOT specify any multi-detent sheet (the app's modals are single-height, or it has no sheets), record this primitive as not-applicable and immediately call complete_step with the note "N/A: PRD indicates app has no multi-detent sheet." Note: most apps will be N/A here — multi-detent sheets are a specialized affordance.
+</seeding_and_precondition>
+
+<steps>
+<step>
+
+<name>
+test_sheet_opens_at_initial_detent_and_resizes
+</name>
+
+Present the sheet via the PRD-specified action.
+
+Verify:
+- The sheet appears at its initial detent — it occupies a partial portion of the screen (per the PRD's initial snap height) with the underlying screen still partially visible behind/around it, rather than instantly covering the full screen
+- (non-fatal) A drag handle / grabber is visible at the top of the sheet, indicating it is resizable
+
+Drag the sheet's handle (swipe up on the handle / sheet top) toward a larger configured detent.
+
+Verify:
+- The sheet resizes to a different detent and SNAPS to a configured height (it grew to the larger snap point and held there) rather than ignoring the drag or dismissing — confirming more than one detent is configured
+- (non-fatal) Content inside the sheet remains usable / correctly laid out at the new detent (no clipped or broken layout after resizing)
+
+[Commentary: After the verifications, dismiss the sheet (drag down past the smallest detent or use its close affordance) so no state is left open.]
+
+<points>4</points>
+</step>
+</steps>
+
+<full_points>4</full_points>
+
+</test_plan>

@@ -1,0 +1,59 @@
+<test_plan>
+
+<purpose>
+Primitive: Notifications → Permission request → Permission prompt + Graceful denial (APP-AGNOSTIC).
+Verify that the app requests notification (or other sensitive) permission by surfacing the OS permission dialog at the point the PRD specifies, that the dialog offers a real allow/deny choice, and that DENYING permission leaves the app functioning normally rather than crashing or dead-ending.
+
+This test plan is APP-AGNOSTIC. Use the supplied App PRD to determine which permission the app requests, what user action / screen triggers the request, and where the app continues to afterward.
+</purpose>
+
+<seeding_and_precondition>
+Read the supplied App PRD to determine:
+
+- PERMISSION + TRIGGER: which permission the app requests (notifications is the canonical case; the same shape applies to other OS permission prompts the PRD describes) and what triggers the request — ideally a contextual action (enabling reminders, tapping "turn on notifications", a settings toggle), NOT something that should fire silently on cold first launch.
+- POST-DECISION BEHAVIOR: where the app goes / what it shows after the user responds, per the PRD (it should continue to function whether granted or denied).
+
+Setup for the formal test:
+- Reach the screen from which the permission request is triggered (signed-in / unlocked as needed). The app should be in a state where permission is still UNDETERMINED (not already granted/denied from a prior run) — if a prior decision is cached, a fresh install / cleared state via restart may be needed; if you cannot reach an undetermined state, see the N/A clause.
+- Do NOT trigger the request during setup.
+
+If the PRD indicates the app requests no OS permissions of any kind, record this primitive as not-applicable and immediately call complete_step with the note "N/A: PRD indicates app requests no OS permissions." If permission was already decided and cannot be reset to undetermined in this environment, record N/A with the note "N/A: could not reach an undetermined permission state to trigger the prompt."
+</seeding_and_precondition>
+
+<steps>
+<step>
+
+<name>
+test_prompt_appears_with_allow_and_deny_choices
+</name>
+
+Invoke the PRD-specified action that should trigger the permission request.
+
+Verify:
+- An OS permission dialog appears (a system alert requesting the permission — e.g. "...Would Like to Send You Notifications") rather than the request firing silently or the app proceeding as if permission were assumed
+- The dialog offers a genuine choice — both an allow ("Allow" / "OK") and a deny ("Don't Allow" / "Deny") affordance are present and distinct
+- (non-fatal) The prompt appears at the contextually appropriate moment the PRD describes (in response to the user's action), not unprompted on a cold first launch before the user has expressed intent
+
+<points>3</points>
+</step>
+
+<step>
+
+<name>
+test_denial_is_handled_gracefully
+</name>
+
+On the permission dialog, choose DENY ("Don't Allow").
+
+Verify:
+- The app continues to function after denial — it returns to a usable screen (the triggering screen or a sensible next screen) with no crash, no frozen state, and no blank screen
+- No unhandled error related to the denied permission is surfaced to the user (the app neither insists the permission is granted nor dead-ends; at most it may show a benign "notifications are off" style affordance per the PRD)
+- (non-fatal) The app offers a reasonable path forward despite denial (continues with the feature degraded, or points the user to Settings) rather than blocking access to unrelated functionality
+
+<points>3</points>
+</step>
+</steps>
+
+<full_points>6</full_points>
+
+</test_plan>

@@ -18,3 +18,17 @@ jobs:
 
       - name: Run standalone agentic evaluator
         run: bash ./scripts/setup-eval.sh
+
+      # tar ourselves -> clean `eval-out/` root (upload_artifact bakes in abs paths)
+      - name: Package eval output
+        if: ${{ always() }}
+        run: tar -czf eval-out.tar.gz eval-out
+
+      # type: other = generic artifact for custom jobs.
+      - name: Upload eval output
+        if: ${{ always() }}
+        uses: eas/upload_artifact
+        with:
+          type: other
+          name: eval-out
+          path: eval-out.tar.gz

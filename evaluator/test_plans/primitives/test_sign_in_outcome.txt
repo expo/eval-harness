@@ -1,0 +1,62 @@
+<test_plan>
+
+<purpose>
+Primitive: Identity → Sign-in → Provider handshake + Auth state propagation (APP-AGNOSTIC).
+Verify that submitting VALID credentials on the sign-in surface establishes a session and lands the user on authenticated content, that submitting INVALID credentials surfaces an error rather than crashing or silently hanging, and that once signed in the user's identity is reflected somewhere in the authenticated UI.
+
+This bundles two tightly-coupled Sign-in primitives that share a single flow: the handshake (does submitting credentials actually authenticate / reject correctly?) and auth-state propagation (is the resulting identity available to the UI?).
+
+This test plan is APP-AGNOSTIC. Use the supplied App PRD to determine the credentials this app accepts (a fixed gate password, a seeded email + password, etc.), what "authenticated content" looks like (the home / list / feed reached after sign-in), and where the signed-in user's identity is surfaced (a name, email, avatar, greeting, or a profile/account tab).
+</purpose>
+
+<seeding_and_precondition>
+Read the supplied App PRD to determine:
+
+- VALID CREDENTIALS: the exact credential value(s) the app accepts at the sign-in surface (e.g. the fixed gate password, or a seeded test account's email + password). The PRD is the source of truth — do not invent credentials.
+- INVALID CREDENTIALS: any clearly-wrong value of the same shape (e.g. a wrong password, a malformed email). Used only for the negative check.
+- AUTHENTICATED LANDING: which screen the app shows immediately after a successful sign-in (home, list, feed, dashboard, etc.) — i.e. the observable signal that a session was established.
+- IDENTITY SURFACE: where, if anywhere, the PRD says the signed-in user's identity appears (a greeting like "Hi, Alex", an email in a profile/account tab, an avatar). For a fixed-password gate with no user object, the PRD may specify no identity surface — note that.
+
+Navigate to the credential-collection surface on a fresh launch (sign in/unlock screen). Do NOT submit anything during setup.
+
+If the PRD indicates the app has no sign-in flow at all (session-based, single-user, no auth gate), this primitive does NOT apply. Record no assertions and immediately call complete_step with the note "N/A: PRD indicates app has no authentication flow." Likewise, if the app uses a fixed-password gate with NO concept of a user identity, you may still run the handshake steps but treat the identity-propagation verification as not-applicable per the PRD (see step 2).
+</seeding_and_precondition>
+
+<steps>
+<step>
+
+<name>
+test_invalid_credentials_rejected_without_crash
+</name>
+
+On the credential-collection surface, enter the INVALID credential value(s) determined from the PRD and submit (tap the sign-in / unlock affordance, or submit-on-return).
+
+Verify:
+- The app does NOT advance to authenticated content — it remains on the sign-in surface (or an error variant of it)
+- An error / rejection is communicated to the user (an inline error message, a shaken field, a banner, an alert, or the field clearing) — OR the surface simply stays put with no advance; in all cases the app has NOT crashed, frozen, or shown a blank screen
+- (non-fatal) The rejection messaging is specific to bad credentials (e.g. "incorrect password", "invalid email or password") rather than a generic unhandled-error dump
+
+<points>3</points>
+</step>
+
+<step>
+
+<name>
+test_valid_credentials_authenticate_and_identity_propagates
+</name>
+
+Clear any invalid input (overwrite the field(s) rather than relying on erase, per the iOS secure-field quirk), enter the VALID credential value(s) from the PRD, and submit.
+
+Verify:
+- The app advances off the sign-in surface to the authenticated landing screen specified by the PRD (the session was established)
+- The authenticated content is genuinely usable (its primary screen / list / feed / dashboard is visible, not a blank or error screen)
+- The signed-in user's identity is reflected in the authenticated UI as specified by the PRD (a name, email, avatar, or greeting visible on the landing screen or reachable in a profile/account tab). If the PRD specifies NO identity surface (e.g. a fixed-password gate with no user object), record this assertion as not-applicable for this app and verify instead that authenticated content rendered for the unlocked session.
+- (non-fatal) The identity shown matches the account used to sign in (the surfaced name/email corresponds to the valid credentials entered), where the PRD makes that correspondence checkable
+
+<points>4</points>
+</step>
+</steps>
+
+<full_points>7</full_points>
+
+</test_plan>

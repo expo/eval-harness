@@ -17,6 +17,11 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TELEMETRY_DIR="${TELEMETRY_DIR:-$ROOT/telemetry}"
 mkdir -p "$TELEMETRY_DIR"
 
+# Shared telemetry-sidecar helpers (eval::launch_proxy / eval::wait_for_port /
+# eval::launch_otlp_receiver / eval::stop_proxies), also used by build-and-eval.sh.
+# shellcheck source=scripts/lib/eval-stages.sh
+source "$ROOT/scripts/lib/eval-stages.sh"
+
 # ---- model selection (cheapest tier; override via env) ----
 CC_MODEL="${CC_MODEL:-claude-haiku-4-5}"
 CODEX_MODEL="${CODEX_MODEL:-gpt-5-mini}"   # CONFIRM this id exists for your OpenAI account
@@ -25,36 +30,18 @@ ANTHROPIC_PROXY_PORT="${ANTHROPIC_PROXY_PORT:-8081}"
 OPENAI_PROXY_PORT="${OPENAI_PROXY_PORT:-8082}"
 OTLP_PORT="${OTLP_PORT:-4318}"   # Codex native OTel (OTLP/HTTP) sink
 
-PROXY_PIDS=()
-cleanup() { for p in "${PROXY_PIDS[@]:-}"; do kill "$p" 2>/dev/null || true; done; }
-trap cleanup EXIT
-
-launch_proxy() { # label upstream port logfile
-  PROXY_LABEL="$1" PROXY_UPSTREAM="$2" PROXY_PORT="$3" PROXY_LOG="$4" \
-    node "$ROOT/proxy/logging-proxy.mjs" &
-  PROXY_PIDS+=($!)
-}
-
-wait_for_port() { # port
-  for _ in $(seq 1 30); do
-    if node -e "require('net').connect($1,'127.0.0.1').on('connect',()=>process.exit(0)).on('error',()=>process.exit(1))" 2>/dev/null; then
-      return 0
-    fi
-    sleep 0.2
-  done
-  echo "!! proxy on port $1 never came up" >&2; return 1
-}
+EVAL_PROXY_PIDS=()
+trap 'eval::stop_proxies' EXIT
 
 echo "== launching logging proxies =="
-launch_proxy anthropic https://api.anthropic.com "$ANTHROPIC_PROXY_PORT" "$TELEMETRY_DIR/anthropic.jsonl"
-launch_proxy openai    https://api.openai.com    "$OPENAI_PROXY_PORT"    "$TELEMETRY_DIR/openai.jsonl"
-wait_for_port "$ANTHROPIC_PROXY_PORT"
-wait_for_port "$OPENAI_PROXY_PORT"
+eval::launch_proxy "$ROOT" anthropic https://api.anthropic.com "$ANTHROPIC_PROXY_PORT" "$TELEMETRY_DIR/anthropic.jsonl"
+eval::launch_proxy "$ROOT" openai    https://api.openai.com    "$OPENAI_PROXY_PORT"    "$TELEMETRY_DIR/openai.jsonl"
+eval::wait_for_port "$ANTHROPIC_PROXY_PORT"
+eval::wait_for_port "$OPENAI_PROXY_PORT"
 
 echo "== launching Codex OTLP/HTTP receiver (:$OTLP_PORT) =="
-OTLP_PORT="$OTLP_PORT" OTLP_OUT="$TELEMETRY_DIR/codex-otel" node "$ROOT/proxy/otlp-receiver.mjs" &
-PROXY_PIDS+=($!)
-wait_for_port "$OTLP_PORT"
+eval::launch_otlp_receiver "$ROOT" "$OTLP_PORT" "$TELEMETRY_DIR/codex-otel"
+eval::wait_for_port "$OTLP_PORT"
 
 # =================== secret-value diagnostics (direct, no proxy) ===================
 # Both agents 401 with keys that work locally → isolate whether the EAS-injected
@@ -158,10 +145,9 @@ fi
 echo "== telemetry written to $TELEMETRY_DIR =="
 ls -la "$TELEMETRY_DIR"
 
-# Dump captures to the job log — this is the ONLY exfil channel: eas/upload_artifact
-# is not supported in workflow custom jobs ("Uploading build artifacts outside of
-# builds is not supported"). Cap per-file + pace writes so a big log can't trip the
-# non-blocking stdout pipe (EAGAIN / "Resource temporarily unavailable").
+# Dump a capped copy to the job log as a text backstop. The workflow also uploads
+# telemetry.tar.gz as a generic EAS artifact. Cap per-file + pace writes so a big
+# log can't trip the non-blocking stdout pipe (EAGAIN / "Resource temporarily unavailable").
 echo "== full capture dump (stdout backstop; capped per file) =="
 CAP=60000
 for f in "$TELEMETRY_DIR"/*.jsonl "$TELEMETRY_DIR"/codex-otel/index.jsonl; do
@@ -175,6 +161,5 @@ for f in claude-console.log codex-stdout.txt codex-stderr.log; do
   [ -s "$TELEMETRY_DIR/$f" ] && { echo "----- $f (first 60 lines) -----"; head -n 60 "$TELEMETRY_DIR/$f"; echo; sleep 0.1; }
 done
 
-# Always succeed so the artifact-upload step runs even when an agent failed
-# (EAS Workflows has no documented step-level `if: always()`).
+# Always succeed so cleanup and artifact-upload steps can still run when an agent failed.
 exit 0

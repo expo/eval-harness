@@ -1,0 +1,49 @@
+<test_plan>
+
+<purpose>
+Primitive: Device → Native sharing → Share sheet trigger + Cancellation handling (APP-AGNOSTIC).
+Verify that a share action opens the native OS share sheet with content, and that cancelling the share sheet returns the user to the app without error or state change.
+
+This bundles the two Native-sharing primitives, which share one flow.
+
+This test plan is APP-AGNOSTIC. Use the supplied App PRD to determine where the app exposes a share action and what it shares.
+</purpose>
+
+<seeding_and_precondition>
+Read the supplied App PRD to determine:
+
+- SHARE AFFORDANCE: where the app exposes sharing (a share icon on a detail screen, a "Share" menu item, a share button on a record) and what content it shares (a link, a message, a record summary).
+
+Setup for the formal test:
+- Reach the screen with the share affordance (signed-in / unlocked), seeding any record needed so the share target exists (e.g. create a record, open its detail where the share button lives).
+- Do NOT trigger the share during setup.
+
+If the PRD indicates the app exposes no native share action, record this primitive as not-applicable and immediately call complete_step with the note "N/A: PRD indicates app has no native share action."
+</seeding_and_precondition>
+
+<steps>
+<step>
+
+<name>
+test_share_sheet_opens_and_cancels_cleanly
+</name>
+
+Trigger the share affordance per the PRD.
+
+Verify:
+- The native OS share sheet appears (the system share UI — a sheet listing share destinations / actions such as Messages, Copy, AirDrop, etc.) rather than the action doing nothing or showing an in-app error
+- (non-fatal) The share sheet reflects the content being shared where observable (a preview / title of the shared item appears in the sheet), consistent with what the PRD says is shared
+
+Cancel / dismiss the share sheet (tap Cancel, or dismiss it) WITHOUT completing a share.
+
+Verify:
+- After cancelling, the app returns to the screen the share was triggered from, with no crash and no error dialog
+- The app's state is unchanged by the cancelled share (the record / screen the share was triggered from is intact — cancelling shared nothing and mutated nothing)
+
+<points>4</points>
+</step>
+</steps>
+
+<full_points>4</full_points>
+
+</test_plan>

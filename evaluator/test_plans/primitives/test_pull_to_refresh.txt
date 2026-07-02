@@ -1,0 +1,46 @@
+<test_plan>
+
+<purpose>
+Primitive: Surface → Pull-to-refresh (trigger + indicator + data update) (APP-AGNOSTIC).
+Verify that an overscroll pull-down gesture at the top of a scrollable collection triggers a refresh: a loading indicator appears for the duration of the refresh, and when it completes the displayed content reflects the latest data (including any new record added out-of-band before the pull).
+
+This bundles the tightly-coupled primitives of the Pull-to-refresh pattern.
+
+This test plan is APP-AGNOSTIC. Use the supplied App PRD to determine which scrollable screen supports pull-to-refresh and what fresh data should appear after a refresh.
+</purpose>
+
+<seeding_and_precondition>
+Read the supplied App PRD to determine:
+
+- REFRESHABLE SURFACE: which list / feed / catalog screen supports a pull-to-refresh gesture.
+- FRESH DATA: how to make "new data" appear on refresh so the data-update check is observable. The cleanest approach: while on the refreshable screen (or just before), create / add a record through the app such that it should show up in the collection after a refresh.
+
+Setup for the formal test:
+- Reach the refreshable screen (signed-in / unlocked), scrolled to the TOP (pull-to-refresh requires being at the top of the scroll view).
+- Arrange for a record to be newly present in the underlying data that is not yet shown, if the PRD's data model allows (e.g. create one via the create flow, then return to the top of the list). If new data cannot be introduced, the refresh-trigger and indicator verifications still apply; treat the data-change verification as best-effort.
+
+If the PRD indicates no screen supports pull-to-refresh, record this primitive as not-applicable and immediately call complete_step with the note "N/A: PRD indicates app has no pull-to-refresh surface."
+</seeding_and_precondition>
+
+<steps>
+<step>
+
+<name>
+test_pull_triggers_refresh_indicator_and_updates_data
+</name>
+
+From the top of the scrollable collection, perform an overscroll pull-DOWN gesture (swipe down from the top past the overscroll threshold) to trigger a refresh.
+
+Verify:
+- A refresh / loading indicator appears as a result of the pull (a spinner at the top of the list), confirming the gesture triggered a refresh rather than just bouncing the scroll view
+- The refresh indicator is shown for the duration of the refresh and then goes away on its own (it does not get stuck spinning indefinitely after the refresh should have completed)
+- The displayed content reflects the latest data after the refresh resolves — if a new record was introduced during setup, it is now visible in the collection; otherwise the existing content re-renders intact without errors or duplication
+- (non-fatal) A single pull triggered a single refresh (the indicator did not flicker through multiple refresh cycles from one gesture)
+
+<points>4</points>
+</step>
+</steps>
+
+<full_points>4</full_points>
+
+</test_plan>

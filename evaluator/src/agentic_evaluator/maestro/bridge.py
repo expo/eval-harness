@@ -33,9 +33,23 @@ class MaestroResult:
 
 class MaestroBridge:
 
-    def __init__(self, platform: str = "ios", timeout: int = 60, verbose: bool = False):
+    def __init__(
+        self,
+        platform: str = "ios",
+        timeout: int = 60,
+        verbose: bool = False,
+        app_id: str | None = None,
+        deep_link: str | None = None,
+    ):
         self.platform = platform
-        self.config = PLATFORM_CONFIGS[platform]
+        cfg = dict(PLATFORM_CONFIGS[platform])
+        app_id = app_id or os.environ.get("EVAL_APP_BUNDLE_ID")
+        deep_link = deep_link or os.environ.get("EVAL_APP_DEEP_LINK")
+        if app_id:
+            cfg["app_id"] = app_id
+        if deep_link:
+            cfg["deep_link"] = deep_link
+        self.config = cfg
         self.timeout = timeout
         self.verbose = verbose
         self.maestro_bin = self._find_maestro()

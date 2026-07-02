@@ -102,6 +102,8 @@ class AgentDeviceBridge:
         session: str = "adaptive",
         timeout: int = 60,
         verbose: bool = False,
+        app_id: str | None = None,
+        deep_link: str | None = None,
     ):
         if platform != "ios":
             raise NotImplementedError(
@@ -112,7 +114,23 @@ class AgentDeviceBridge:
         self.session = session
         self.timeout = timeout
         self.verbose = verbose
-        self.config = PLATFORM_CONFIGS[platform]
+        # Copy the platform defaults, then apply explicit overrides (constructor
+        # args take precedence over the EVAL_APP_BUNDLE_ID / EVAL_APP_DEEP_LINK
+        # env vars). This lets the end-to-end harness point the NATIVE restart
+        # path at a dev-build app — its own bundle id + dev-client deep link
+        # (e.g. `myscheme://expo-development-client/?url=http://localhost:8081`)
+        # — instead of Expo Go, without touching the Expo-Go-specific Maestro
+        # hybrid path. Defaults reproduce the original Expo Go behavior exactly.
+        cfg = dict(PLATFORM_CONFIGS[platform])
+        app_id = app_id or os.environ.get("EVAL_APP_BUNDLE_ID")
+        deep_link = deep_link or os.environ.get("EVAL_APP_DEEP_LINK")
+        if app_id:
+            cfg["app_id"] = app_id
+        if deep_link:
+            cfg["deep_link"] = deep_link
+        self.config = cfg
+        if verbose:
+            print(f"  [bridge] app_id={cfg['app_id']} deep_link={cfg['deep_link']}")
         # Common flags appended to every agent-device call.
         self._common_args = ["--session", session, "--platform", platform]
 
@@ -129,11 +147,31 @@ class AgentDeviceBridge:
             ok = r.returncode == 0
             out = (r.stdout or "").strip()
             err = (r.stderr or "").strip()
+            if self.verbose and not ok:
+                detail = err or out or "(no output)"
+                print(f"  [agent-device ❌] {' '.join(args)} -> {detail[:500]}")
             return AgentDeviceResult(success=ok, output=out, error=err)
         except subprocess.TimeoutExpired:
             return AgentDeviceResult(success=False, output="", error=f"timed out after {t}s")
         except FileNotFoundError as e:
             return AgentDeviceResult(success=False, output="", error=f"agent-device not found: {e}")
+
+    @staticmethod
+    def _result_blob(result: AgentDeviceResult) -> str:
+        return f"{result.error}\n{result.output}"
+
+    def _recover_if_runner_restarted(self, result: AgentDeviceResult) -> None:
+        """
+        Some XCTest failures make agent-device restart its iOS runner session.
+        Re-bind to the target app immediately so the next tap/fill doesn't run
+        against a stale selector cache or foreground helper.
+        """
+        blob = self._result_blob(result)
+        if "XCTEST_RECORDED_FAILURE" not in blob and "runner session will be restarted" not in blob:
+            return
+        time.sleep(1.0)
+        self._rebind_session()
+        self._run_cmd(["snapshot", "-i", "--raw"], timeout=15)
 
     def _simctl(self, args: list[str], timeout: int = 15) -> AgentDeviceResult:
         cmd = ["xcrun", "simctl"] + args
@@ -238,6 +276,29 @@ class AgentDeviceBridge:
         return False
 
     @staticmethod
+    def _has_target_app_content(nodes: list[dict]) -> bool:
+        """True when React Native has rendered app-owned, testID-addressable UI."""
+        content_types = {"StaticText", "Button", "Image", "SecureTextField", "TextField", "Other"}
+        return any(n.get("type") in content_types and n.get("identifier") for n in nodes)
+
+    @staticmethod
+    def _debug_node_summary(nodes: list[dict], max_labels: int = 10) -> str:
+        app = next((n.get("label") for n in nodes if n.get("type") == "Application"), "")
+        labels: list[str] = []
+        identifiers: list[str] = []
+        for n in nodes:
+            label = n.get("label")
+            ident = n.get("identifier")
+            if isinstance(label, str) and label and label not in labels:
+                labels.append(label)
+            if isinstance(ident, str) and ident and ident not in identifiers:
+                identifiers.append(ident)
+        return (
+            f'app="{app}" labels={labels[:max_labels]!r} '
+            f"ids={identifiers[:max_labels]!r} total_nodes={len(nodes)}"
+        )
+
+    @staticmethod
     def _render_nodes(nodes: list[dict]) -> str:
         """
         Render JSON nodes into the compressed text format with explicit testIDs.
@@ -323,7 +384,29 @@ class AgentDeviceBridge:
         if self._is_ref(id_):
             ref = id_ if id_.startswith("@") else f"@{id_}"
             return self._run_cmd(["press", ref])
-        return self._run_cmd(["press", f'id="{id_}"'])
+        r = self._run_cmd(["press", f'id="{id_}"'])
+        if r.success:
+            return r
+
+        # If the previous command restarted/rebound the runner, the id selector
+        # can miss even though the element is visible. Refresh and try one more
+        # stable id press, then fall back to the current snapshot ref.
+        self._recover_if_runner_restarted(r)
+        self._run_cmd(["snapshot", "-i", "--raw"], timeout=15)
+        retry = self._run_cmd(["press", f'id="{id_}"'])
+        if retry.success:
+            return retry
+
+        ref = self._element_ref(id_)
+        if ref:
+            ref_press = self._run_cmd(["press", ref])
+            if ref_press.success:
+                return ref_press
+            retry.error = (
+                f"{retry.error or retry.output[:200]}; ref press {ref} failed: "
+                f"{ref_press.error or ref_press.output[:200]}"
+            )
+        return retry
 
     def tap_label(self, text: str) -> AgentDeviceResult:
         # Escape any embedded double-quotes in the label.
@@ -332,6 +415,114 @@ class AgentDeviceBridge:
 
     def tap_point(self, x: int, y: int) -> AgentDeviceResult:
         return self._run_cmd(["press", str(x), str(y)])
+
+    def _element_center(self, id_: str) -> tuple[int, int] | AgentDeviceResult:
+        points = self._element_points(id_, include_safe_top_fallbacks=False)
+        if not isinstance(points, list):
+            return points
+        return points[0]
+
+    def _element_points(
+        self,
+        id_: str,
+        include_safe_top_fallbacks: bool = False,
+    ) -> list[tuple[int, int]] | AgentDeviceResult:
+        attrs = self.get_attrs(id_)
+        if not attrs.success:
+            return AgentDeviceResult(
+                success=False,
+                output="",
+                error=f"get_attrs failed for id={id_!r}: {attrs.error or attrs.output[:200]}",
+            )
+        try:
+            data = json.loads(attrs.output)
+            rect = data.get("rect") or {}
+            x, y, w, h = rect["x"], rect["y"], rect["width"], rect["height"]
+        except (json.JSONDecodeError, KeyError, TypeError) as e:
+            return AgentDeviceResult(
+                success=False,
+                output="",
+                error=f"could not parse bounds for id={id_!r}: {e}",
+            )
+        cx = int(x + w / 2)
+        cy = int(y + h / 2)
+        points = [(cx, cy)]
+        if include_safe_top_fallbacks and cy < 70:
+            # Some RN TextInputs at the top of the screen report an
+            # accessibility rect inside the status/safe-area band. Pressing the
+            # reported center can hit chrome rather than the editable view, so
+            # try a couple of visually plausible points lower in the same
+            # horizontal lane before giving up.
+            for safe_y in (80, 100):
+                point = (cx, safe_y)
+                if point not in points:
+                    points.append(point)
+        return points
+
+    def _element_ref(self, id_: str) -> str | None:
+        nodes = self._snapshot_raw()
+        if nodes is None:
+            return None
+        for n in nodes:
+            if n.get("identifier") == id_:
+                ref = n.get("ref")
+                return f"@{ref}" if ref else None
+        return None
+
+    def _maestro_fill_fallback(
+        self,
+        id_: str,
+        text: str,
+        points: list[tuple[int, int]] | None = None,
+    ) -> AgentDeviceResult:
+        if os.environ.get("EVAL_MAESTRO_TEXT_FALLBACK", "1") == "0":
+            return AgentDeviceResult(success=False, output="", error="maestro text fallback disabled")
+
+        try:
+            if not hasattr(self, "_maestro"):
+                from ..maestro.bridge import MaestroBridge
+                self._maestro = MaestroBridge(
+                    platform=self.platform,
+                    timeout=self.timeout,
+                    verbose=self.verbose,
+                    app_id=self.config["app_id"],
+                    deep_link=self.config["deep_link"],
+                )
+            m = self._maestro
+        except Exception as e:
+            return AgentDeviceResult(success=False, output="", error=f"maestro unavailable: {e}")
+
+        text_q = json.dumps(text)
+        id_q = json.dumps(id_)
+        attempts = [
+            (
+                f"id={id_!r}",
+                f"- tapOn:\n    id: {id_q}\n- inputText: {text_q}\n",
+            )
+        ]
+        for x, y in points or []:
+            attempts.append(
+                (
+                    f"point={x},{y}",
+                    f'- tapOn:\n    point: "{x},{y}"\n- inputText: {text_q}\n',
+                )
+            )
+
+        errors: list[str] = []
+        for label, yaml in attempts:
+            if self.verbose:
+                print(f"  [bridge] maestro text fallback via {label}")
+            r = m.execute_yaml(yaml, timeout_override=45)
+            if r.success:
+                self._run_cmd(["snapshot", "-i", "--raw"], timeout=15)
+                return AgentDeviceResult(success=True, output=f"typed via maestro fallback ({label})")
+            errors.append(f"{label}: {r.error or r.output[:240]}")
+
+        return AgentDeviceResult(
+            success=False,
+            output="",
+            error="maestro text fallback failed: " + " | ".join(errors),
+        )
 
     # ----- UI: text input -----
 
@@ -371,7 +562,79 @@ class AgentDeviceBridge:
             # Drain the keystroke queue before returning so chained taps don't
             # get queued behind pending keystrokes.
             self._run_cmd(["snapshot", "-i", "--raw"], timeout=15)
-        return r
+            return r
+
+        ref = self._element_ref(id_)
+        ref_error = ""
+        if ref:
+            ref_fill = self._run_cmd(["fill", ref, text])
+            if ref_fill.success:
+                self._run_cmd(["snapshot", "-i", "--raw"], timeout=15)
+                return ref_fill
+            ref_error = f"; ref fill {ref} failed: {ref_fill.error or ref_fill.output[:200]}"
+
+        points = self._element_points(id_, include_safe_top_fallbacks=True)
+        center_error = ""
+        if isinstance(points, list):
+            coord_errors: list[str] = []
+            for cx, cy in points:
+                coord_fill = self._run_cmd(["fill", str(cx), str(cy), text])
+                if coord_fill.success:
+                    self._run_cmd(["snapshot", "-i", "--raw"], timeout=15)
+                    return coord_fill
+                coord_errors.append(
+                    f"fill {cx},{cy}: {coord_fill.error or coord_fill.output[:200]}"
+                )
+
+            cx, cy = points[-1]
+            # If coordinate fill also fails, try an explicit coordinate press
+            # before the lower-level type primitive. Some RN TextInputs expose
+            # an accessibility id but only become first responder from a
+            # physical center tap.
+            center_focus = self._run_cmd(["press", str(cx), str(cy)])
+            if center_focus.success:
+                time.sleep(0.3)
+                typed = self._run_cmd(["type", text])
+                if typed.success:
+                    self._run_cmd(["snapshot", "-i", "--raw"], timeout=15)
+                    return typed
+                self._recover_if_runner_restarted(typed)
+                maestro = self._maestro_fill_fallback(id_, text, points)
+                if maestro.success:
+                    return maestro
+                typed.error = (
+                    f"fill failed: {r.error or r.output[:200]}{ref_error}; "
+                    f"coordinate fill failed: {' | '.join(coord_errors)}; "
+                    f"coordinate type fallback failed at {cx},{cy}: {typed.error or typed.output[:200]}; "
+                    f"{maestro.error or maestro.output[:200]}"
+                )
+                return typed
+            else:
+                center_error = (
+                    f"; coordinate fill failed: {' | '.join(coord_errors)}; "
+                    f"coordinate focus failed at {cx},{cy}: {center_focus.error or center_focus.output[:200]}"
+                )
+        else:
+            center_error = f"; coordinate fallback unavailable: {points.error}"
+
+        # Some iOS/RN text inputs focus correctly via `press id=...` but reject
+        # agent-device's combined tap+replace `fill` action. In that case, keep
+        # the explicit focus and fall back to the lower-level type primitive.
+        typed = self._run_cmd(["type", text])
+        if typed.success:
+            self._run_cmd(["snapshot", "-i", "--raw"], timeout=15)
+            return typed
+        self._recover_if_runner_restarted(typed)
+        maestro_points = points if isinstance(points, list) else None
+        maestro = self._maestro_fill_fallback(id_, text, maestro_points)
+        if maestro.success:
+            return maestro
+        typed.error = (
+            f"fill failed: {r.error or r.output[:200]}{ref_error}{center_error}; "
+            f"type fallback failed: {typed.error or typed.output[:200]}; "
+            f"{maestro.error or maestro.output[:200]}"
+        )
+        return typed
 
     # ----- UI: assertions -----
 
@@ -511,17 +774,10 @@ class AgentDeviceBridge:
 
     def long_press_id(self, id_: str, duration_ms: int = 800) -> AgentDeviceResult:
         """Read the element's bounds via `get attrs`, then longpress at its center."""
-        attrs = self.get_attrs(id_)
-        if not attrs.success:
-            return AgentDeviceResult(success=False, output="", error=f"long_press: get_attrs failed: {attrs.error}")
-        try:
-            data = json.loads(attrs.output)
-            rect = data.get("rect") or {}
-            x, y, w, h = rect["x"], rect["y"], rect["width"], rect["height"]
-        except (json.JSONDecodeError, KeyError, TypeError) as e:
-            return AgentDeviceResult(success=False, output="", error=f"long_press: could not parse element bounds: {e}")
-        cx = int(x + w / 2)
-        cy = int(y + h / 2)
+        center = self._element_center(id_)
+        if not isinstance(center, tuple):
+            return AgentDeviceResult(success=False, output="", error=f"long_press: {center.error}")
+        cx, cy = center
         return self._run_cmd(["longpress", str(cx), str(cy), str(duration_ms)])
 
     def long_press_point(self, x: int, y: int, duration_ms: int = 800) -> AgentDeviceResult:
@@ -649,6 +905,8 @@ class AgentDeviceBridge:
         `restart_app_native` and reachable for diagnostic / fallback runs."""
         app_id = self.config["app_id"]
         deep_link = self.config["deep_link"]
+        is_dev_client = "expo-development-client" in deep_link
+        use_simctl_launch = os.environ.get("EVAL_APP_USE_SIMCTL_LAUNCH") == "1"
 
         # 1: terminate Expo Go via Apple's API.
         # NOTE: do NOT also terminate `com.facebook.WebDriverAgentRunner.xctrunner`
@@ -659,8 +917,17 @@ class AgentDeviceBridge:
 
         self._simctl(["terminate", "booted", app_id])
 
-        # 2: clearState equivalent — wipe Expo Go's data subdirs.
-        if clear_state:
+        # 2: clearState equivalent — wipe app data subdirs. Historically we
+        # preserved dev-client data because its launcher state also lived in the
+        # app container; with expo-dev-client defaultLaunchURL configured, the
+        # native binary should know how to re-enter Metro after a data wipe.
+        dev_client_clear_state = os.environ.get("EVAL_DEV_CLIENT_CLEAR_STATE") == "1"
+        if clear_state and is_dev_client and not dev_client_clear_state:
+            if self.verbose:
+                print("  [bridge] preserving dev-client container state during restart")
+        elif clear_state:
+            if self.verbose and is_dev_client:
+                print("  [bridge] clearing dev-client container state during restart")
             info = self._simctl(["get_app_container", "booted", app_id, "data"], timeout=10)
             if info.success and info.output:
                 data_path = info.output
@@ -670,8 +937,16 @@ class AgentDeviceBridge:
                     except Exception:
                         pass
 
-        # 3: launch via deep link.
-        self._simctl(["openurl", "booted", deep_link])
+        # 3: launch. For Expo dev-client, prefer the exact deep link captured
+        # from Expo CLI over the launcher "recent project" state. The launcher
+        # can replay stale LAN URLs after a process restart, while the captured
+        # URL is the current Metro endpoint for this workflow run.
+        if use_simctl_launch:
+            self._simctl(["launch", "booted", app_id], timeout=30)
+        elif is_dev_client:
+            self._simctl(["openurl", "booted", deep_link], timeout=30)
+        else:
+            self._simctl(["openurl", "booted", deep_link])
         # Brief settle: let Expo Go's process come up before any agent-device
         # interaction. Without this, our first snapshot can race the JS
         # bundle load and trigger an unnecessary session rebuild.
@@ -689,7 +964,8 @@ class AgentDeviceBridge:
         # rendered content" from "agent-device's helper runner has text on
         # screen" — the runner has its own [StaticText] nodes that would
         # falsely trigger a text-based readiness heuristic.
-        deadline = time.time() + 30.0
+        ready_timeout = float(os.environ.get("EVAL_APP_READY_TIMEOUT_SEC", "30"))
+        deadline = time.time() + ready_timeout
         dismiss_attempts = 0
         while time.time() < deadline:
             nodes = self._snapshot_raw()
@@ -709,7 +985,28 @@ class AgentDeviceBridge:
             # or alongside the Bottom Sheet; check it first so the Bottom
             # Sheet branch isn't masked by a Continue overlay above it.
             labels = " ".join((n.get("label") or "") for n in nodes)
+            if "Bundling " in labels or "Loading JavaScript bundle" in labels:
+                if self.verbose:
+                    print(f"  [bridge] app still bundling/loading: {self._debug_node_summary(nodes)}")
+                time.sleep(1.5)
+                continue
+
+            if "Open in" in labels and "Open" in labels:
+                if self.verbose:
+                    print(f"  [bridge] confirming Open dialog: {self._debug_node_summary(nodes)}")
+                self._run_cmd(["press", 'label="Open"'])
+                dismiss_attempts += 1
+                time.sleep(1.0)
+                if dismiss_attempts > 9:
+                    return AgentDeviceResult(
+                        success=False, output="",
+                        error='restart_app: failed to confirm "Open in app" dialog after 10 attempts',
+                    )
+                continue
+
             if "Continue" in labels:
+                if self.verbose:
+                    print(f"  [bridge] dismissing Continue dialog: {self._debug_node_summary(nodes)}")
                 self._run_cmd(["press", 'label="Continue"'])
                 dismiss_attempts += 1
                 time.sleep(1.0)
@@ -717,6 +1014,77 @@ class AgentDeviceBridge:
                     return AgentDeviceResult(
                         success=False, output="",
                         error="restart_app: failed to dismiss Continue dialog after 10 attempts",
+                    )
+                continue
+
+            # Expo dev-client can foreground its launcher/dev-tools surface
+            # after a deep link ("Runtime version", "Source code explorer",
+            # "Open DevTools", etc.). Dismiss it before applying the stricter
+            # app-ready heuristic below, otherwise every primitive plan can
+            # spend the full readiness timeout looking at the launcher chrome.
+            if (
+                "Runtime version:" in labels
+                or "Source code explorer" in labels
+                or "Open DevTools" in labels
+                or "Toggle performance monitor" in labels
+                or "dev-tools" in labels
+            ):
+                if self.verbose:
+                    print(f"  [bridge] dismissing dev launcher/tools: {self._debug_node_summary(nodes)}")
+                closed = self._run_cmd(["press", 'label="Close"'])
+                if not closed.success:
+                    self._run_cmd(["press", "200", "80"])
+                dismiss_attempts += 1
+                time.sleep(1.0)
+                if dismiss_attempts > 9:
+                    return AgentDeviceResult(
+                        success=False, output="",
+                        error="restart_app: failed to dismiss Expo dev launcher/dev tools after 10 attempts",
+                )
+                continue
+
+            if "OK" in labels and (
+                "Could not connect" in labels
+                or "Unable to connect" in labels
+                or "Something went wrong" in labels
+                or "No compatible apps" in labels
+            ):
+                if self.verbose:
+                    print(f"  [bridge] dismissing reconnect alert: {self._debug_node_summary(nodes)}")
+                self._run_cmd(["press", 'label="OK"'])
+                if is_dev_client:
+                    self._simctl(["openurl", "booted", deep_link], timeout=30)
+                dismiss_attempts += 1
+                time.sleep(2.0)
+                if dismiss_attempts > 9:
+                    return AgentDeviceResult(
+                        success=False, output="",
+                        error="restart_app: failed to dismiss dev-client reconnect alert after 10 attempts",
+                    )
+                continue
+
+            # Expo dev-client launcher home / project picker. Re-open the
+            # explicit dev-client URL and let it settle; accepting launcher
+            # controls as "ready" causes evaluators to tap the wrong UI, and
+            # tapping "recent project" entries can select a stale endpoint.
+            if (
+                "Recently opened" in labels
+                or "Development servers" in labels
+                or "Enter URL manually" in labels
+                or "Scan QR code" in labels
+            ):
+                if self.verbose:
+                    print(f"  [bridge] dev-client launcher visible: {self._debug_node_summary(nodes)}")
+                if is_dev_client:
+                    self._simctl(["openurl", "booted", deep_link], timeout=30)
+                else:
+                    self._simctl(["openurl", "booted", deep_link])
+                dismiss_attempts += 1
+                time.sleep(2.0)
+                if dismiss_attempts > 9:
+                    return AgentDeviceResult(
+                        success=False, output="",
+                        error="restart_app: failed to leave Expo dev-client launcher after 10 attempts",
                     )
                 continue
 
@@ -738,18 +1106,16 @@ class AgentDeviceBridge:
             # The stricter "has identifier" requirement filters out Expo Go's
             # chrome (welcome dialog, dev menu, splash) which has text nodes
             # but no testIDs. Only the actual app's components have testIDs.
-            content_types = {"StaticText", "Button", "Image", "SecureTextField", "TextField", "Other"}
-            if any(
-                n.get("type") in content_types and n.get("identifier")
-                for n in nodes
-            ):
+            if self._has_target_app_content(nodes):
+                if self.verbose:
+                    print(f"  [bridge] target app content ready: {self._debug_node_summary(nodes)}")
                 return AgentDeviceResult(success=True, output="ready")
 
             time.sleep(1.5)
 
         return AgentDeviceResult(
             success=False, output="",
-            error="restart_app: app did not become ready within 30s",
+            error=f"restart_app: app did not become ready within {ready_timeout:g}s",
         )
 
     def cleanup(self) -> None:

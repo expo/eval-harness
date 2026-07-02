@@ -1,0 +1,43 @@
+<test_plan>
+
+<purpose>
+Primitive: Navigation → Stack navigation → Pop to root (APP-AGNOSTIC).
+Verify that from a stack nested two or more levels deep, a single "return to root" action (a pop-to-root button, a "Done"/"Close" affordance, or the documented gesture) removes ALL intermediate screens at once and lands the user back on the stack's root screen — not just one level back.
+
+This test plan is APP-AGNOSTIC. Use the supplied App PRD to determine a navigation path that goes at least two pushes deep within one stack, and how the app exposes returning to that stack's root in one step.
+</purpose>
+
+<seeding_and_precondition>
+Read the supplied App PRD to determine:
+
+- A MULTI-LEVEL PATH: a sequence within a single stack that goes at least two levels deep from a root screen (root → screen A → screen B), e.g. list → detail → sub-detail, or a multi-step wizard with several pushed steps.
+- POP-TO-ROOT AFFORDANCE: how the app returns to the stack root in one action — a "Done" / "Close" / "Cancel" button, a home/root button, a pop-to-root gesture, or a tab re-tap that resets the stack (per the PRD).
+
+Setup for the formal test:
+- Reach the stack's root screen (signed-in / unlocked), seeding any records needed so the multi-level path is traversable (e.g. create a record so a detail exists to drill into).
+- Navigate DOWN the path so the formal step starts at least two levels deep (on screen B), with the intermediate screen A in the stack behind it.
+
+If the PRD indicates the app has no stack that goes two or more levels deep, OR exposes no single pop-to-root affordance (only one-level-at-a-time back), record this primitive as not-applicable and immediately call complete_step with the note "N/A: PRD indicates app has no multi-level stack with a pop-to-root affordance."
+</seeding_and_precondition>
+
+<steps>
+<step>
+
+<name>
+test_pop_to_root_clears_all_intermediate_screens
+</name>
+
+From the deep screen (at least two levels from root), invoke the pop-to-root affordance per the PRD (a single action, not repeated back taps).
+
+Verify:
+- The stack's ROOT screen is now visible (its identifying content / the root list/landing is shown)
+- The intermediate screen(s) traversed on the way down are NO LONGER in the stack — using the back affordance now does not step back into screen A or B (a single back from root would exit the stack entirely or do nothing, rather than revealing a skipped intermediate screen). Confirm by observing that the root has no back affordance pointing into the popped screens, or that a back attempt does not surface an intermediate screen.
+- (non-fatal) The pop-to-root happened in one step / one animation rather than visibly popping screens one at a time
+
+<points>4</points>
+</step>
+</steps>
+
+<full_points>4</full_points>
+
+</test_plan>

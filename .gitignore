@@ -44,3 +44,7 @@ telemetry.tgz
 .env
 .env.local
 eval-out/
+agent-workspace/
+
+# session-local learnings (promote durable items to CLAUDE.md)
+.learnings/

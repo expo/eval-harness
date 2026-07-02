@@ -1,0 +1,66 @@
+<test_plan>
+
+<purpose>
+Primitive: Identity → Session lifecycle → Token persistence + Sign-out (APP-AGNOSTIC).
+Verify that an established session SURVIVES an app restart (the user is not forced to re-authenticate after killing and reopening the app), and that an explicit sign-out TEARS DOWN the session (the user is returned to the sign-in surface and protected content is no longer reachable, including across a subsequent restart).
+
+This bundles two tightly-coupled Session-lifecycle primitives that are best verified back-to-back on one signed-in session.
+
+This test plan is APP-AGNOSTIC. Use the supplied App PRD to determine the credentials, what authenticated content looks like, and where the sign-out affordance lives (a profile/account tab, a settings screen, a menu).
+</purpose>
+
+<seeding_and_precondition>
+Read the supplied App PRD to determine:
+
+- CREDENTIALS + AUTHENTICATED LANDING: as for the sign-in primitive — the valid credentials and the screen reached after a successful sign-in.
+- SIGN-OUT AFFORDANCE: where the PRD says sign-out / log-out lives, and what the post-sign-out destination is (typically the sign-in surface).
+
+Setup for the formal test:
+- Sign in with valid credentials per the PRD so the app is in an authenticated state, on the authenticated landing screen, BEFORE the formal steps begin.
+
+If the PRD indicates the app has no authentication / persistent session at all, this primitive does NOT apply. Record no assertions and immediately call complete_step with the note "N/A: PRD indicates app has no session to persist or tear down." If the app authenticates but the PRD specifies NO sign-out affordance, run step 1 (persistence) and mark step 2 (sign-out) not-applicable per the PRD.
+</seeding_and_precondition>
+
+<steps>
+<step>
+
+<name>
+test_session_survives_restart
+</name>
+
+With the app in a signed-in state, restart the app (use restart_app — this is a cold relaunch, not a navigation).
+
+After the app finishes relaunching and settles, observe the first content-bearing screen.
+
+Verify:
+- The app lands on authenticated content (the home / list / feed / dashboard), NOT back on the sign-in / credential-collection surface — the session persisted across the restart
+- No re-authentication prompt, "session expired", or "please sign in again" error is shown on relaunch
+- (non-fatal) Authenticated data that was present before the restart is still present afterward (e.g. the user's records / identity surface render again rather than appearing wiped)
+
+<points>4</points>
+</step>
+
+<step>
+
+<name>
+test_sign_out_tears_down_session
+</name>
+
+Navigate to the sign-out affordance per the PRD and sign out.
+
+Verify:
+- The app returns to the sign-in / credential-collection surface (or a logged-out landing screen) — the authenticated content is no longer the active screen
+- Protected content is no longer reachable without re-authenticating (e.g. the previously-visible list / feed / profile is gone, replaced by the sign-in surface)
+
+Then restart the app (restart_app) to confirm the teardown persisted.
+
+Verify:
+- After the restart, the app opens to the sign-in / credential-collection surface, NOT to authenticated content — sign-out cleared the persisted session rather than leaving a stale one that re-hydrates on relaunch
+
+<points>4</points>
+</step>
+</steps>
+
+<full_points>8</full_points>
+
+</test_plan>
