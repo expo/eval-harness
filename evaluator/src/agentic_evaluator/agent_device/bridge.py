@@ -514,8 +514,11 @@ class AgentDeviceBridge:
                 print(f"  [bridge] maestro text fallback via {label}")
             r = m.execute_yaml(yaml, timeout_override=45)
             if r.success:
-                self._run_cmd(["snapshot", "-i", "--raw"], timeout=15)
-                return AgentDeviceResult(success=True, output=f"typed via maestro fallback ({label})")
+                nodes = self._snapshot_raw() or []
+                if self._snapshot_contains(nodes, text):
+                    return AgentDeviceResult(success=True, output=f"typed via maestro fallback ({label})")
+                errors.append(f"{label}: command passed but snapshot did not contain {text!r}")
+                continue
             errors.append(f"{label}: {r.error or r.output[:240]}")
 
         return AgentDeviceResult(
@@ -523,6 +526,16 @@ class AgentDeviceBridge:
             output="",
             error="maestro text fallback failed: " + " | ".join(errors),
         )
+
+    @staticmethod
+    def _snapshot_contains(nodes: list[dict], text: str) -> bool:
+        needle = text.lower()
+        for node in nodes:
+            for key in ("label", "value", "identifier"):
+                value = node.get(key)
+                if isinstance(value, str) and needle in value.lower():
+                    return True
+        return False
 
     # ----- UI: text input -----
 
