@@ -90,7 +90,7 @@ jobs:
           fi
 
       - name: Build, run, and evaluate authored app
-        run: bash ./eval_harness/scripts/eval_ios_app.sh
+        run: bash ./eval_harness/scripts/eval-ios-app.sh
 
       - name: Package eval output
         if: ${{ always() }}

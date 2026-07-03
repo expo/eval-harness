@@ -69,7 +69,7 @@ jobs:
           if [ -n "${ANTHROPIC_API_KEY:-}" ]; then echo "ANTHROPIC_API_KEY bound (len ${#ANTHROPIC_API_KEY})"; else echo "MISSING"; exit 1; fi
 
       - name: Author app with coding agent
-        run: bash ./eval_harness/scripts/author_app.sh
+        run: bash ./eval_harness/scripts/author-app.sh
 
       - name: Package authored app
         if: ${{ always() }}

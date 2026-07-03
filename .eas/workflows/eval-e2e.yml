@@ -101,7 +101,7 @@ jobs:
           if [ -n "${ANTHROPIC_API_KEY:-}" ]; then echo "ANTHROPIC_API_KEY bound (len ${#ANTHROPIC_API_KEY})"; else echo "MISSING"; exit 1; fi
 
       - name: Author app with coding agent
-        run: bash ./eval_harness/scripts/author_app.sh
+        run: bash ./eval_harness/scripts/author-app.sh
 
       # Carries both the authored workspace and author-side diagnostics to macOS.
       - name: Package authored app
@@ -176,7 +176,7 @@ jobs:
           fi
 
       - name: Build, run, and evaluate authored app
-        run: bash ./eval_harness/scripts/eval_ios_app.sh
+        run: bash ./eval_harness/scripts/eval-ios-app.sh
 
       # tar ourselves -> clean `eval-out/` root (upload_artifact bakes in abs paths)
       - name: Package eval output
@@ -214,7 +214,7 @@ jobs:
           AUTHORED_ARTIFACT='${{ steps.download_author.outputs.artifact_path }}' \
           SCENARIO='${{ inputs.skill_scenario }}' \
           OUT_DIR=skill-eval-report \
-          bash ./eval_harness/scripts/eval_skill_use.sh
+          bash ./eval_harness/scripts/eval-skill-use.sh
 
       - name: Package skill-eval report
         if: ${{ always() }}

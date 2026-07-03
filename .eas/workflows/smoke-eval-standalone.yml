@@ -17,7 +17,7 @@ jobs:
           if [ -n "${ANTHROPIC_API_KEY:-}" ]; then echo "ANTHROPIC_API_KEY bound (len ${#ANTHROPIC_API_KEY})"; else echo "MISSING"; exit 1; fi
 
       - name: Run standalone agentic evaluator
-        run: bash ./eval_harness/scripts/smoke_eval_standalone.sh
+        run: bash ./eval_harness/scripts/smoke-eval-standalone.sh
 
       # tar ourselves -> clean `eval-out/` root (upload_artifact bakes in abs paths)
       - name: Package eval output

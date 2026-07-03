@@ -103,7 +103,7 @@ jobs:
           EVAL_ARTIFACT="$EVAL_ARTIFACT" \
           SCENARIO='${{ inputs.scenario }}' \
           OUT_DIR=skill-eval-report \
-          bash ./eval_harness/scripts/eval_skill_use.sh
+          bash ./eval_harness/scripts/eval-skill-use.sh
 
       - name: Package skill-eval report
         if: ${{ always() }}

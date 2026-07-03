@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build, run, and evaluate an app authored by eval_harness/scripts/author_app.sh.
+# Build, run, and evaluate an app authored by eval_harness/scripts/author-app.sh.
 #
 # This is the macOS half of eval-e2e.yml. The workflow downloads and extracts the
 # authored-app artifact first, so this script expects agent-workspace/<RUN_ID> and
