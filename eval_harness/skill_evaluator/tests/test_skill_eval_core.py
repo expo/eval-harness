@@ -230,6 +230,18 @@ class SkillEvalCoreTests(unittest.TestCase):
         self.assertEqual(layout.trace_path.name, "claude-authoring.json")
         self.assertIsNone(layout.result_path)
 
+    def test_unpack_artifact_rejects_path_traversal_tarball(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            tar_path = root / "unsafe.tar"
+            payload = root / "payload.txt"
+            payload.write_text("bad\n")
+            with tarfile.open(tar_path, "w") as archive:
+                archive.add(payload, arcname="../escape.txt")
+
+            with self.assertRaises(ValueError):
+                unpack_artifact(tar_path, root / "unpacked")
+
     def test_analyze_artifacts_reports_author_only_outcome_pending(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

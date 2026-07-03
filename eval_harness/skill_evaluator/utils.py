@@ -113,8 +113,13 @@ def first_archive(path: Path) -> Path | None:
 
 
 def extract_tar(path: Path, dest_dir: Path) -> None:
+    dest_root = dest_dir.resolve()
     with tarfile.open(path) as archive:
-        archive.extractall(dest_dir)
+        for member in archive.getmembers():
+            target = (dest_root / member.name).resolve()
+            if target != dest_root and dest_root not in target.parents:
+                raise ValueError(f"Refusing to extract unsafe tar member: {member.name}")
+        archive.extractall(dest_root)
 
 
 def flatten_strings(value: Any) -> list[str]:

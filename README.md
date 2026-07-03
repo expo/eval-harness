@@ -90,7 +90,8 @@ eas workflow:run .eas/workflows/eval-e2e.yml \
 Run a skill-case scenario through the same authoring workflow by switching
 `authoring_mode` to `skill_case`. In this mode `skill_case_spec` and
 `skill_scenario` resolve the PRD passed to the coding agent; the `prd` input is
-ignored for authoring. `test_plan` still belongs to the app evaluator only.
+ignored for authoring. `test_plan` belongs to the app evaluator only, so it is
+only needed when `run_eval_ios=true`.
 
 ```bash
 eas workflow:run .eas/workflows/eval-e2e.yml \
@@ -98,8 +99,7 @@ eas workflow:run .eas/workflows/eval-e2e.yml \
   -F authoring_mode=skill_case \
   -F skill_case_spec=eval_harness/skill_evaluator/skill_cases/core5/native-data-fetching.json \
   -F skill_scenario=skills_available_unmentioned \
-  -F test_plan=eval_harness/app_evaluator/test_plans/primitives/test_insert.txt \
-  -F run_eval_ios=true \
+  -F run_eval_ios=false \
   -F run_eval_skill=true
 ```
 
@@ -108,15 +108,16 @@ eas workflow:run .eas/workflows/eval-e2e.yml \
 Open the EAS Workflow run and download artifacts from the run’s artifact list.
 Untar them locally with `tar -xzf <file>.tar.gz`.
 
-`eval-ios-app` and the `eval_ios` job in full E2E runs upload app-eval output:
+`eval-ios-app.yml` and the iOS evaluation job in full E2E runs upload app-eval
+output:
 
 - artifact name in full E2E runs: `eval-e2e-output`
 - artifact name in replay runs: `eval-ios-replay-output`
 - archive: `eval-out.tar.gz`
 - contains: `eval/result.json`, evaluator traces, logs, and `manifest.json`
 
-`eval-skill-use` and the `eval_skill` job in full E2E runs upload skill-eval
-output:
+`eval-skill-use.yml` and the skill evaluation job in full E2E runs upload
+skill-eval output:
 
 - artifact name: `skill-eval-report`
 - archive: `skill-eval-report.tar.gz`
