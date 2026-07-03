@@ -164,7 +164,10 @@ else
     [ -n "$SCHEME" ] && export EVAL_APP_DEEP_LINK="$SCHEME://expo-development-client/?url=$ENCODED_DEV_CLIENT_URL"
   }
 fi
-eval::probe_snapshot "$OUT" "${EVAL_APP_BUNDLE_ID:-host.exp.Exponent}"
+if ! eval::probe_snapshot "$OUT" "${EVAL_APP_BUNDLE_ID:-host.exp.Exponent}"; then
+  echo "  ❌ authored app failed launch readiness probe; skipping evaluator"
+  exit 1
+fi
 
 # ============================================================================
 # Stage E — evaluator scores the dev build (native restart honors EVAL_APP_*)

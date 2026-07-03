@@ -244,6 +244,23 @@ PY
 # Direct agent-device probe with the SAME session the evaluator uses ("adaptive").
 # If this snapshots the app, the evaluator will too; if it fails we see the REAL
 # agent-device error (vs the evaluator's swallowed "snapshot failed").
+eval::probe_blocking_app_shell_error() { # snapshot_file
+  local snap="$1"
+  if grep -Eq 'expo-router-unmatched|Unmatched Route|Page could not be found' "$snap"; then
+    echo "Expo Router unmatched route"
+    return 0
+  fi
+  if grep -Eq 'Application has not been registered|No component registered|Invariant Violation|React Native version mismatch' "$snap"; then
+    echo "React Native app registration/runtime error"
+    return 0
+  fi
+  if grep -Eq 'ReferenceError:|TypeError:|SyntaxError:|Cannot find module|Unable to resolve module' "$snap"; then
+    echo "JavaScript runtime/module error"
+    return 0
+  fi
+  return 1
+}
+
 eval::probe_snapshot() { # out_dir app_id
   local out="$1" app_id="${2:-host.exp.Exponent}"
   echo "================= STAGE 6b: agent-device probe (open $app_id + snapshot) ================="
@@ -304,10 +321,22 @@ eval::probe_snapshot() { # out_dir app_id
       sleep 2
       continue
     fi
+    local blocking_error=""
+    blocking_error="$(eval::probe_blocking_app_shell_error "$out/s6b-snap.log" || true)"
+    if [ -n "$blocking_error" ]; then
+      echo "  ❌ snapshot probe sees app shell error: $blocking_error" >>"$out/s6b-open.log"
+      break
+    fi
     break
   done
   rc=$?; eval::gate $rc "agent-device snapshot probe"
   echo "  --- snapshot head (first 25 lines) ---"; head -25 "$out/s6b-snap.log" | sed 's/^/    /'
+  local blocking_error=""
+  blocking_error="$(eval::probe_blocking_app_shell_error "$out/s6b-snap.log" || true)"
+  if [ "$rc" = 0 ] && [ -n "$blocking_error" ]; then
+    echo "  ❌ snapshot probe sees app shell error: $blocking_error"
+    return 1
+  fi
   if [ "$rc" = 0 ] && grep -Eq 'Runtime version:|Source code explorer|Open DevTools|Toggle performance monitor|dev-tools|Go home|Reload' "$out/s6b-snap.log"; then
     echo "  ❌ snapshot probe still sees Expo dev launcher/dev tools, not the authored app"
     return 1

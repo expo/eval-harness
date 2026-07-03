@@ -282,6 +282,38 @@ class AgentDeviceBridge:
         return any(n.get("type") in content_types and n.get("identifier") for n in nodes)
 
     @staticmethod
+    def _blocking_app_shell_error(nodes: list[dict]) -> str | None:
+        """Return a known app-shell/runtime launch error visible in the snapshot."""
+        labels = "\n".join(str(n.get("label") or "") for n in nodes)
+        identifiers = "\n".join(str(n.get("identifier") or "") for n in nodes)
+        blob = f"{labels}\n{identifiers}"
+        checks = [
+            (
+                re.compile(r"expo-router-unmatched|Unmatched Route|Page could not be found", re.I),
+                "Expo Router unmatched route",
+            ),
+            (
+                re.compile(
+                    r"Application has not been registered|No component registered|"
+                    r"Invariant Violation|React Native version mismatch",
+                    re.I,
+                ),
+                "React Native app registration/runtime error",
+            ),
+            (
+                re.compile(
+                    r"ReferenceError:|TypeError:|SyntaxError:|Cannot find module|Unable to resolve module",
+                    re.I,
+                ),
+                "JavaScript runtime/module error",
+            ),
+        ]
+        for pattern, reason in checks:
+            if pattern.search(blob):
+                return reason
+        return None
+
+    @staticmethod
     def _debug_node_summary(nodes: list[dict], max_labels: int = 10) -> str:
         app = next((n.get("label") for n in nodes if n.get("type") == "Application"), "")
         labels: list[str] = []
@@ -1113,6 +1145,14 @@ class AgentDeviceBridge:
                         error="restart_app: failed to dismiss Bottom Sheet after 10 attempts",
                     )
                 continue
+
+            blocking_error = self._blocking_app_shell_error(nodes)
+            if blocking_error:
+                return AgentDeviceResult(
+                    success=False,
+                    output="",
+                    error=f"restart_app: app shell error visible: {blocking_error}; {self._debug_node_summary(nodes)}",
+                )
 
             # Ready when the target app has rendered a node that BOTH has a
             # content type AND a React Native testID (accessibilityIdentifier).

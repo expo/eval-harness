@@ -31,7 +31,10 @@ eval::install_uv_and_evaluator "$EVAL" "$OUT"
 eval::boot_sim_and_runner "$OUT"
 eval::npm_install "$APP" "$OUT"
 eval::start_metro_expo_go "$APP" "$OUT"
-eval::probe_snapshot "$OUT" "host.exp.Exponent"
+if ! eval::probe_snapshot "$OUT" "host.exp.Exponent"; then
+    echo "  ❌ reference app failed launch readiness probe; skipping evaluator"
+    exit 1
+fi
 eval::run_evaluator "$EVAL" \
     test_plans/primitives/test_insert.txt \
     prds/notes/prd/mvp.txt \
