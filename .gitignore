@@ -2,6 +2,7 @@
 
 # dependencies
 node_modules/
+.venv/
 
 # Expo
 .expo/
@@ -39,12 +40,12 @@ yarn-error.*
 # generated native folders
 /ios
 /android
-telemetry/
+/telemetry/
 telemetry.tgz
 .env
 .env.local
 eval-out/
 agent-workspace/
 
-# session-local learnings (promote durable items to CLAUDE.md)
+# session-local learnings (promote durable items to AGENTS.md)
 .learnings/

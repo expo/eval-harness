@@ -1,0 +1,22 @@
+[project]
+name = "expo-evals"
+version = "0.1.0"
+description = "EAS-native evaluation harness for Expo coding-agent experiments"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "braintrust>=0.3.0",
+    "claude-agent-sdk>=0.0.1",
+    "python-dotenv>=1.0.0",
+]
+
+[project.scripts]
+agentic-evaluator = "eval_harness.app_evaluator.main:main"
+agentic-skill-eval = "eval_harness.skill_evaluator.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["eval_harness"]

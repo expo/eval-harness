@@ -20,26 +20,26 @@ on:
       agent:
         type: choice
         options:
-          - claude
+          - claude-code
           - codex
-        default: claude
+        default: claude-code
         required: false
         description: Coding agent to author the app
       agent_model:
         type: string
         default: ''
         required: false
-        description: Optional model alias/name; defaults to sonnet for Claude and gpt-5-mini for Codex
+        description: Optional model alias/name; defaults to sonnet for Claude Code and gpt-5-mini for Codex
       prd:
         type: string
-        default: prds/hot_chocolate/prd/mvp.txt
+        default: eval_harness/prds/hot_chocolate/prd/mvp.txt
         required: false
-        description: PRD path under evaluator/
+        description: PRD path under eval_harness/
       test_plan:
         type: string
-        default: test_plans/primitives
+        default: eval_harness/app_evaluator/test_plans/primitives
         required: false
-        description: Test plan file or directory under evaluator/
+        description: Test plan file or directory under eval_harness/
       ios_app_mode:
         type: choice
         options:
@@ -65,7 +65,7 @@ on:
         description: Author from a skill-eval case PRD variant instead of the requested PRD
       skill_case_spec:
         type: string
-        default: evaluator/skill_eval_cases/core5/native-data-fetching.json
+        default: eval_harness/skill_evaluator/skill_cases/core5/native-data-fetching.json
         required: false
         description: Skill-eval case spec path
       skill_scenario:
@@ -83,10 +83,10 @@ jobs:
     runs_on: linux-medium
     environment: production
     env:
-      AGENT: ${{ inputs.agent || 'claude' }}
+      AGENT: ${{ inputs.agent || 'claude-code' }}
       AGENT_MODEL: ${{ inputs.agent_model || '' }}
-      PRD: ${{ inputs.prd || 'prds/hot_chocolate/prd/mvp.txt' }}
-      TEST_PLAN: ${{ inputs.test_plan || 'test_plans/primitives' }}
+      PRD: ${{ inputs.prd || 'eval_harness/prds/hot_chocolate/prd/mvp.txt' }}
+      TEST_PLAN: ${{ inputs.test_plan || 'eval_harness/app_evaluator/test_plans/primitives' }}
     steps:
       - uses: eas/checkout
 
@@ -97,14 +97,14 @@ jobs:
       - name: Author app with coding agent
         run: |
           if [ '${{ inputs.materialize_skill_case }}' = 'true' ] && [ -n '${{ inputs.skill_case_spec }}' ]; then
-            bash ./scripts/skill-eval/run-scenario.sh \
+            bash ./eval_harness/scripts/skill_eval/run-scenario.sh \
               --case '${{ inputs.skill_case_spec }}' \
               --scenario '${{ inputs.skill_scenario }}' \
               --agent '${{ inputs.agent }}' \
               --agent-model '${{ inputs.agent_model }}' \
-              --script ./scripts/author-app.sh
+              --script ./eval_harness/scripts/author_app.sh
           else
-            bash ./scripts/author-app.sh
+            bash ./eval_harness/scripts/author_app.sh
           fi
 
       # Carries both the authored workspace and author-side diagnostics to macOS.
@@ -140,7 +140,7 @@ jobs:
     runs_on: macos-medium
     environment: production
     env:
-      AGENT: ${{ inputs.agent || 'claude' }}
+      AGENT: ${{ inputs.agent || 'claude-code' }}
       AGENT_MODEL: ${{ inputs.agent_model || '' }}
       PRD_OVERRIDE: ${{ inputs.prd || '' }}
       TEST_PLAN_OVERRIDE: ${{ inputs.test_plan || '' }}
@@ -179,7 +179,7 @@ jobs:
           fi
 
       - name: Build, run, and evaluate authored app
-        run: bash ./scripts/eval-authored-app.sh
+        run: bash ./eval_harness/scripts/eval_ios_app.sh
 
       # tar ourselves -> clean `eval-out/` root (upload_artifact bakes in abs paths)
       - name: Package eval output
@@ -213,14 +213,11 @@ jobs:
 
       - name: Analyze authored app for skill eval
         run: |
-          mkdir -p skill-eval-report
-          AUTHORED_ARTIFACT='${{ steps.download_author.outputs.artifact_path }}'
-          bash ./scripts/skill-eval/analyze-artifacts.sh \
-            --case '${{ inputs.skill_case_spec }}' \
-            --authored-artifact "$AUTHORED_ARTIFACT" \
-            --scenario '${{ inputs.skill_scenario }}' \
-            --out-dir skill-eval-report
-          find skill-eval-report -maxdepth 3 -type f -print | sort
+          CASE_SPEC='${{ inputs.skill_case_spec }}' \
+          AUTHORED_ARTIFACT='${{ steps.download_author.outputs.artifact_path }}' \
+          SCENARIO='${{ inputs.skill_scenario }}' \
+          OUT_DIR=skill-eval-report \
+          bash ./eval_harness/scripts/eval_skill_use.sh
 
       - name: Package skill-eval report
         if: ${{ always() }}

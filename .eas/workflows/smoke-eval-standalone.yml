@@ -1,0 +1,34 @@
+# Standalone agentic-evaluator run on a macOS worker: one primitive (test_insert)
+# against the `notes` reference app in Expo Go. Stage-gated (doubles as the capability
+# probe for running a sim REPL inside EAS). Manual trigger only.
+#   eas workflow:run .eas/workflows/smoke-eval-standalone.yml
+name: smoke-eval-standalone
+
+jobs:
+  eval_standalone:
+    runs_on: macos-medium
+    # auto-injects ANTHROPIC_API_KEY (used by the evaluator's claude-agent-sdk loop)
+    environment: production
+    steps:
+      - uses: eas/checkout
+
+      - name: Check ANTHROPIC_API_KEY bound
+        run: |
+          if [ -n "${ANTHROPIC_API_KEY:-}" ]; then echo "ANTHROPIC_API_KEY bound (len ${#ANTHROPIC_API_KEY})"; else echo "MISSING"; exit 1; fi
+
+      - name: Run standalone agentic evaluator
+        run: bash ./eval_harness/scripts/smoke_eval_standalone.sh
+
+      # tar ourselves -> clean `eval-out/` root (upload_artifact bakes in abs paths)
+      - name: Package eval output
+        if: ${{ always() }}
+        run: tar -czf eval-out.tar.gz eval-out
+
+      # type: other = generic artifact for custom jobs.
+      - name: Upload eval output
+        if: ${{ always() }}
+        uses: eas/upload_artifact
+        with:
+          type: other
+          name: eval-out
+          path: eval-out.tar.gz
