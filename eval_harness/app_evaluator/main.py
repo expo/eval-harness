@@ -5,17 +5,17 @@ Usage:
     # Single test plan (generic primitive plan + app PRD injected at runtime)
     python -m eval_harness.app_evaluator.main \
         eval_harness/app_evaluator/test_plans/primitives/test_insert.txt \
-        --prd eval_harness/prds/notes/prd/mvp.txt \
+        --prd eval_harness/app_evaluator/prds/notes/prd/mvp.txt \
         -d agent-device --hybrid-restart \
         --seed-iterations 200 --max-iterations 50 \
         -o /tmp/result.json --verbose
 
     # Entire directory of test plans
     python -m eval_harness.app_evaluator.main \
-        eval_harness/app_evaluator/test_plans/primitives/ --prd eval_harness/prds/notes/prd/mvp.txt -o results.json --verbose
+        eval_harness/app_evaluator/test_plans/primitives/ --prd eval_harness/app_evaluator/prds/notes/prd/mvp.txt -o results.json --verbose
 
     # Or via the installed console script:
-    agentic-evaluator eval_harness/app_evaluator/test_plans/primitives/test_insert.txt --prd eval_harness/prds/notes/prd/mvp.txt ...
+    agentic-evaluator eval_harness/app_evaluator/test_plans/primitives/test_insert.txt --prd eval_harness/app_evaluator/prds/notes/prd/mvp.txt ...
 """
 
 import argparse

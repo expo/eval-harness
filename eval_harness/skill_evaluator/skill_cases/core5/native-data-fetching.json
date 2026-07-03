@@ -2,17 +2,15 @@
   "id": "native-data-fetching",
   "feature_focus": "mobile-safe async data loading, refresh, and error states",
   "expected_skills": ["native-data-fetching"],
-  "prd_variants": {
-    "unmentioned": "Build a mobile app screen that loads remote café data, supports pull-to-refresh, and shows loading and error states.",
-    "mentioned": "Build a mobile app screen using native-data-fetching guidance. Load remote café data, support pull-to-refresh, and show loading and error states."
+  "scenario_prds": {
+    "skills_off_tools_on": "eval_harness/skill_evaluator/prds/native-data-fetching/unmentioned.txt",
+    "skills_available_unmentioned": "eval_harness/skill_evaluator/prds/native-data-fetching/unmentioned.txt",
+    "skills_available_mentioned": "eval_harness/skill_evaluator/prds/native-data-fetching/mentioned.txt"
   },
-  "scenarios": ["skills_off_tools_on", "skills_available_unmentioned", "skills_available_mentioned"],
   "static_uptake_checks": [
     {"id": "uses_effect_or_query", "kind": "text_any", "target": "useEffect|useQuery|SWR"},
     {"id": "has_loading_state", "kind": "text", "target": "loading"},
     {"id": "has_error_state", "kind": "text", "target": "error"},
     {"id": "has_refresh_control", "kind": "text", "target": "RefreshControl"}
-  ],
-  "test_plan": "eval_harness/app_evaluator/test_plans/primitives/test_insert.txt",
-  "screenshot_targets": [{"label": "Data List", "test_id": "screen-data-list"}]
+  ]
 }

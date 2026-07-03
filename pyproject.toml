@@ -12,7 +12,7 @@ dependencies = [
 
 [project.scripts]
 agentic-evaluator = "eval_harness.app_evaluator.main:main"
-agentic-skill-eval = "eval_harness.skill_evaluator.cli:main"
+agentic-skill-eval = "eval_harness.skill_evaluator.main:main"
 
 [build-system]
 requires = ["hatchling"]

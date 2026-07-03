@@ -10,7 +10,7 @@ runner plus uploaded artifacts.
 ## Current Shape
 
 - `eval_harness/app_evaluator/`: mobile app evaluator package. It drives iOS apps with `agent-device` and scores app-agnostic primitive test plans against a PRD.
-- `eval_harness/skill_evaluator/`: skill-use analyzer package. It inspects authored app artifacts, authoring traces, static uptake checks, and optional evaluator outcomes.
+- `eval_harness/skill_evaluator/`: v0 skill-use analyzer package. It inspects authored app artifacts, authoring traces, static uptake checks, and optional evaluator outcomes.
 - `eval_harness/scripts/`: workflow entrypoints called by `.eas/workflows/*.yml`.
 - `eval_harness/prompts/`: coding-agent prompt templates.
 - `eval_harness/utils/`: shared artifacts, iOS, shell, and telemetry helpers.
@@ -21,12 +21,14 @@ runner plus uploaded artifacts.
 - `eval-e2e.yml` is the front door. The smaller workflows are replay/debug
   entrypoints, not the primary user journey.
 - The app evaluator CLI is `python -m eval_harness.app_evaluator.main`.
-- The skill evaluator CLI is `python -m eval_harness.skill_evaluator.cli`.
+- The skill evaluator CLI is `python -m eval_harness.skill_evaluator.main`.
 - Notes smoke input paths:
-  - PRD: `eval_harness/prds/notes/prd/mvp.txt`
+  - PRD: `eval_harness/app_evaluator/prds/notes/prd/mvp.txt`
   - plan: `eval_harness/app_evaluator/test_plans/primitives/test_insert.txt`
   - app: `eval_harness/app_evaluator/reference_apps/notes/`
 - Artifact bundles keep their index file named `manifest.json`.
+- Skill-eval report artifacts are named `skill-eval-report` and contain
+  `metrics.json` plus `report.html`.
 - `eval_harness/utils/artifacts/collect_artifacts.sh` is a helper called from shell traps, not a workflow job.
 - `eval_harness/legacy/` is archival. Do not wire new workflows or docs to files there.
 - Do not add new root-level harness folders unless there is a strong reason.
@@ -35,6 +37,10 @@ runner plus uploaded artifacts.
   `eval_harness/prompts/`, or `eval_harness/utils/`.
 - Expo project routing belongs in `app.config.js` and should remain configurable
   through `EAS_PROJECT_ID`, `EXPO_SLUG`, `EXPO_OWNER`, and `EXPO_APP_NAME`.
+- `authoring_mode=prd` passes the `prd` input directly to `author_app.sh`.
+- `authoring_mode=skill_case` resolves a PRD from `skill_case_spec` and
+  `skill_scenario`, then still calls the same `author_app.sh` path.
+- `test_plan` is an app-evaluator input. It is not part of skill-use analysis.
 
 ## Evaluator Scoring Rules
 
@@ -67,6 +73,8 @@ runner plus uploaded artifacts.
   sessions.
 - Avoid enabling duplicate Braintrust pushes unless intentionally comparing two
   trace formats.
+- The skill evaluator is v0: trace trigger detection, static code uptake checks,
+  optional app-evaluator score, no LLM judge, and no screenshot evidence.
 
 ## PRD And Prompt Guidance
 
@@ -80,7 +88,7 @@ runner plus uploaded artifacts.
 ## Verification Commands
 
 ```bash
-bash -n eval_harness/scripts/*.sh eval_harness/scripts/skill_eval/*.sh eval_harness/utils/shell/*.sh eval_harness/utils/artifacts/*.sh
-PYTHONPATH=. uv run python -m unittest eval_harness.tests.skill_evaluator.test_skill_eval_core
+find eval_harness/scripts eval_harness/utils -name '*.sh' -print0 | xargs -0 bash -n
+PYTHONPATH=. uv run python -m unittest eval_harness.skill_evaluator.tests.test_skill_eval_core
 node /Users/adityashukla/.codex/plugins/cache/openai-curated-remote/expo/1.0.2/skills/expo-cicd-workflows/scripts/validate.js .eas/workflows/*.yml
 ```

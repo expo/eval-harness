@@ -1,0 +1,1 @@
+Build a polished settings screen with grouped Account, Preferences, and About sections. Include toggle switches, a version row, and a sign-out action.

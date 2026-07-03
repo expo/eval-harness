@@ -28,5 +28,6 @@ if [ -n "$EVAL_ARTIFACT" ]; then
   args+=(--eval-artifact "$EVAL_ARTIFACT")
 fi
 
-bash "$ROOT/eval_harness/scripts/skill_eval/analyze-artifacts.sh" "${args[@]}"
+PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}" \
+  python3 -m eval_harness.skill_evaluator.main analyze-artifacts "${args[@]}"
 find "$OUT_DIR" -maxdepth 3 -type f -print | sort

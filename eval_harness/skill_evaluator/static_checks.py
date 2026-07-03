@@ -1,11 +1,14 @@
-"""Static context-uptake checks over generated Expo app source trees."""
+"""Static source checks and trace skill-detection for generated Expo apps."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
+
+from . import CORE_SKILLS
+from .utils import dedupe, flatten_strings, read_json
 
 
 SOURCE_SUFFIXES = {".js", ".jsx", ".ts", ".tsx", ".json", ".mjs", ".cjs"}
@@ -45,6 +48,63 @@ class StaticUptakeResult:
         if not self.checks:
             return None
         return round(self.passed / self.total, 4)
+
+
+SKILL_ALIASES = {
+    "building-native-ui": ["building-native-ui", "building native ui", "native ui"],
+    "expo-ui": ["expo-ui", "@expo/ui", "expo ui"],
+    "native-data-fetching": ["native-data-fetching", "native data fetching"],
+    "expo-dev-client": ["expo-dev-client", "dev client", "development client"],
+    "expo-tailwind-setup": ["expo-tailwind-setup", "tailwind setup", "nativewind"],
+}
+
+
+@dataclass
+class TriggerQuality:
+    expected_skills: list[str]
+    triggered_skills: list[str]
+    matched_skills: list[str]
+    extra_skills: list[str]
+    missing_skills: list[str]
+    recall: float
+    precision: float
+    any_expo_skill_triggered: bool
+
+
+def load_trace(path: Path | str) -> dict[str, Any]:
+    return read_json(path)
+
+
+def detect_triggered_skills(trace: dict[str, Any]) -> list[str]:
+    text = "\n".join(flatten_strings(trace)).lower()
+    observed: list[str] = []
+    for skill in CORE_SKILLS:
+        aliases = SKILL_ALIASES.get(skill, [skill])
+        if any(alias.lower() in text for alias in aliases):
+            observed.append(skill)
+    return observed
+
+
+def score_trigger_quality(expected_skills: Iterable[str], triggered_skills: Iterable[str]) -> TriggerQuality:
+    expected = dedupe(list(expected_skills))
+    triggered = dedupe([skill for skill in triggered_skills if skill in CORE_SKILLS])
+    expected_set = set(expected)
+    triggered_set = set(triggered)
+    matched = [skill for skill in expected if skill in triggered_set]
+    extra = [skill for skill in triggered if skill not in expected_set]
+    missing = [skill for skill in expected if skill not in triggered_set]
+    recall = len(matched) / len(expected) if expected else 1.0
+    precision = len(matched) / len(triggered) if triggered else (1.0 if not expected else 0.0)
+    return TriggerQuality(
+        expected_skills=expected,
+        triggered_skills=triggered,
+        matched_skills=matched,
+        extra_skills=extra,
+        missing_skills=missing,
+        recall=round(recall, 4),
+        precision=round(precision, 4),
+        any_expo_skill_triggered=bool(triggered),
+    )
 
 
 def run_static_checks(app_dir: Path | str, checks: list[dict[str, Any]]) -> StaticUptakeResult:

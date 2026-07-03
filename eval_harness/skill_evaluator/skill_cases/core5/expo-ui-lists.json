@@ -2,17 +2,15 @@
   "id": "expo-ui-lists",
   "feature_focus": "native @expo/ui list screens and bottom sheet details",
   "expected_skills": ["expo-ui"],
-  "prd_variants": {
-    "unmentioned": "Build a native-looking café browser with a searchable list of cafés, disclosure rows, and a details panel.",
-    "mentioned": "Build a native-looking café browser using @expo/ui. Use native list rows for a searchable café list, disclosure rows, and a details panel."
+  "scenario_prds": {
+    "skills_off_tools_on": "eval_harness/skill_evaluator/prds/expo-ui-lists/unmentioned.txt",
+    "skills_available_unmentioned": "eval_harness/skill_evaluator/prds/expo-ui-lists/unmentioned.txt",
+    "skills_available_mentioned": "eval_harness/skill_evaluator/prds/expo-ui-lists/mentioned.txt"
   },
-  "scenarios": ["skills_off_tools_on", "skills_available_unmentioned", "skills_available_mentioned"],
   "static_uptake_checks": [
     {"id": "imports_expo_ui", "kind": "import", "target": "@expo/ui"},
     {"id": "uses_host", "kind": "text", "target": "Host"},
     {"id": "uses_list", "kind": "text", "target": "List"},
     {"id": "uses_list_item", "kind": "text", "target": "ListItem"}
-  ],
-  "test_plan": "eval_harness/app_evaluator/test_plans/primitives/test_insert.txt",
-  "screenshot_targets": [{"label": "Cafe List", "test_id": "screen-cafes"}]
+  ]
 }

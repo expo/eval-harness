@@ -4,14 +4,19 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from eval_harness.skill_evaluator.artifacts import analyze_artifact_inputs, discover_artifact_layout, unpack_artifact
-from eval_harness.skill_evaluator.eas import extract_artifact_refs
-from eval_harness.skill_evaluator.aggregate import aggregate_skill_results
-from eval_harness.skill_evaluator.manifest import load_case_spec
-from eval_harness.skill_evaluator.metrics import classify_skill, score_case_run
-from eval_harness.skill_evaluator.runner import plan_case_runs
-from eval_harness.skill_evaluator.static_checks import run_static_checks
-from eval_harness.skill_evaluator.trace import detect_triggered_skills, score_trigger_quality
+from eval_harness.skill_evaluator.analysis import (
+    aggregate_skill_results,
+    analyze_artifacts,
+    classify_skill,
+    discover_artifact_layout,
+    score_case_run,
+)
+from eval_harness.skill_evaluator.static_checks import (
+    detect_triggered_skills,
+    run_static_checks,
+    score_trigger_quality,
+)
+from eval_harness.skill_evaluator.utils import load_case_spec, unpack_artifact, write_authoring_env
 
 
 class SkillEvalCoreTests(unittest.TestCase):
@@ -23,26 +28,23 @@ class SkillEvalCoreTests(unittest.TestCase):
         for path in specs:
             spec = load_case_spec(path)
             self.assertTrue(spec.expected_skills, path.name)
-            self.assertIn("skills_available_mentioned", spec.scenarios)
+            self.assertIn("skills_available_mentioned", spec.scenario_prds)
             self.assertTrue(spec.static_uptake_checks, path.name)
 
-    def test_manifest_loads_core_case_without_skill_family(self):
+    def test_case_spec_loads_core_case_without_skill_family(self):
         with tempfile.TemporaryDirectory() as td:
             spec_path = Path(td) / "case.json"
             spec_path.write_text(json.dumps({
                 "id": "settings-ui",
                 "feature_focus": "native settings screen",
                 "expected_skills": ["building-native-ui", "expo-ui"],
-                "prd_variants": {
-                    "unmentioned": "Build a native settings screen",
-                    "mentioned": "Use @expo/ui to build a native settings screen",
+                "scenario_prds": {
+                    "skills_available_unmentioned": "eval_harness/skill_evaluator/prds/settings-ui/unmentioned.txt",
+                    "skills_available_mentioned": "eval_harness/skill_evaluator/prds/settings-ui/mentioned.txt",
                 },
-                "scenarios": ["skills_off_tools_on", "skills_available_unmentioned"],
                 "static_uptake_checks": [
                     {"id": "uses_expo_ui", "kind": "import", "target": "@expo/ui"}
                 ],
-                "test_plan": "eval_harness/app_evaluator/test_plans/settings.txt",
-                "screenshot_targets": [{"label": "Settings", "test_id": "screen-settings"}],
             }))
 
             spec = load_case_spec(spec_path)
@@ -50,6 +52,7 @@ class SkillEvalCoreTests(unittest.TestCase):
         self.assertEqual(spec.id, "settings-ui")
         self.assertEqual(spec.expected_skills, ["building-native-ui", "expo-ui"])
         self.assertFalse(hasattr(spec, "skill_family"))
+        self.assertFalse(hasattr(spec, "test_plan"))
 
     def test_trigger_quality_requires_the_right_skills(self):
         trace = {
@@ -139,7 +142,6 @@ class SkillEvalCoreTests(unittest.TestCase):
             static_total=1,
             evaluator_pct=80.0,
             build_success=True,
-            visual_quality=7.0,
         )
 
         self.assertIsNone(run.context_uptake.uptake_rate)
@@ -180,59 +182,31 @@ class SkillEvalCoreTests(unittest.TestCase):
         self.assertEqual(aggregate["expo-ui"]["outcome_delta"], 25.0)
         self.assertEqual(aggregate["expo-ui"]["classification"], "Helpful")
 
-    def test_extract_artifact_refs_from_eas_logs(self):
-        logs = """
-        bundle: /tmp/run-1.tgz
-        uploaded gs://expo-evals/run-1.tgz
-        report https://storage.example.com/run-1/report.html
-        ::artifact{url="https://example.com/app.tgz" label="app"}
-        """
-
-        refs = extract_artifact_refs(logs)
-
-        self.assertIn("gs://expo-evals/run-1.tgz", refs)
-        self.assertIn("https://storage.example.com/run-1/report.html", refs)
-        self.assertIn("https://example.com/app.tgz", refs)
-
-    def test_runner_plans_scenario_matrix_from_case_spec(self):
+    def test_resolve_authoring_env_writes_skill_case_prd_path(self):
         with tempfile.TemporaryDirectory() as td:
             repo = Path(td)
-            (repo / "eval_harness" / "scripts").mkdir(parents=True)
-            (repo / "eval_harness" / "scripts" / "author_app.sh").write_text("#!/usr/bin/env bash\n")
             spec_path = repo / "case.json"
             spec_path.write_text(json.dumps({
                 "id": "native-list",
                 "feature_focus": "native list UI",
                 "expected_skills": ["expo-ui"],
-                "prd_variants": {
-                    "unmentioned": "Build a native list",
-                    "mentioned": "Build a native list using the expo-ui skill",
+                "scenario_prds": {
+                    "skills_off_tools_on": "eval_harness/skill_evaluator/prds/native-list/unmentioned.txt",
+                    "skills_available_unmentioned": "eval_harness/skill_evaluator/prds/native-list/unmentioned.txt",
+                    "skills_available_mentioned": "eval_harness/skill_evaluator/prds/native-list/mentioned.txt",
                 },
-                "scenarios": [
-                    "skills_off_tools_on",
-                    "skills_available_unmentioned",
-                    "skills_available_mentioned",
-                ],
                 "static_uptake_checks": [
                     {"id": "uses_expo_ui", "kind": "import", "target": "@expo/ui"}
                 ],
-                "test_plan": "eval_harness/app_evaluator/test_plans/list.txt",
             }))
+            env_file = repo / "authoring.env"
 
-            runs = plan_case_runs(load_case_spec(spec_path), repo, agent="codex")
+            env = write_authoring_env(spec_path, "skills_available_mentioned", env_file)
 
-            self.assertEqual([run.scenario for run in runs], [
-                "skills_off_tools_on",
-                "skills_available_unmentioned",
-                "skills_available_mentioned",
-            ])
-            self.assertEqual(runs[0].env["EXPO_CAPABILITY_MODE"], "skills_off_tools_on")
-            self.assertEqual(runs[1].env["EXPO_CAPABILITY_MODE"], "expo_plugin")
-            self.assertEqual(runs[2].env["SKILL_EVAL_PRD_VARIANT"], "mentioned")
-            self.assertEqual(runs[2].env["AGENT"], "codex")
-            self.assertEqual(runs[2].env["SKILL_EVAL_EXPECTED_SKILLS"], "expo-ui")
-            self.assertEqual(runs[2].command, [(repo.resolve() / "eval_harness" / "scripts" / "author_app.sh").as_posix()])
-            self.assertTrue((repo / runs[2].env["PRD"]).exists())
+            self.assertEqual(env["PRD"], "eval_harness/skill_evaluator/prds/native-list/mentioned.txt")
+            self.assertEqual(env["SKILL_EVAL_CASE_ID"], "native-list")
+            self.assertEqual(env["SKILL_EVAL_EXPECTED_SKILLS"], "expo-ui")
+            self.assertIn("export PRD=eval_harness/skill_evaluator/prds/native-list/mentioned.txt", env_file.read_text())
 
     def test_unpack_and_discover_authored_artifact_layout_from_tarball(self):
         with tempfile.TemporaryDirectory() as td:
@@ -272,7 +246,7 @@ class SkillEvalCoreTests(unittest.TestCase):
                 "braintrust_url": "https://www.braintrust.dev/app/project/traces/abc",
             }))
 
-            payload = analyze_artifact_inputs(case_path, authored, None, "skills_available_unmentioned", root / "out")
+            payload = analyze_artifacts(case_path, authored, None, "skills_available_unmentioned", root / "out")
 
             self.assertEqual(payload["outcome_status"], "pending")
             self.assertEqual(payload["runs"][0]["classification"], "Outcome pending")
@@ -282,7 +256,7 @@ class SkillEvalCoreTests(unittest.TestCase):
             self.assertTrue((root / "out" / "metrics.json").exists())
             self.assertTrue((root / "out" / "report.html").exists())
 
-    def test_analyze_artifacts_merges_eval_result_and_screenshots(self):
+    def test_analyze_artifacts_merges_eval_result(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             case_path = self._write_case(root, "expo-ui")
@@ -295,19 +269,15 @@ class SkillEvalCoreTests(unittest.TestCase):
             (app / "index.tsx").write_text("import { Host } from '@expo/ui';\nexport default Host;\n")
             (traces / "claude-authoring.json").write_text(json.dumps({"text": "Using expo-ui"}))
             eval_out = root / "eval"
-            screenshot_dir = eval_out / "eval-out" / "run-1" / "bundle" / "eval" / "traces" / "trace-1" / "screenshots"
-            screenshot_dir.mkdir(parents=True)
-            (screenshot_dir / "home.png").write_bytes(b"png")
             result = eval_out / "eval-out" / "run-1" / "bundle" / "eval"
             result.mkdir(parents=True, exist_ok=True)
             (result / "result.json").write_text(json.dumps({"macro_avg_pct": 87.5}))
 
-            payload = analyze_artifact_inputs(case_path, authored, eval_out, "skills_available_mentioned", root / "out")
+            payload = analyze_artifacts(case_path, authored, eval_out, "skills_available_mentioned", root / "out")
 
         self.assertEqual(payload["outcome_status"], "complete")
         self.assertEqual(payload["runs"][0]["evaluator_pct"], 87.5)
         self.assertTrue(payload["runs"][0]["build_success"])
-        self.assertEqual(payload["screenshots"][0]["label"], "home.png")
         self.assertEqual(payload["skills"]["expo-ui"]["classification"], "Helpful")
 
     def test_analyze_artifacts_marks_missing_trace_without_crashing(self):
@@ -320,7 +290,7 @@ class SkillEvalCoreTests(unittest.TestCase):
             (app / "package.json").write_text(json.dumps({"dependencies": {"@expo/ui": "1.0.0"}}))
             (app / "index.tsx").write_text("import { Host } from '@expo/ui';\nexport default Host;\n")
 
-            payload = analyze_artifact_inputs(case_path, authored, None, "skills_available_unmentioned", root / "out")
+            payload = analyze_artifacts(case_path, authored, None, "skills_available_unmentioned", root / "out")
 
         self.assertIn("author trace not found", payload["warnings"])
         self.assertEqual(payload["runs"][0]["trigger_recall"], 0.0)
@@ -335,7 +305,7 @@ class SkillEvalCoreTests(unittest.TestCase):
             traces.mkdir(parents=True)
             (traces / "claude-authoring.json").write_text(json.dumps({"text": "Using expo-ui"}))
 
-            payload = analyze_artifact_inputs(case_path, authored, None, "skills_available_unmentioned", root / "out")
+            payload = analyze_artifacts(case_path, authored, None, "skills_available_unmentioned", root / "out")
 
         self.assertIn("app tree not found", payload["warnings"])
         self.assertEqual(payload["static_checks"], [])
@@ -347,13 +317,13 @@ class SkillEvalCoreTests(unittest.TestCase):
             "id": "artifact-case",
             "feature_focus": "artifact analysis",
             "expected_skills": [skill],
-            "prd_variants": {"unmentioned": "Build UI", "mentioned": "Build UI using skill"},
-            "scenarios": ["skills_available_unmentioned", "skills_available_mentioned"],
+            "scenario_prds": {
+                "skills_available_unmentioned": "eval_harness/skill_evaluator/prds/artifact-case/unmentioned.txt",
+                "skills_available_mentioned": "eval_harness/skill_evaluator/prds/artifact-case/mentioned.txt",
+            },
             "static_uptake_checks": [
                 {"id": "uses_expo_ui", "kind": "import", "target": "@expo/ui"}
             ],
-            "test_plan": "eval_harness/app_evaluator/test_plans/artifact.txt",
-            "screenshot_targets": [{"label": "Home", "test_id": "home-screen"}],
         }))
         return case_path
 

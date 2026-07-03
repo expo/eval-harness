@@ -37,7 +37,7 @@ if ! eval::probe_snapshot "$OUT" "host.exp.Exponent"; then
 fi
 eval::run_evaluator "$EVAL" \
     eval_harness/app_evaluator/test_plans/primitives/test_insert.txt \
-    eval_harness/prds/notes/prd/mvp.txt \
+    eval_harness/app_evaluator/prds/notes/prd/mvp.txt \
     "$OUT/result.json" \
     "$OUT" \
     --hybrid-restart

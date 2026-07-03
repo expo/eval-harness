@@ -4,22 +4,19 @@
 #   PRD ──▶ coding agent authors an Expo app ──▶ harness dev-builds + serves it
 #       ──▶ agentic evaluator scores it ──▶ collect app + all telemetry
 #
-# Everything is correlated by a single RUN_ID. The reusable install/boot/serve/
-# evaluate/agent stages live in scripts/lib/eval-stages.sh (shared with
-# setup-eval.sh). Like setup-eval.sh this never exits non-zero mid-way and ends
-# `exit 0`; the EXIT trap always runs the collector so a failed run is still
-# diagnosable.
+# Everything is correlated by a single RUN_ID. This monolithic script is kept as
+# a single-macOS-job alternative to the modular author/eval workflows.
 #
-# Knobs (env): AGENT={claude|codex} (default claude), AGENT_MODEL (default depends on agent),
+# Knobs (env): AGENT={claude-code|codex} (default claude-code), AGENT_MODEL (default depends on agent),
 #   GCS_BUCKET + GCP_SA_KEY (optional mirror), BRAINTRUST_API_KEY (optional trace push),
 #   BRAINTRUST_PROJECT / *_PROJECT overrides (default expo-evals),
 #   RUN_ID (pin a run id), PRD / TEST_PLAN (override the defaults).
 set -uo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-EVAL="$ROOT/evaluator"
-# shellcheck source=scripts/lib/eval-stages.sh
-source "$ROOT/scripts/lib/eval-stages.sh"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+EVAL="$ROOT"
+# shellcheck source=eval_harness/utils/shell/eval_stages.sh
+source "$ROOT/eval_harness/utils/shell/eval_stages.sh"
 
 # ---- run identity + layout ----
 RUN_ID="${RUN_ID:-$(date +%Y%m%d-%H%M%S)-$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')}"
@@ -29,15 +26,16 @@ WORKSPACE="$ROOT/agent-workspace/$RUN_ID"; mkdir -p "$WORKSPACE"
 TELEMETRY_DIR="$OUT/telemetry"; mkdir -p "$TELEMETRY_DIR/otel"
 export RUN_ID RUN_START_MTIME OUT WORKSPACE TELEMETRY_DIR
 
-AGENT="${AGENT:-claude}"
+AGENT="${AGENT:-claude-code}"
+[ "$AGENT" = "claude" ] && AGENT="claude-code"
 AGENT_MODEL="${AGENT_MODEL:-}"
 if [ -z "$AGENT_MODEL" ]; then
   if [ "$AGENT" = "codex" ]; then AGENT_MODEL="${CODEX_MODEL:-gpt-5-mini}"; else AGENT_MODEL="sonnet"; fi
 fi
 METRO_MODE="dev-build"
-PRD="${PRD:-prds/hot_chocolate/prd/mvp.txt}"
-TEST_PLAN="${TEST_PLAN:-test_plans/primitives}"
-export AGENT AGENT_MODEL METRO_MODE
+PRD="${PRD:-eval_harness/app_evaluator/prds/hot_chocolate/prd/mvp.txt}"
+TEST_PLAN="${TEST_PLAN:-eval_harness/app_evaluator/test_plans/primitives}"
+export AGENT AGENT_MODEL METRO_MODE PRD TEST_PLAN
 
 ANTHROPIC_PROXY_PORT=8082   # 8081 is Metro's; Anthropic proxy moves to 8082
 OPENAI_PROXY_PORT=8083
@@ -78,7 +76,7 @@ EVAL_PROXY_PIDS=()
 EVAL_METRO_PID=""
 # The trap runs the collector no matter how we exit (success, agent crash,
 # build failure). It reads RUN_ID/OUT/etc from the exported env.
-trap 'eval::stop_proxies; kill "${EVAL_METRO_PID:-}" 2>/dev/null || true; bash "$ROOT/scripts/collect-artifacts.sh" "$ROOT" "$RUN_ID" "$OUT" "$WORKSPACE" "$EVAL" "$TELEMETRY_DIR"' EXIT
+trap 'eval::stop_proxies; kill "${EVAL_METRO_PID:-}" 2>/dev/null || true; bash "$ROOT/eval_harness/utils/artifacts/collect_artifacts.sh" "$ROOT" "$RUN_ID" "$OUT" "$WORKSPACE" "$EVAL" "$TELEMETRY_DIR"' EXIT
 
 echo "================= STAGE B: telemetry sidecars ================="
 eval::launch_proxy "$ROOT" anthropic https://api.anthropic.com "$ANTHROPIC_PROXY_PORT" "$TELEMETRY_DIR/anthropic.jsonl"
@@ -104,7 +102,7 @@ export OTEL_METRIC_EXPORT_INTERVAL=2000 OTEL_LOGS_EXPORT_INTERVAL=2000
 export OTEL_RESOURCE_ATTRIBUTES="run.id=$RUN_ID,phase=agent-build,service.name=eval-harness"
 [ -n "$AGENT_MODEL" ] && export ANTHROPIC_MODEL="$AGENT_MODEL"
 
-eval::run_coding_agent "$AGENT" "$ROOT" "$WORKSPACE" "$EVAL/$PRD" "$OUT" "$AGENT_MODEL"
+eval::run_coding_agent "$AGENT" "$ROOT" "$WORKSPACE" "$ROOT/$PRD" "$OUT" "$AGENT_MODEL"
 
 if [ ! -f "$WORKSPACE/package.json" ]; then
   echo "  ❌ coding agent did not produce package.json; skipping build/eval and collecting diagnostics"
@@ -129,7 +127,7 @@ if [ "$EVAL_IOS_APP_MODE" = "dev-client" ]; then
     || echo "  ⚠️  expo install expo-dev-client failed (see d-devclient.log)"
 
   DEV_CLIENT_DEFAULT_URL="${DEV_CLIENT_DEFAULT_URL:-http://localhost:8081}"
-  node "$ROOT/scripts/patch-dev-client-default-url.mjs" "$WORKSPACE" "$DEV_CLIENT_DEFAULT_URL" >"$OUT/d-devclient-config.log" 2>&1 \
+  node "$ROOT/eval_harness/utils/ios/patch_dev_client_default_url.mjs" "$WORKSPACE" "$DEV_CLIENT_DEFAULT_URL" >"$OUT/d-devclient-config.log" 2>&1 \
     || echo "  ⚠️  dev-client defaultLaunchURL patch failed (see d-devclient-config.log)"
   cat "$OUT/d-devclient-config.log"
   export EVAL_DEV_CLIENT_CLEAR_STATE="${EVAL_DEV_CLIENT_CLEAR_STATE:-1}"

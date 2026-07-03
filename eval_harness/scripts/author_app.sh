@@ -27,9 +27,32 @@ if [ -z "$AGENT_MODEL" ]; then
   if [ "$AGENT" = "codex" ]; then AGENT_MODEL="${CODEX_MODEL:-gpt-5-mini}"; else AGENT_MODEL="sonnet"; fi
 fi
 METRO_MODE="dev-build"
-PRD="${PRD:-eval_harness/prds/hot_chocolate/prd/mvp.txt}"
+AUTHORING_MODE="${AUTHORING_MODE:-prd}"
+SKILL_CASE_SPEC="${SKILL_CASE_SPEC:-}"
+SKILL_SCENARIO="${SKILL_SCENARIO:-skills_available_unmentioned}"
+PRD="${PRD:-eval_harness/app_evaluator/prds/hot_chocolate/prd/mvp.txt}"
 TEST_PLAN="${TEST_PLAN:-eval_harness/app_evaluator/test_plans/primitives}"
-export AGENT AGENT_MODEL METRO_MODE PRD TEST_PLAN
+if [ "$AUTHORING_MODE" = "skill_case" ]; then
+  if [ -z "$SKILL_CASE_SPEC" ]; then
+    echo "  ❌ SKILL_CASE_SPEC is required when AUTHORING_MODE=skill_case"
+    exit 2
+  fi
+  AUTHORING_ENV="$OUT/authoring.env"
+  PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}" \
+    "$PY" -m eval_harness.skill_evaluator.main resolve-authoring-env \
+      --case "$SKILL_CASE_SPEC" \
+      --scenario "$SKILL_SCENARIO" \
+      --out-env "$AUTHORING_ENV" >"$OUT/authoring-env.log" 2>&1
+  rc=$?
+  eval::gate $rc "resolve skill-case authoring PRD"
+  if [ "$rc" != 0 ]; then
+    cat "$OUT/authoring-env.log" | sed 's/^/    /'
+    exit "$rc"
+  fi
+  # shellcheck disable=SC1090
+  . "$AUTHORING_ENV"
+fi
+export AGENT AGENT_MODEL METRO_MODE AUTHORING_MODE PRD TEST_PLAN SKILL_CASE_SPEC SKILL_SCENARIO
 
 ANTHROPIC_PROXY_PORT=8082
 OPENAI_PROXY_PORT=8083
@@ -44,9 +67,15 @@ echo "RUN_ID=$RUN_ID  AGENT=$AGENT  WORKSPACE=$WORKSPACE"
   echo "RUN_START_MTIME=$RUN_START_MTIME"
   echo "AGENT=$AGENT"
   echo "AGENT_MODEL=$AGENT_MODEL"
+  echo "AUTHORING_MODE=$AUTHORING_MODE"
   echo "PRD=$PRD"
   echo "TEST_PLAN=$TEST_PLAN"
   echo "METRO_MODE=$METRO_MODE"
+  echo "SKILL_CASE_SPEC=${SKILL_CASE_SPEC:-}"
+  echo "SKILL_SCENARIO=${SKILL_SCENARIO:-}"
+  echo "SKILL_EVAL_CASE_ID=${SKILL_EVAL_CASE_ID:-}"
+  echo "SKILL_EVAL_FEATURE_FOCUS=${SKILL_EVAL_FEATURE_FOCUS:-}"
+  echo "SKILL_EVAL_EXPECTED_SKILLS=${SKILL_EVAL_EXPECTED_SKILLS:-}"
 } >"$OUT/author.env"
 
 EVAL_PROXY_PIDS=()

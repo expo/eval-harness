@@ -32,7 +32,7 @@ on:
         description: Optional model alias/name; defaults to sonnet for Claude Code and gpt-5-mini for Codex
       prd:
         type: string
-        default: eval_harness/prds/hot_chocolate/prd/mvp.txt
+        default: eval_harness/app_evaluator/prds/hot_chocolate/prd/mvp.txt
         required: false
         description: PRD path under eval_harness/
       test_plan:
@@ -58,11 +58,14 @@ on:
         default: true
         required: false
         description: Run the skill-eval analyzer job
-      materialize_skill_case:
-        type: boolean
-        default: false
+      authoring_mode:
+        type: choice
+        options:
+          - prd
+          - skill_case
+        default: prd
         required: false
-        description: Author from a skill-eval case PRD variant instead of the requested PRD
+        description: Author from a direct PRD path or a skill-case scenario PRD
       skill_case_spec:
         type: string
         default: eval_harness/skill_evaluator/skill_cases/core5/native-data-fetching.json
@@ -85,8 +88,11 @@ jobs:
     env:
       AGENT: ${{ inputs.agent || 'claude-code' }}
       AGENT_MODEL: ${{ inputs.agent_model || '' }}
-      PRD: ${{ inputs.prd || 'eval_harness/prds/hot_chocolate/prd/mvp.txt' }}
+      AUTHORING_MODE: ${{ inputs.authoring_mode || 'prd' }}
+      PRD: ${{ inputs.prd || 'eval_harness/app_evaluator/prds/hot_chocolate/prd/mvp.txt' }}
       TEST_PLAN: ${{ inputs.test_plan || 'eval_harness/app_evaluator/test_plans/primitives' }}
+      SKILL_CASE_SPEC: ${{ inputs.skill_case_spec || '' }}
+      SKILL_SCENARIO: ${{ inputs.skill_scenario || 'skills_available_unmentioned' }}
     steps:
       - uses: eas/checkout
 
@@ -95,17 +101,7 @@ jobs:
           if [ -n "${ANTHROPIC_API_KEY:-}" ]; then echo "ANTHROPIC_API_KEY bound (len ${#ANTHROPIC_API_KEY})"; else echo "MISSING"; exit 1; fi
 
       - name: Author app with coding agent
-        run: |
-          if [ '${{ inputs.materialize_skill_case }}' = 'true' ] && [ -n '${{ inputs.skill_case_spec }}' ]; then
-            bash ./eval_harness/scripts/skill_eval/run-scenario.sh \
-              --case '${{ inputs.skill_case_spec }}' \
-              --scenario '${{ inputs.skill_scenario }}' \
-              --agent '${{ inputs.agent }}' \
-              --agent-model '${{ inputs.agent_model }}' \
-              --script ./eval_harness/scripts/author_app.sh
-          else
-            bash ./eval_harness/scripts/author_app.sh
-          fi
+        run: bash ./eval_harness/scripts/author_app.sh
 
       # Carries both the authored workspace and author-side diagnostics to macOS.
       - name: Package authored app
@@ -142,6 +138,7 @@ jobs:
     env:
       AGENT: ${{ inputs.agent || 'claude-code' }}
       AGENT_MODEL: ${{ inputs.agent_model || '' }}
+      AUTHORING_MODE: ${{ inputs.authoring_mode || 'prd' }}
       PRD_OVERRIDE: ${{ inputs.prd || '' }}
       TEST_PLAN_OVERRIDE: ${{ inputs.test_plan || '' }}
       EVAL_IOS_APP_MODE: ${{ inputs.ios_app_mode || 'release' }}
