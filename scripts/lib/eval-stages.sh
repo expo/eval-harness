@@ -476,7 +476,7 @@ eval::run_coding_agent() { # agent root workspace prd_file out_dir [model]
         echo "Expo MCP not configured: set EXPO_MCP_BEARER_TOKEN to enable it"
       fi
       codex mcp list --json || true
-      ( cd "$workspace" && npx -y skills add expo/skills )
+      ( cd "$workspace" && npx -y skills add expo/skills --yes )
     } >"$out/c-plugin.log" 2>&1 || \
       echo "  ⚠️  npx skills add expo/skills failed (continuing; see c-plugin.log)"
     ( cd "$workspace" && $TO codex exec "$prompt" ) 2>&1 | tee "$out/c-agent.log"

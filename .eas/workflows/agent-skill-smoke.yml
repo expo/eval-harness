@@ -1,0 +1,49 @@
+name: agent-skill-smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      agent:
+        type: choice
+        options:
+          - claude
+          - codex
+        default: codex
+        required: false
+        description: Coding agent to smoke-test
+      agent_model:
+        type: string
+        default: ''
+        required: false
+        description: Optional model alias/name; defaults to sonnet for Claude and gpt-5-mini for Codex
+      smoke_skill:
+        type: string
+        default: native-data-fetching
+        required: false
+        description: Expo skill/guidance to ask the agent to use
+
+jobs:
+  smoke:
+    runs_on: linux-medium
+    environment: production
+    env:
+      AGENT: ${{ inputs.agent || 'codex' }}
+      AGENT_MODEL: ${{ inputs.agent_model || '' }}
+      SMOKE_SKILL: ${{ inputs.smoke_skill || 'native-data-fetching' }}
+    steps:
+      - uses: eas/checkout
+
+      - name: Run agent skill smoke
+        run: bash ./scripts/agent-skill-smoke.sh
+
+      - name: Package smoke output
+        if: ${{ always() }}
+        run: tar -czf agent-skill-smoke.tar.gz skill-smoke-out
+
+      - name: Upload smoke output
+        if: ${{ always() }}
+        uses: eas/upload_artifact
+        with:
+          type: other
+          name: agent-skill-smoke
+          path: agent-skill-smoke.tar.gz
