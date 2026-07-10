@@ -21,11 +21,6 @@ on:
         default: eval_harness/app_evaluator/prds/notes/prd/mvp.txt
         required: false
         description: PRD path under eval_harness/
-      test_plan:
-        type: string
-        default: eval_harness/app_evaluator/test_plans/primitives/test_insert.txt
-        required: false
-        description: Test plan file or directory under eval_harness/
 
 jobs:
   author_app:
@@ -35,7 +30,6 @@ jobs:
       AGENT: ${{ inputs.agent || 'claude-code' }}
       AGENT_MODEL: ${{ inputs.agent_model || '' }}
       PRD: ${{ inputs.prd || 'eval_harness/app_evaluator/prds/notes/prd/mvp.txt' }}
-      TEST_PLAN: ${{ inputs.test_plan || 'eval_harness/app_evaluator/test_plans/primitives/test_insert.txt' }}
     steps:
       - uses: eas/checkout
 
