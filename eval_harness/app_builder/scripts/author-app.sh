@@ -25,6 +25,7 @@ AGENT_MODEL="${AGENT_MODEL:-}"
 if [ -z "$AGENT_MODEL" ]; then
   if [ "$AGENT" = "codex" ]; then AGENT_MODEL="${CODEX_MODEL:-gpt-5-mini}"; else AGENT_MODEL="sonnet"; fi
 fi
+METRO_MODE="dev-build"
 PRD="${PRD:-eval_harness/prds/hot_chocolate/prd/mvp.txt}"
 export AGENT AGENT_MODEL METRO_MODE PRD
 
