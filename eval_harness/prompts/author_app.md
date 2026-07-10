@@ -43,13 +43,36 @@ A self-contained Expo project that the harness can build and run with
   Use Expo tooling (`npx create-expo-app`, `npx expo install`, or current Expo
   docs) so dependency versions match the requested SDK.
 - Do **not** start Metro, run `expo run:ios`, or launch the app yourself — the
-  harness owns build, serve, and evaluation. Your job is to author correct code.
-  You **must** run `npm install` before stopping. If it fails, repair the project
-  and rerun it until it succeeds.
+  harness owns serving and driving the app on-device. Your job is to author
+  correct code and verify it actually compiles as a native app. You **must** run
+  `npm install` before stopping. If it fails, repair the project and rerun it
+  until it succeeds.
   You **must** also run `npx expo install --check` before stopping. If it reports
   incompatible packages, repair the versions with Expo tooling and rerun it until
   it succeeds.
-- When the app fully satisfies the PRD, `npm install` has succeeded, and
-  `npx expo install --check` has succeeded, stop.
+- You **should** also verify the app builds as a real native binary using the
+  Expo ecosystem's own cloud build tooling — `npm install` and `expo install
+  --check` catch dependency issues, not native compile errors, and those are
+  common enough to be worth catching before you stop. This environment may be
+  authenticated against an EAS account non-interactively via `EXPO_TOKEN`.
+  Ensure your project's `eas.json` has a build profile named `agent-verify` with
+  `"ios": {"simulator": true}` (create the file with this profile if it doesn't
+  exist yet — this is a fast, signing-free simulator build meant only for this
+  verification, not for distribution), then run:
+
+      eas init --id "$EAS_PROJECT_ID" --non-interactive --force
+      eas build --platform ios --profile agent-verify --non-interactive
+
+  Read the build output. If it fails for a reason you can fix (a real compile
+  error in your code/config), diagnose and fix it, then rebuild. If `eas`
+  reports you are not authenticated, or `eas init`/`eas build` fails for a
+  reason unrelated to your app's code (missing token, account/permission
+  error, project-linking mismatch), do **not** keep retrying the same command —
+  note in your final summary that native-build verification could not run and
+  why, and proceed. This step must never block you from stopping once the PRD
+  is satisfied and the two checks above have succeeded.
+- When the app fully satisfies the PRD, `npm install` has succeeded, and `npx
+  expo install --check` has succeeded, stop — whether or not the `eas build`
+  verification above was able to run.
 
 The PRD follows.

@@ -50,7 +50,10 @@ eas env:push production --path .env
 
 Required for Claude Code authoring and evaluator runs: `ANTHROPIC_API_KEY`.
 Required for Codex authoring: `OPENAI_API_KEY`.
-Optional: `BRAINTRUST_API_KEY` plus `BRAINTRUST_PROJECT` for trace pushes.
+Optional: `EXPO_TOKEN` (an Expo Robot User access token) so the coding agent can
+run its own `eas build` self-verification step during authoring; see
+`env.default` for details. Optional: `BRAINTRUST_API_KEY` plus
+`BRAINTRUST_PROJECT` for trace pushes.
 
 Expo project routing is controlled by `app.config.js`. Override these env vars
 when running the same branch under another Expo account:

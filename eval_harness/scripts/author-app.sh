@@ -54,6 +54,12 @@ if [ "$AUTHORING_MODE" = "skill_case" ]; then
 fi
 export AGENT AGENT_MODEL METRO_MODE AUTHORING_MODE PRD TEST_PLAN SKILL_CASE_SPEC SKILL_SCENARIO
 
+# Lets the agent's own `eas init --id "$EAS_PROJECT_ID"` (see author_app.md) link its freshly
+# authored project to the same EAS project the harness itself uses, rather than needing to mint
+# a new one per run. Same default/override convention as app.config.js.
+EAS_PROJECT_ID="${EAS_PROJECT_ID:-338f6455-57a3-49c9-a2e0-36e5a0577c77}"
+export EAS_PROJECT_ID
+
 ANTHROPIC_PROXY_PORT=8082
 OPENAI_PROXY_PORT=8083
 OTLP_PORT=4318
@@ -97,6 +103,10 @@ if [ "$AGENT" = "codex" ]; then
   npm install -g @openai/codex >"$OUT/a-codex-install.log" 2>&1
   codex --version >/dev/null 2>&1; eval::gate $? "codex CLI install"
 fi
+
+npm install -g eas-cli >"$OUT/a-eas-cli-install.log" 2>&1
+eas --version >/dev/null 2>&1; eval::gate $? "eas-cli install"
+if [ -n "${EXPO_TOKEN:-}" ]; then echo "  EXPO_TOKEN bound (len ${#EXPO_TOKEN}); eas build available to the agent"; else echo "  EXPO_TOKEN unset: agent's own eas build self-verification step will fail"; fi
 
 echo "================= STAGE B: telemetry sidecars ================="
 eval::launch_proxy "$ROOT" anthropic https://api.anthropic.com "$ANTHROPIC_PROXY_PORT" "$TELEMETRY_DIR/anthropic.jsonl"
