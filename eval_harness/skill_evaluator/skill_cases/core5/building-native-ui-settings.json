@@ -1,0 +1,16 @@
+{
+  "id": "building-native-ui-settings",
+  "feature_focus": "native grouped settings screen with platform-safe styling",
+  "expected_skills": ["building-native-ui"],
+  "scenario_prds": {
+    "skills_off_tools_on": "eval_harness/skill_evaluator/prds/building-native-ui-settings/unmentioned.txt",
+    "skills_available_unmentioned": "eval_harness/skill_evaluator/prds/building-native-ui-settings/unmentioned.txt",
+    "skills_available_mentioned": "eval_harness/skill_evaluator/prds/building-native-ui-settings/mentioned.txt"
+  },
+  "static_uptake_checks": [
+    {"id": "uses_expo_router", "kind": "import", "target": "expo-router"},
+    {"id": "uses_switch", "kind": "text", "target": "Switch"},
+    {"id": "uses_automatic_insets", "kind": "text", "target": "contentInsetAdjustmentBehavior"},
+    {"id": "avoids_vector_icons", "kind": "text_absent", "target": "@expo/vector-icons"}
+  ]
+}

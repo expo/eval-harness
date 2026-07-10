@@ -1,0 +1,60 @@
+<test_plan>
+
+<purpose>
+Primitive: Data → Filtered query → Text search filter (also exercises Surface → Component library → Search bar) (APP-AGNOSTIC).
+Verify that a text search / filter input narrows a collection to the records matching the typed query (matching records remain, non-matching records are excluded), and that clearing the query restores the full collection. This covers both the data behavior (substring/text match filters results) and the search-bar component behavior (typing updates results; the clear affordance empties the query).
+
+This test plan is APP-AGNOSTIC. Use the supplied App PRD to determine which screen has a search / text-filter input, what it searches over, and what a matching vs. non-matching record looks like.
+</purpose>
+
+<seeding_and_precondition>
+Read the supplied App PRD to determine:
+
+- SEARCH SURFACE: which screen exposes a text search / filter input (a search bar over a list, feed, or catalog) and what field(s) it matches against (title, name, body, tags).
+- DATA SHAPE: how to guarantee there is a record that MATCHES a chosen query and at least one that does NOT, so narrowing is observable.
+
+Setup for the formal test:
+- Reach the search-capable screen, signing in / unlocking first if the PRD gates content.
+- Ensure the collection contains at least two records that are DISTINGUISHABLE by the searchable field — ideally create two with known, different identifying values (e.g. one titled with a unique string "ZZZMATCH", another clearly different) so a query for one excludes the other. If the app is pre-seeded with enough distinct records, you may use those, noting two specific records' searchable values.
+- Leave the formal test on the search surface with the full (unfiltered) collection visible. Do NOT type a query during setup.
+
+If the PRD indicates the app has no text search / filter input on any collection, record this primitive as not-applicable and immediately call complete_step with the note "N/A: PRD indicates app has no text search / filter surface."
+</seeding_and_precondition>
+
+<steps>
+<step>
+
+<name>
+test_query_narrows_to_matching_records
+</name>
+
+Tap into the search / filter input and type a query that matches ONE known record's searchable field but not the other (e.g. a distinctive substring of the matching record's title).
+
+Verify:
+- The matching record's row / item / card is visible in the filtered results
+- The known NON-matching record is NOT visible in the filtered results (the filter excluded it rather than showing everything regardless of query)
+- (non-fatal) The result set is consistent with the query as the query changes — i.e. results reflect the current input, not a stale pre-query list
+
+<points>3</points>
+</step>
+
+<step>
+
+<name>
+test_clearing_query_restores_full_collection
+</name>
+
+Clear the search query — use the search field's clear affordance (the "x" / clear button) if present, otherwise erase the typed characters.
+
+Verify:
+- After clearing, the previously-excluded record is visible again (the full / unfiltered collection is restored) — the filter was reversible, not a permanent removal
+- The search input now shows an empty query (the clear affordance emptied the field, or the erase left it blank)
+- (non-fatal) The clear affordance behaved as a one-tap reset where the PRD specifies one (a visible clear "x" emptied the field rather than requiring character-by-character deletion)
+
+<points>3</points>
+</step>
+</steps>
+
+<full_points>6</full_points>
+
+</test_plan>

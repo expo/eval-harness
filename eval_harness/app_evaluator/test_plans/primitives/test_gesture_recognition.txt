@@ -1,0 +1,47 @@
+<test_plan>
+
+<purpose>
+Primitive: Device → Gesture recognition → Swipe gesture + Long press (APP-AGNOSTIC).
+Verify that the app recognizes a non-tap gesture the PRD assigns a behavior to: a directional SWIPE fires its action when performed in the intended direction (and ideally does nothing in the wrong direction), or a LONG PRESS fires its action when the hold exceeds the threshold. Whichever gesture(s) the PRD exposes are the ones tested.
+
+This bundles two Gesture-recognition primitives; an app typically exposes one or the other (e.g. swipe-to-delete on a row, or long-press for a context menu). Pan tracking (continuous deltas) is a separate primitive not covered here.
+
+This test plan is APP-AGNOSTIC. Use the supplied App PRD to determine which gesture(s) the app assigns a behavior to and on which element.
+</purpose>
+
+<seeding_and_precondition>
+Read the supplied App PRD to determine:
+
+- GESTURE + TARGET + EXPECTED ACTION: which gesture the app handles and what it does. Common cases: swipe-LEFT on a list row reveals / performs delete or archive; long-press on an item opens a context menu or selection mode; swipe between cards/pages.
+- Choose the SIMPLEST gesture the PRD specifies that operates on an element you can create / reach.
+
+Setup for the formal test:
+- Reach the screen where the gesture applies (signed-in / unlocked), and ensure the target element exists (e.g. create a record so a swipeable row is present).
+- Do NOT perform the gesture during setup.
+
+If the PRD indicates the app assigns no behavior to any swipe or long-press gesture (interaction is tap-only), record this primitive as not-applicable and immediately call complete_step with the note "N/A: PRD indicates app has no swipe or long-press gesture behavior."
+</seeding_and_precondition>
+
+<steps>
+<step>
+
+<name>
+test_gesture_in_intended_form_fires_its_action
+</name>
+
+Perform the PRD-specified gesture on its target in the INTENDED form — e.g. swipe the row in the documented direction, or hold (long-press) the element past the threshold.
+
+Verify:
+- The gesture's documented action occurs (the swipe reveals / triggers its affordance such as a delete/archive button or removes the row; the long-press opens its context menu / selection mode / preview — whatever the PRD specifies) — confirming the gesture recognizer fired
+- The result is the SPECIFIC documented action, not an unrelated side effect (e.g. a swipe-to-delete revealed delete, rather than navigating into a detail as a plain tap would)
+- (non-fatal) For a SWIPE: a gesture in the OPPOSITE / wrong direction (or a too-short tap where a long-press is required) does NOT fire the action — the recognizer discriminates direction / duration rather than firing on any touch. (Perform this counter-check only if it does not risk an unintended destructive action.)
+
+[Commentary: If the gesture's action is destructive (e.g. swipe-to-delete that immediately deletes), it is acceptable to let it complete on a throwaway seeded record, or to stop at the revealed affordance without confirming, per what the PRD's gesture actually does.]
+
+<points>4</points>
+</step>
+</steps>
+
+<full_points>4</full_points>
+
+</test_plan>

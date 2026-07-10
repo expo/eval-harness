@@ -1,0 +1,336 @@
+# Product Requirements Document: Wiki Reader
+
+## Overview
+
+Wiki Reader is a mobile application that provides a clean, customizable interface for browsing Wikipedia. It replaces the default Wikipedia website or app experience with a more focused reading app that supports multi-language browsing, bookmarking, history tracking, and extensive display customization.
+
+---
+
+## Goals
+
+- Provide a fast, distraction-reduced reading experience for Wikipedia articles
+- Support discovery through random article browsing
+- Allow users to save articles and track their reading history
+- Offer extensive personalization of appearance and reading settings
+- Support Wikipedia in all available languages
+
+---
+
+## Target Platform
+
+Mobile (Android and iOS). The app should feel native to each platform while maintaining a consistent feature set.
+
+---
+
+## Navigation Structure
+
+The app uses a side drawer navigation menu accessible from the home screen. The drawer provides top-level navigation to:
+
+1. **Home** — main browsing screen
+2. **Saved** — bookmarked articles
+3. **History** — recently viewed articles
+4. **Settings** — preferences and configuration
+5. **About** — app information and credits
+
+---
+
+## Screens & Features
+
+### 1. Home Screen
+
+The home screen is the primary interface for reading Wikipedia articles.
+
+#### Header
+- A **menu button** that opens the side navigation drawer
+- A **search bar** with placeholder text "Search Wikipedia" that allows users to search for articles by title
+- A **shuffle button** that loads a random Wikipedia article
+
+#### Article Display
+- A full-screen web view renders the Wikipedia article
+- On app launch, a random Wikipedia article is automatically loaded
+- The article respects the user's selected Wikipedia language setting
+- A **progress bar** appears at the top of the screen while an article is loading and disappears once fully loaded
+- Users can **pull down to refresh** the current article
+
+#### Floating Toolbar
+A bottom floating toolbar appears over the article and contains the following actions:
+- **Shuffle** — load a new random article
+- **Translate** — translate the current article (placeholder for future feature)
+- **Share** — share the article link (placeholder for future feature)
+- **Download** — save the article for offline reading (placeholder for future feature)
+- **Scroll to top** — instantly scroll back to the top of the article
+- **Search** — open article search (placeholder for future feature)
+
+When the **Immersive Mode** setting is enabled, this toolbar and the search bar hide while the user is scrolling down, and reappear when the user scrolls up or stops.
+
+---
+
+### 2. Article Page View
+
+When opening an article from Saved or History, the article is shown in a dedicated page view:
+
+- The article title is displayed in the page header
+- A progress bar shows loading state
+- The full Wikipedia article is rendered in a web view
+- Display settings (theme, font size, font style, image settings, etc.) apply here as they do on the Home screen
+
+---
+
+### 3. Saved Articles Screen
+
+Allows users to manage articles they have bookmarked.
+
+#### Header
+- Title: "Saved"
+- A **delete button** in the header to trigger article deletion
+
+#### Empty State
+- An icon and the message "No saved articles"
+- Supporting text: "Articles you save will appear here"
+
+#### Article List (when articles exist)
+- If saved articles span multiple Wikipedia languages, **language filter chips** appear at the top of the list, allowing the user to toggle which languages are shown
+- Articles are grouped by language when multiple languages are present; groups are not shown if only one language exists
+- Each article item displays:
+  - A placeholder avatar showing the first letter of the article title
+  - The article title
+  - The article description or excerpt
+- Tapping an article opens it in the Article Page View
+
+#### Deletion
+- Tapping the header delete button opens a dialog with context-sensitive options:
+  - If an article is selected: option to delete that specific article
+  - If no article is selected: option to delete all saved articles
+- User must confirm before deletion proceeds
+
+---
+
+### 4. History Screen
+
+Shows all Wikipedia articles the user has previously viewed, in reverse chronological order.
+
+#### Header
+- Title: "History"
+- A **delete button** that clears all history immediately (no confirmation required)
+
+#### Empty State
+- An icon and the message "No history items"
+- Supporting text: "Articles you view will appear here"
+
+#### Article List (when history exists)
+- Articles are grouped under date headers:
+  - "Today"
+  - "Yesterday"
+  - Specific date for older entries (e.g., "June 5")
+- Within each group, articles appear in reverse chronological order
+- Each article item shows:
+  - Article title
+  - Article description
+  - Time the article was viewed (e.g., "2:30 PM"), displayed on the right
+- Tapping an article opens it in the Article Page View
+
+---
+
+### 5. Settings Screen
+
+The Settings screen organizes all user preferences into collapsible sections.
+
+---
+
+#### Appearance
+
+**Color Scheme**
+- Opens a color picker dialog
+- User selects from 13 preset accent colors:
+  - Coral, Pink, Magenta, Blue, Cyan, Light Cyan, Teal, Green, Lime, Yellow, Orange, Peach, White
+- The currently selected color is indicated with a checkmark
+- The selected color is used as the app's primary accent color throughout the UI
+
+**Theme**
+- Opens a dialog with three options:
+  - Light
+  - Dark
+  - System default (follows the device's current setting)
+- Default: System default
+
+**Black Theme** *(toggle)*
+- When enabled and the app is in dark mode, uses pure black (#000000) instead of dark gray as the background
+- Supporting text explains that this applies only in dark mode
+
+---
+
+#### Language
+
+**Wikipedia Language**
+- Opens a searchable bottom sheet listing all available Wikipedia language editions (100+)
+- Each language is shown with its native name and its Wikipedia name in that language
+- A "Recent languages" section shows previously selected languages at the top
+- A search bar filters the list in real time
+- Selecting a language changes the language of all Wikipedia articles loaded in the app
+
+**App Language**
+- Opens a searchable bottom sheet for the app's interface language
+- Options include "System default" and all supported locales
+- A search bar filters the list in real time
+- Changing this setting translates all app UI strings into the selected language
+
+---
+
+#### Typography
+
+**Font Style** *(toggle)*
+- Switches article text between **Sans-serif** and **Serif** typeface
+- Default: Sans-serif
+
+**Font Size** *(slider)*
+- Adjusts the base font size for article text
+- Range: 10–22px
+- Current value is shown numerically alongside the slider
+
+---
+
+#### Content & Display
+
+**Data Saver** *(toggle)*
+- When enabled, images are not loaded on the home feed
+- Images in individual article page views are unaffected
+
+**Feed** *(toggle)*
+- When enabled, the home screen shows trending Wikipedia articles, news, and other discovery content on startup
+- When disabled, the home screen opens directly to the last or a random article
+
+**Expand Sections** *(toggle)*
+- When enabled, all collapsible sections within an article are expanded by default
+- When disabled, sections start collapsed and the user expands them manually
+
+**Image Background** *(toggle)*
+- When enabled, a white background is added behind transparent images
+- Improves visibility of images that use transparency in dark mode
+
+**Immersive Mode** *(toggle)*
+- When enabled, the search bar and floating toolbar hide automatically while the user scrolls down, and reappear when scrolling stops or reverses
+- Enabled by default on smaller screens
+- Designed to maximize article reading area
+
+**Render Math Expressions** *(toggle)*
+- When enabled, LaTeX and other mathematical markup within articles is rendered as formatted math
+- When disabled, raw markup may be shown, improving performance at the cost of readability
+- Supporting text notes that enabling this uses additional data
+
+---
+
+#### History & Search
+
+**Save History** *(toggle)*
+- When enabled, viewed articles are recorded in the History screen
+- When disabled, no new history is saved and the History screen remains empty
+
+**Save Search History** *(toggle)*
+- When enabled, search queries are saved for later reference
+- When disabled, searches are not recorded
+
+---
+
+#### Default App
+
+- An informational card explains how to set Wiki Reader as the default app to handle Wikipedia links (i.e., links opened from other apps that point to Wikipedia)
+- Two buttons: **Settings** (opens device settings to configure default apps) and **Instructions** (provides step-by-step guidance)
+
+---
+
+### 6. About Screen
+
+Provides information about the app, its dependencies, and its credits.
+
+#### App Header
+- App name, icon, and version number
+
+#### App Information
+- **Version** — displays the current app version
+- **Source Code** — tappable link to the app's source code repository
+- **Original App** — tappable link to the original Wikipedia reader app that inspired this one
+- **License** — displays the license type (MIT) and links to the full license text
+
+#### Built With
+- Links to the major frameworks or tools used to build the app (no version-specific detail needed in the UI; just names with links to documentation)
+
+#### Credits
+- **Original Author** — name and GitHub profile link for the original app author
+- **Donate** — link to support the original author (e.g., GitHub Sponsors)
+
+#### Wikipedia
+- **Wikipedia** — link to Wikipedia's main page
+- **Support Wikipedia** — link to the Wikimedia Foundation donation page
+
+All items on this screen are tappable and open their respective URLs in the device's default browser.
+
+---
+
+## Data & Storage
+
+### Article Saving
+- Users can save any Wikipedia article from the article view for later access
+- Saved articles persist across app sessions
+- Saved articles retain their title, description, URL, and language
+
+### History
+- Every Wikipedia article the user views is automatically recorded with a timestamp
+- History entries include: title, description, URL, language, and date/time viewed
+- History respects the "Save History" toggle in Settings
+
+### Search History
+- Search queries are stored if "Save Search History" is enabled
+- Search history is accessible from the search interface
+
+### Settings Persistence
+- All user settings are persisted locally across sessions
+- Default values apply on first launch
+
+---
+
+## Wikipedia Integration
+
+- The app loads Wikipedia articles using standard Wikipedia URLs
+- Supports all Wikipedia language editions
+- Random articles are loaded via Wikipedia's built-in random article endpoint
+- Articles render with their standard Wikipedia styling, subject to font and theme overrides applied by the app
+- Internal Wikipedia links (clicking a link within an article) navigate within the app
+
+---
+
+## Deep Linking
+
+- The app registers a custom URL scheme (`wikireader://`) for deep linking
+- The app can be set as the default handler for Wikipedia URLs on the device, so that Wikipedia links opened from other apps open in Wiki Reader instead of a browser
+
+---
+
+## Display & Theming
+
+- The app supports **light**, **dark**, and **system-default** themes
+- An optional **black theme** variant uses pure black backgrounds in dark mode
+- The accent/primary color is user-configurable from 13 preset options
+- Font size and font family (serif vs. sans-serif) are user-configurable and apply to article text
+- The theme and font settings propagate into the Wikipedia web view (articles reflect the app's dark/light mode and font preferences)
+
+---
+
+## Accessibility & UX
+
+- The app is responsive to different screen sizes
+- Immersive mode improves the reading experience on smaller screens
+- Empty states on Saved and History screens include an icon and descriptive text to orient new users
+- Loading states are communicated via a progress bar rather than a spinner, giving a sense of progress
+
+---
+
+## Out of Scope (Placeholder Features)
+
+The following features are present in the UI as visual placeholders but are not functional in the current version:
+
+- Article translation
+- Article sharing
+- Offline article download
+- Full search functionality (beyond UI affordance)
+
+These may be implemented in a future version.

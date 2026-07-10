@@ -1,0 +1,61 @@
+<test_plan>
+
+<purpose>
+Primitive: Surface → Component library → Empty state (APP-AGNOSTIC).
+Verify that the app renders an explicit empty-state indicator on a screen that displays a collection (list, feed, catalog, search results) when that collection contains zero items, AND that this indicator disappears once at least one item is present.
+
+This test plan is APP-AGNOSTIC. Use the supplied App PRD to determine which screen in this app has a collection that can legitimately be empty, and what the PRD-specified empty-state UX should look like.
+</purpose>
+
+<seeding_and_precondition>
+Read the supplied App PRD to determine an EMPTY-STATE-CAPABLE SCREEN in this app:
+
+- Common patterns: a notes list with zero notes, a logbook with zero flights, a feed with zero posts (or for a fresh user with no active relationships), a search results screen with a query that returns nothing, an admin panel that is initially empty.
+- The PRD may explicitly specify empty-state messaging like "No notes yet", "No flights logged", "No results", etc. Use that as a reference for what to expect.
+
+To reach a zero-items state:
+- Sign in / unlock if needed per PRD.
+- Navigate to the empty-state-capable screen. If the screen would naturally have items (e.g., the app pre-seeds content), use whichever path forces it to zero — typically: delete any existing items, OR use a search that returns nothing, OR navigate to a screen that is empty by default for a fresh account.
+
+If the PRD indicates no screen in this app would ever legitimately display an empty state (e.g., a game that always has pre-populated questions, a curated catalog that is never empty), record this primitive as not-applicable and immediately call complete_step with the note "N/A: PRD indicates app has no empty-state-capable screen."
+</seeding_and_precondition>
+
+<steps>
+<step>
+
+<name>
+test_empty_state_visible_when_collection_is_empty
+</name>
+
+Ensure the collection-capable screen is currently showing a zero-items state (per the setup steps above).
+
+Observe the screen.
+
+Verify:
+- An empty-state indicator is visible — this can be a testID-bearing element (e.g. `id="empty-state-..."` or similar), a visible message containing PRD-specified text (e.g. "No notes yet", "Create your first X", or similar), or a clear visual signal that the collection has zero items
+- No item / row / card from the collection is currently visible on screen (consistent with the zero-items state)
+- (non-fatal) The empty-state messaging is contextually meaningful for this app's domain (mentions the app's entity type or invites action), not a generic / placeholder error message
+
+<points>3</points>
+</step>
+
+<step>
+
+<name>
+test_empty_state_hidden_when_collection_has_items
+</name>
+
+Add a single item to the collection — using the PRD's create / add affordance (e.g., New Note, Create Post, Log Flight, etc.) with PRD-compliant throwaway values. After adding, navigate back to the collection's primary view if needed.
+
+Verify:
+- A row / item / card representing the just-added entity is now visible in the collection view
+- The empty-state indicator from the previous step is NO LONGER visible (the testID is absent, or the empty-state message is no longer on screen)
+- (non-fatal) The transition from empty to populated happened cleanly — no leftover empty-state element overlaid on the populated list
+
+<points>3</points>
+</step>
+</steps>
+
+<full_points>6</full_points>
+
+</test_plan>

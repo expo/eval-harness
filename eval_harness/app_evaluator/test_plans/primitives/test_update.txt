@@ -1,0 +1,49 @@
+<test_plan>
+
+<purpose>
+Primitive: Data → Record CRUD → Update (APP-AGNOSTIC).
+Verify that editing an existing record persists the change: after modifying one field and saving, the new value is reflected in the record's representation (in its detail and/or its list row), and re-reading the record shows the updated value rather than the old one.
+
+This test plan is APP-AGNOSTIC. Use the supplied App PRD to determine the app's primary entity, how an existing record is edited (an edit affordance on the detail screen, an inline editor, an "Edit" button), and which field is safe to modify.
+</purpose>
+
+<seeding_and_precondition>
+Read the supplied App PRD to determine:
+
+- ENTITY + EDIT AFFORDANCE: the primary record type and how the app exposes editing an existing record (tap row → editable detail; an "Edit" button; long-press → edit; etc.).
+- EDITABLE FIELD: a field that is safe to change and observable afterward (a title, a name, a text body, a numeric value). Avoid fields with strict validation unless you can supply a valid new value per the PRD.
+
+Setup for the formal test:
+- Reach the list / feed / catalog, signing in / unlocking first if the PRD gates content.
+- Ensure a record you can edit exists — prefer to create one with a known starting value (e.g. a recognizable title) so the before/after change is unambiguous.
+- Open the record's edit affordance so the formal test starts ready to modify a field. (You may stop just before changing the value.)
+
+If the PRD indicates records are immutable / read-only once created (no edit affordance anywhere), record this primitive as not-applicable and immediately call complete_step with the note "N/A: PRD indicates records cannot be edited after creation."
+</seeding_and_precondition>
+
+<steps>
+<step>
+
+<name>
+test_edit_persists_and_reflects_new_value
+</name>
+
+Change the chosen editable field to a NEW, distinct value (different from its current value and recognizable, e.g. append or replace with a unique throwaway string). Confirm the new value landed in the field before saving (capture the screen and verify the field shows the new value). Then complete the save / submit flow per the PRD's terminology.
+
+Verify:
+- After saving, the record's representation shows the NEW value (in its detail surface and/or its list row, wherever the PRD says the field is displayed)
+- The OLD value is no longer shown for that field anywhere it was previously displayed (the update replaced it rather than creating a duplicate or leaving the stale value)
+- (non-fatal) Fields that were NOT edited remain unchanged (the update was scoped to the one field, not a blanket overwrite that cleared other fields)
+
+To confirm persistence beyond the immediate render, navigate away from the record (back to the list) and re-open it.
+
+Verify:
+- On re-read, the edited field still shows the NEW value (the change persisted, not just a transient in-memory update)
+
+<points>4</points>
+</step>
+</steps>
+
+<full_points>4</full_points>
+
+</test_plan>

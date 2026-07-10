@@ -1,0 +1,229 @@
+# End-to-end Evaluation Harness I, split across two workers:
+#   linux: PRD → coding agent authors an Expo app → upload authored-app artifact
+#   macOS: download authored app → native iOS build → evaluator scores it →
+#          upload eval output artifact.
+#   linux: download authored app → analyze skill trigger quality + static uptake
+# Manual trigger only (consumes CI minutes + does a native iOS build).
+#   eas workflow:run .eas/workflows/eval-e2e.yml
+#
+# Secrets come ONLY from the `production` environment (auto-injected as $VAR).
+# Required: ANTHROPIC_API_KEY. Optional: OPENAI_API_KEY (AGENT=codex),
+# GCS_BUCKET + GCP_SA_KEY (mirror exfil), BRAINTRUST_API_KEY (trace push).
+# Braintrust defaults to project `expo-evals`; override with BRAINTRUST_PROJECT,
+# BRAINTRUST_CC_PROJECT, or BRAINTRUST_EVAL_PROJECT.
+# Push them with:  eas env:push production --path .env  (Secret visibility)
+name: eval-e2e
+
+on:
+  workflow_dispatch:
+    inputs:
+      agent:
+        type: choice
+        options:
+          - claude-code
+          - codex
+        default: claude-code
+        required: false
+        description: Coding agent to author the app
+      agent_model:
+        type: string
+        default: ''
+        required: false
+        description: Optional model alias/name; defaults to sonnet for Claude Code and gpt-5-mini for Codex
+      prd:
+        type: string
+        default: eval_harness/app_evaluator/prds/hot_chocolate/prd/mvp.txt
+        required: false
+        description: PRD path under eval_harness/
+      test_plan:
+        type: string
+        default: eval_harness/app_evaluator/test_plans/primitives
+        required: false
+        description: Test plan file or directory under eval_harness/
+      ios_app_mode:
+        type: choice
+        options:
+          - dev-client
+          - release
+        default: release
+        required: false
+        description: iOS app mode to build for evaluation
+      run_eval_ios:
+        type: boolean
+        default: false
+        required: false
+        description: Run the native iOS evaluator job
+      run_eval_skill:
+        type: boolean
+        default: true
+        required: false
+        description: Run the skill-eval analyzer job
+      authoring_mode:
+        type: choice
+        options:
+          - prd
+          - skill_case
+        default: prd
+        required: false
+        description: Author from a direct PRD path or a skill-case scenario PRD
+      skill_case_spec:
+        type: string
+        default: eval_harness/skill_evaluator/skill_cases/core5/native-data-fetching.json
+        required: false
+        description: Skill-eval case spec path
+      skill_scenario:
+        type: choice
+        options:
+          - skills_off_tools_on
+          - skills_available_unmentioned
+          - skills_available_mentioned
+        default: skills_available_unmentioned
+        required: false
+        description: Skill-eval scenario label and capability mode
+
+jobs:
+  author_app:
+    runs_on: linux-medium
+    environment: production
+    env:
+      AGENT: ${{ inputs.agent || 'claude-code' }}
+      AGENT_MODEL: ${{ inputs.agent_model || '' }}
+      AUTHORING_MODE: ${{ inputs.authoring_mode || 'prd' }}
+      PRD: ${{ inputs.prd || 'eval_harness/app_evaluator/prds/hot_chocolate/prd/mvp.txt' }}
+      TEST_PLAN: ${{ inputs.test_plan || 'eval_harness/app_evaluator/test_plans/primitives' }}
+      SKILL_CASE_SPEC: ${{ inputs.skill_case_spec || '' }}
+      SKILL_SCENARIO: ${{ inputs.skill_scenario || 'skills_available_unmentioned' }}
+    steps:
+      - uses: eas/checkout
+
+      - name: Check ANTHROPIC_API_KEY bound
+        run: |
+          if [ -n "${ANTHROPIC_API_KEY:-}" ]; then echo "ANTHROPIC_API_KEY bound (len ${#ANTHROPIC_API_KEY})"; else echo "MISSING"; exit 1; fi
+
+      - name: Author app with coding agent
+        run: bash ./eval_harness/scripts/author-app.sh
+
+      # Carries both the authored workspace and author-side diagnostics to macOS.
+      - name: Package authored app
+        if: ${{ always() }}
+        run: |
+          tar \
+            --exclude 'agent-workspace/*/node_modules' \
+            --exclude 'agent-workspace/*/.expo' \
+            --exclude 'agent-workspace/*/ios/build' \
+            --exclude 'agent-workspace/*/android/.gradle' \
+            --exclude 'agent-workspace/*/android/build' \
+            --exclude 'eval-out/*/codex-home/skills' \
+            --exclude 'eval-out/*/codex-home/.tmp' \
+            --exclude 'eval-out/*/codex-home/tmp' \
+            --exclude 'eval-out/*/codex-home/shell_snapshots' \
+            --exclude 'eval-out/*/codex-home/state_*.sqlite*' \
+            --exclude 'eval-out/*/codex-home/memories_*.sqlite*' \
+            --exclude 'eval-out/*/codex-home/goals_*.sqlite*' \
+            -czf authored-app.tar.gz agent-workspace eval-out
+
+      - name: Upload authored app
+        if: ${{ always() }}
+        uses: eas/upload_artifact
+        with:
+          type: other
+          name: authored-app
+          path: authored-app.tar.gz
+
+  eval_ios:
+    if: ${{ inputs.run_eval_ios }}
+    needs: [author_app]
+    runs_on: macos-medium
+    environment: production
+    env:
+      AGENT: ${{ inputs.agent || 'claude-code' }}
+      AGENT_MODEL: ${{ inputs.agent_model || '' }}
+      AUTHORING_MODE: ${{ inputs.authoring_mode || 'prd' }}
+      PRD_OVERRIDE: ${{ inputs.prd || '' }}
+      TEST_PLAN_OVERRIDE: ${{ inputs.test_plan || '' }}
+      EVAL_IOS_APP_MODE: ${{ inputs.ios_app_mode || 'release' }}
+    steps:
+      - uses: eas/checkout
+
+      - name: Check ANTHROPIC_API_KEY bound
+        run: |
+          if [ -n "${ANTHROPIC_API_KEY:-}" ]; then echo "ANTHROPIC_API_KEY bound (len ${#ANTHROPIC_API_KEY})"; else echo "MISSING"; exit 1; fi
+
+      - name: Download authored app
+        uses: eas/download_artifact
+        id: download_author
+        with:
+          name: authored-app
+
+      - name: Unpack authored app
+        run: |
+          artifact_path="${{ steps.download_author.outputs.artifact_path }}"
+          echo "download_author artifact_path=$artifact_path"
+          if [ -d "$artifact_path" ]; then
+            echo "downloaded artifact directory contents:"
+            find "$artifact_path" -maxdepth 2 -mindepth 1 -print | sort | head -40
+            if [ -f "$artifact_path/authored-app.tar.gz" ]; then
+              tar -xzf "$artifact_path/authored-app.tar.gz"
+            elif [ -d "$artifact_path/agent-workspace" ] || [ -d "$artifact_path/eval-out" ]; then
+              cp -R "$artifact_path"/. .
+            else
+              echo "Could not locate authored app contents in $artifact_path"
+              exit 1
+            fi
+          else
+            ls -lah "$artifact_path"
+            tar -xzf "$artifact_path"
+          fi
+
+      - name: Build, run, and evaluate authored app
+        run: bash ./eval_harness/scripts/eval-ios-app.sh
+
+      # tar ourselves -> clean `eval-out/` root (upload_artifact bakes in abs paths)
+      - name: Package eval output
+        if: ${{ always() }}
+        run: |
+          mkdir -p eval-out
+          tar -czf eval-out.tar.gz eval-out
+
+      # type: other = generic artifact for custom jobs.
+      - name: Upload eval output
+        if: ${{ always() }}
+        uses: eas/upload_artifact
+        with:
+          type: other
+          name: eval-e2e-output
+          path: eval-out.tar.gz
+
+  eval_skill:
+    if: ${{ inputs.run_eval_skill }}
+    needs: [author_app]
+    runs_on: linux-medium
+    environment: production
+    steps:
+      - uses: eas/checkout
+
+      - name: Download authored app
+        uses: eas/download_artifact
+        id: download_author
+        with:
+          name: authored-app
+
+      - name: Analyze authored app for skill eval
+        run: |
+          CASE_SPEC='${{ inputs.skill_case_spec }}' \
+          AUTHORED_ARTIFACT='${{ steps.download_author.outputs.artifact_path }}' \
+          SCENARIO='${{ inputs.skill_scenario }}' \
+          OUT_DIR=skill-eval-report \
+          bash ./eval_harness/scripts/eval-skill-use.sh
+
+      - name: Package skill-eval report
+        if: ${{ always() }}
+        run: tar -czf skill-eval-report.tar.gz skill-eval-report
+
+      - name: Upload skill-eval report
+        if: ${{ always() }}
+        uses: eas/upload_artifact
+        with:
+          type: other
+          name: skill-eval-report
+          path: skill-eval-report.tar.gz

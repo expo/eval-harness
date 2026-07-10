@@ -1,0 +1,50 @@
+<test_plan>
+
+<purpose>
+Primitive: Navigation → Modal presentation → Modal present (APP-AGNOSTIC).
+Verify that an action which the PRD specifies should present a confirmation / warning modal does in fact present one, with the expected structural pieces: a dialog overlay, messaging conveying the action's consequence, and at least two action affordances (typically a confirm and a cancel/dismiss).
+
+This test plan is APP-AGNOSTIC. Use the supplied App PRD to determine which action in this app should present a modal — typical examples: deleting a record, logging out, leaving an in-progress game, "are you sure" warnings, or "low data / cannot proceed" warnings.
+</purpose>
+
+<seeding_and_precondition>
+Read the supplied App PRD to determine a MODAL-TRIGGERING ACTION that this app exposes. Common patterns:
+
+- A destructive action that requires confirmation (delete a record, end a session, log out, cancel a booking).
+- A guard or warning that appears under an edge condition (PRD-specified "warning" or "are you sure" prompts).
+- A confirmation before a billing or commitment step.
+
+Pick the SIMPLEST modal-triggering action specified in the PRD — ideally a destructive confirmation for a record the agent can create and then delete in setup. Avoid actions that require external dependencies (network calls, third-party services) or multi-step preconditions.
+
+Setup for the formal test:
+- Navigate to whichever screen the modal-triggering action is reachable from.
+- Create or seed any record / state that the action needs to operate on (e.g., create a note in order to delete it; create a flight in order to delete it).
+- The formal test then triggers the action and verifies the modal's structure. Do NOT confirm the destructive action — only trigger the modal and verify it, then dismiss via the cancel/close affordance at the end so the underlying state remains intact.
+
+If the PRD indicates the app has no modal-presenting actions at all (no confirmations, no warnings, no destructive-action guards), record this primitive as not-applicable and immediately call complete_step with the note "N/A: PRD indicates app has no modal-presenting actions."
+</seeding_and_precondition>
+
+<steps>
+<step>
+
+<name>
+test_action_presents_modal_with_expected_structure
+</name>
+
+Trigger the modal-presenting action identified from the PRD (e.g., tap the delete affordance on a seeded record, tap log out, etc.).
+
+Verify:
+- A modal / dialog overlay is now visible on the screen (a testID-bearing dialog element, an iOS UIAlertController, or another clearly-modal overlay)
+- The dialog contains text that conveys the action's nature or consequence (e.g. for a delete: text including "permanent" / "cannot be undone" / "delete" / "remove" / similar PRD-specified language)
+- The dialog exposes at least two distinct action affordances — one to confirm / proceed with the original action, and one to dismiss / cancel without proceeding
+- (non-fatal) The dialog's confirm affordance is visually emphasized as destructive (different color, red, distinct styling) when the original action is destructive, per PRD if specified
+
+[Commentary: Do NOT tap the confirm affordance in this test. Tap the cancel / dismiss affordance after the verifications above so the underlying state remains intact.]
+
+<points>4</points>
+</step>
+</steps>
+
+<full_points>4</full_points>
+
+</test_plan>

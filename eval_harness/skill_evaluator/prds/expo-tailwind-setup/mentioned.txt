@@ -1,0 +1,1 @@
+Build a styled Expo profile screen using expo-tailwind-setup guidance and utility classes for layout, spacing, and color.

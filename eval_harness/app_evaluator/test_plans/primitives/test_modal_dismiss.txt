@@ -1,0 +1,47 @@
+<test_plan>
+
+<purpose>
+Primitive: Navigation → Modal presentation → Modal dismiss (APP-AGNOSTIC).
+Verify that a presented modal can be DISMISSED (via its close / cancel affordance, a back action, or a drag-to-dismiss gesture) and that dismissing it restores the underlying screen to its prior state — the screen that was behind the modal returns, intact, rather than being reset or replaced.
+
+This is the complement to the modal-present primitive: present verifies the overlay appears with the right structure; dismiss verifies it goes away cleanly and the context underneath is preserved.
+
+This test plan is APP-AGNOSTIC. Use the supplied App PRD to determine an action that presents a modal / sheet and how the app expects that modal to be dismissed.
+</purpose>
+
+<seeding_and_precondition>
+Read the supplied App PRD to determine:
+
+- MODAL-TRIGGERING ACTION: an action that presents a modal or sheet (a create form presented modally, a confirmation dialog, a detail presented as a sheet, a settings modal). Prefer a NON-destructive modal (e.g. a create form or info sheet) so dismissing it leaves no side effects; avoid a destructive-confirm modal here.
+- DISMISS AFFORDANCE: how the PRD expects dismissal — a Close / Cancel / "X" button, a back action, or drag-to-dismiss.
+
+Setup for the formal test:
+- Reach the screen from which the modal is presented (the "underlying" screen). Establish a small piece of observable state on it where feasible (note its scroll position or a visible record) so the "underlying restored to prior state" check is meaningful.
+- Do NOT present the modal during setup — the formal step presents it, then dismisses it.
+
+If the PRD indicates the app presents no modals / sheets at all, record this primitive as not-applicable and immediately call complete_step with the note "N/A: PRD indicates app presents no dismissible modals."
+</seeding_and_precondition>
+
+<steps>
+<step>
+
+<name>
+test_modal_dismisses_and_restores_underlying_screen
+</name>
+
+Note identifying content of the underlying screen. Present the modal via the PRD-specified action and confirm it is visible (a modal/sheet overlay is on screen).
+
+Then dismiss it using the PRD-specified affordance (tap Close / Cancel / "X", a back action, or a drag-down-to-dismiss gesture).
+
+Verify:
+- After dismissal, the modal / sheet overlay is no longer visible (it was removed, not merely scrolled or backgrounded)
+- The underlying screen is restored and is once again the active screen, showing the same identifying content it had before the modal was presented (it was preserved beneath the modal, not reset to a different screen or reloaded from scratch)
+- (non-fatal) Any prior state on the underlying screen (scroll position, a visible record, in-progress input) is intact after dismissal
+
+<points>4</points>
+</step>
+</steps>
+
+<full_points>4</full_points>
+
+</test_plan>

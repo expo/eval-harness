@@ -1,0 +1,118 @@
+# Analyze a prior authored-app artifact for Expo skill trigger quality, context
+# uptake, and optional outcome evidence from a prior evaluator artifact.
+#
+# Example:
+#   eas workflow:run .eas/workflows/eval-skill-use.yml \
+#     -F case_spec=eval_harness/skill_evaluator/skill_cases/core5/expo-ui-lists.json \
+#     -F authored_app_url='https://wf-artifacts.eascdn.net/.../authored-app.tar.gz?...' \
+#     -F scenario=skills_available_unmentioned
+name: eval-skill-use
+
+on:
+  workflow_dispatch:
+    inputs:
+      case_spec:
+        type: string
+        required: true
+        description: Skill-eval case spec path under eval_harness/skill_evaluator/skill_cases/
+      authored_app_artifact_id:
+        type: string
+        required: false
+        description: EAS artifact ID for an authored-app artifact
+      authored_app_url:
+        type: string
+        required: false
+        default: ''
+        description: Signed download URL for an authored-app.tar.gz artifact
+      eval_output_artifact_id:
+        type: string
+        required: false
+        default: ''
+        description: Optional EAS artifact ID for eval output
+      eval_output_url:
+        type: string
+        required: false
+        default: ''
+        description: Optional signed download URL for eval output tarball
+      scenario:
+        type: choice
+        options:
+          - skills_off_tools_on
+          - skills_available_unmentioned
+          - skills_available_mentioned
+        default: skills_available_unmentioned
+        required: true
+        description: Skill availability scenario for this artifact
+
+jobs:
+  skill_eval:
+    runs_on: linux-medium
+    environment: production
+    steps:
+      - uses: eas/checkout
+
+      - name: Check artifact input
+        run: |
+          if [ -z '${{ inputs.authored_app_artifact_id }}' ] && [ -z '${{ inputs.authored_app_url }}' ]; then
+            echo "Provide either authored_app_artifact_id or authored_app_url"
+            exit 1
+          fi
+
+      - name: Download authored app by artifact ID
+        uses: eas/download_artifact
+        id: download_author
+        if: ${{ inputs.authored_app_artifact_id }}
+        with:
+          artifact_id: ${{ inputs.authored_app_artifact_id }}
+
+      - name: Download authored app by signed URL
+        id: download_author_from_url
+        if: ${{ !inputs.authored_app_artifact_id && inputs.authored_app_url }}
+        run: |
+          AUTHORED_APP_URL='${{ inputs.authored_app_url }}'
+          mkdir -p authored-app-download
+          curl --fail --location --show-error "$AUTHORED_APP_URL" --output authored-app-download/authored-app.tar.gz
+          set-output artifact_path "$(pwd)/authored-app-download/authored-app.tar.gz"
+
+      - name: Download eval output by artifact ID
+        uses: eas/download_artifact
+        id: download_eval
+        if: ${{ inputs.eval_output_artifact_id }}
+        with:
+          artifact_id: ${{ inputs.eval_output_artifact_id }}
+
+      - name: Download eval output by signed URL
+        id: download_eval_from_url
+        if: ${{ !inputs.eval_output_artifact_id && inputs.eval_output_url }}
+        run: |
+          EVAL_OUTPUT_URL='${{ inputs.eval_output_url }}'
+          mkdir -p eval-output-download
+          curl --fail --location --show-error "$EVAL_OUTPUT_URL" --output eval-output-download/eval-output.tar.gz
+          set-output artifact_path "$(pwd)/eval-output-download/eval-output.tar.gz"
+
+      - name: Analyze skill-eval artifacts
+        run: |
+          CASE_SPEC='${{ inputs.case_spec }}'
+          AUTHORED_ARTIFACT='${{ steps.download_author.outputs.artifact_path || steps.download_author_from_url.outputs.artifact_path }}'
+          EVAL_ARTIFACT='${{ steps.download_eval.outputs.artifact_path || steps.download_eval_from_url.outputs.artifact_path }}'
+          if [ "$EVAL_ARTIFACT" = "undefined" ] || [ "$EVAL_ARTIFACT" = "null" ]; then
+            EVAL_ARTIFACT=""
+          fi
+          CASE_SPEC="$CASE_SPEC" \
+          AUTHORED_ARTIFACT="$AUTHORED_ARTIFACT" \
+          EVAL_ARTIFACT="$EVAL_ARTIFACT" \
+          SCENARIO='${{ inputs.scenario }}' \
+          OUT_DIR=skill-eval-report \
+          bash ./eval_harness/scripts/eval-skill-use.sh
+
+      - name: Package skill-eval report
+        if: ${{ always() }}
+        run: tar -czf skill-eval-report.tar.gz skill-eval-report
+
+      - name: Upload skill-eval report
+        if: ${{ always() }}
+        uses: eas/upload_artifact
+        with:
+          type: other
+          name: skill-eval-report
+          path: skill-eval-report.tar.gz

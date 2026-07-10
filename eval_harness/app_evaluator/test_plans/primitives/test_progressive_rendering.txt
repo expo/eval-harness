@@ -1,0 +1,50 @@
+<test_plan>
+
+<purpose>
+Primitive: Data → Pagination → Progressive rendering (APP-AGNOSTIC).
+Verify that a collection larger than one screenful renders incrementally: the first page of records is visible without waiting for the entire dataset, and scrolling toward the end of the current set causes additional records to appear (append) without losing or duplicating the records already shown.
+
+A black-box UI evaluator cannot inspect server range requests or row-limit headers; it can only observe the user-facing outcome — "more records appear as I scroll, the list keeps growing, and earlier records are not dropped or duplicated." This plan tests that observable behavior.
+
+This test plan is APP-AGNOSTIC. Use the supplied App PRD to determine which screen lists records, and how to ensure that screen holds more records than fit in one viewport.
+</purpose>
+
+<seeding_and_precondition>
+Read the supplied App PRD to determine:
+
+- PAGINATED SURFACE: which list / feed / catalog screen is expected to handle large datasets via incremental loading.
+- VOLUME: how to ensure the collection contains clearly more records than fit on one screen (so a second "page" exists to load). The app may be pre-seeded with many records; if not, and if creating dozens of records is infeasible within the seed budget, see the N/A clause below.
+
+Setup for the formal test:
+- Reach the list / feed / catalog, signing in / unlocking first if the PRD gates content.
+- Confirm the collection holds substantially more records than fit in the initial viewport (enough that scrolling reveals records not initially visible). Note an identifying value of a record at the TOP of the list so you can confirm it is still present after scrolling.
+
+If the PRD indicates the app's collections are inherently small (bounded to a handful of records that always fit on one screen) such that pagination cannot occur, record this primitive as not-applicable and immediately call complete_step with the note "N/A: PRD indicates collections are too small to paginate." Likewise, if the dataset cannot be made large enough within the seed budget to observe a second page, record N/A with the note "N/A: could not establish a dataset large enough to observe progressive rendering."
+</seeding_and_precondition>
+
+<steps>
+<step>
+
+<name>
+test_first_page_renders_then_scroll_appends_more
+</name>
+
+Observe the initial state of the list before scrolling.
+
+Verify:
+- A first set of records is visible promptly (the list rendered its first page rather than showing a blank screen while the whole dataset loads)
+
+Note one or more records currently visible (their identifying values), including the topmost. Then scroll the list down toward the bottom of the currently-loaded set (one or more swipe-UP gestures).
+
+Verify:
+- Additional records become visible that were NOT in the initial viewport (the list grew as you approached the end of the loaded set — new content appended)
+- Records continue to load / the list keeps extending rather than dead-ending prematurely while more records should exist (i.e. it did not silently truncate at the first page)
+- (non-fatal) No record is visibly duplicated and no earlier record is dropped from the list as new pages append — scrolling back UP still shows the original top record noted earlier
+
+<points>3</points>
+</step>
+</steps>
+
+<full_points>3</full_points>
+
+</test_plan>

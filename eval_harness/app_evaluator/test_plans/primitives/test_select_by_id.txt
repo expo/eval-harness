@@ -1,0 +1,44 @@
+<test_plan>
+
+<purpose>
+Primitive: Data → Record CRUD → Select by ID (APP-AGNOSTIC).
+Verify that opening a single specific record from the list / feed / catalog reads back that record's full detail correctly — the detail surface shows the SAME values that identify the row the user tapped, not a different record's data and not a blank / error detail.
+
+This test plan is APP-AGNOSTIC. Use the supplied App PRD to determine the app's primary entity, how a single record is opened (tap a row → detail screen), and which fields identify a record so the row→detail correspondence can be checked.
+</purpose>
+
+<seeding_and_precondition>
+Read the supplied App PRD to determine:
+
+- ENTITY + DETAIL SURFACE: the primary record type and the screen reached by opening one record (a detail screen, an editor opened on an existing record, an expanded card).
+- IDENTIFYING FIELDS: which field(s) let you confirm the detail belongs to the row you tapped (title, name, a unique value you entered, a timestamp, a body preview).
+
+Setup for the formal test:
+- Reach the list / feed / catalog of records, signing in / unlocking first if the PRD gates content.
+- Ensure at least one record exists whose identifying value you KNOW. Prefer to create one with a unique, recognizable value (e.g. a title containing a distinctive throwaway string) so the row→detail match is unambiguous. If the app pre-seeds records, you may instead pick an existing row and note its identifying field text from the list before opening it.
+- Leave the formal test starting on the list with that record's row visible. Do NOT open the record during setup.
+
+If the PRD indicates the app has no per-record detail surface (records are only ever shown as list rows with no openable detail), record this primitive as not-applicable and immediately call complete_step with the note "N/A: PRD indicates records have no openable detail surface."
+</seeding_and_precondition>
+
+<steps>
+<step>
+
+<name>
+test_open_record_reads_back_correct_detail
+</name>
+
+Note the identifying field value of the target row as it appears in the list. Then tap that row to open its detail surface.
+
+Verify:
+- A per-record detail surface is now visible (a detail screen, editor, or expanded view — per the PRD), not the list and not a blank / error screen
+- The detail's identifying field matches the value of the row that was tapped (the record selected by its identity is the record that was opened — no row/detail mismatch)
+- (non-fatal) Additional fields the PRD specifies for the detail surface are populated with this record's data (body, metadata, secondary fields) rather than empty placeholders, confirming a full read rather than a partial one
+
+<points>4</points>
+</step>
+</steps>
+
+<full_points>4</full_points>
+
+</test_plan>

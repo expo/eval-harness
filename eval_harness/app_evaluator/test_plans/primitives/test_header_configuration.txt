@@ -1,0 +1,46 @@
+<test_plan>
+
+<purpose>
+Primitive: Navigation → Stack navigation → Header configuration (APP-AGNOSTIC).
+Verify that screens in a stack are configured with the correct header: a pushed detail / sub-screen shows the title the PRD specifies for it (distinct from the parent's title where applicable), exposes a back affordance, and — where the PRD specifies one — a trailing header action (e.g. Edit, Save, Add, a menu).
+
+This is distinct from the push/pop primitive (which verifies navigation works): here the focus is the per-screen header CONFIGURATION — title correctness and header actions — not the transition itself.
+
+This test plan is APP-AGNOSTIC. Use the supplied App PRD to determine the parent → detail pair, the titles each screen should display, and any trailing header action the PRD assigns to the detail screen.
+</purpose>
+
+<seeding_and_precondition>
+Read the supplied App PRD to determine:
+
+- PARENT + DETAIL: a parent list/feed/landing screen and a pushed detail/sub-screen, plus the TITLE each is expected to display in its header.
+- TRAILING ACTION: whether the PRD assigns the detail screen a trailing header action (Edit / Save / Add / share / menu). If none is specified, that verification is treated as not-applicable for this app.
+
+Setup for the formal test:
+- Reach the parent screen (signed-in / unlocked), with at least one tappable item present (create one if needed).
+- Do NOT push to the detail yet — the formal step performs the push and inspects the header.
+
+If the PRD indicates the app has no stack with configurable headers (e.g. a flat single-screen or pure-tab app with no pushed screens), record this primitive as not-applicable and immediately call complete_step with the note "N/A: PRD indicates app has no stack headers to configure."
+</seeding_and_precondition>
+
+<steps>
+<step>
+
+<name>
+test_detail_header_has_correct_title_back_and_action
+</name>
+
+Note the parent screen's header title. Push to the detail screen by tapping an item.
+
+Verify:
+- The detail screen's header shows the title the PRD specifies for it (matching the PRD's intended title text — e.g. the record's name, or a static screen title — and, where applicable, distinct from the parent's title rather than a stale or blank header)
+- A back affordance is present in the detail header, and using it returns to the parent (the back button is wired to the correct destination, not absent or dead)
+- The detail screen's trailing header action is present where the PRD specifies one (Edit / Save / Add / menu / share). If the PRD specifies no trailing action for this screen, record this verification as not-applicable for this app.
+- (non-fatal) The parent screen's own header title was correct as well (per the PRD), establishing that headers are configured per-screen rather than only on the detail
+
+<points>4</points>
+</step>
+</steps>
+
+<full_points>4</full_points>
+
+</test_plan>

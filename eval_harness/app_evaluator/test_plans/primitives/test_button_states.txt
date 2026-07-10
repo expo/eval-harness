@@ -1,0 +1,62 @@
+<test_plan>
+
+<purpose>
+Primitive: Surface → Component library → Button (APP-AGNOSTIC).
+Verify that the app's primary action button respects its states: when DISABLED (e.g. a submit button before required input is provided) it does not perform its action, and when ENABLED it does perform its action. This confirms the button gates its handler on its enabled state rather than firing unconditionally.
+
+This test plan is APP-AGNOSTIC. Use the supplied App PRD to find a button that has a meaningful disabled state — most commonly a form's submit / save / continue button that is disabled until required fields are filled.
+</purpose>
+
+<seeding_and_precondition>
+Read the supplied App PRD to determine:
+
+- A STATEFUL BUTTON: an action button the PRD specifies should be disabled under some condition and enabled under another. The canonical case is a Save / Submit / Continue / Post button disabled until required form fields are valid. (If the PRD specifies no disabled-state button, see the N/A clause.)
+- THE GATING CONDITION: what makes the button transition from disabled to enabled (required fields filled, a selection made, terms accepted).
+
+Setup for the formal test:
+- Navigate to the screen holding the button (signed-in / unlocked as needed), opening the relevant form / surface so the button is visible in its DISABLED state (e.g. open the create form but leave required fields empty).
+- Do NOT satisfy the gating condition during setup — the formal step does that.
+
+If the PRD specifies no button with a disabled state (all buttons are always active), record this primitive as not-applicable and immediately call complete_step with the note "N/A: PRD indicates app has no button with a meaningful disabled state."
+</seeding_and_precondition>
+
+<steps>
+<step>
+
+<name>
+test_disabled_button_does_not_fire
+</name>
+
+With the gating condition NOT satisfied, observe the button, then attempt to tap it.
+
+Verify:
+- The button is presented in a disabled state (visually de-emphasized — greyed / lowered opacity — per the PRD / accessibility tree, and/or marked disabled in the AT)
+- Tapping it does NOT perform the action — the screen does not advance, no record is created/saved, no navigation occurs (the handler did not fire while disabled)
+- (non-fatal) The disabled styling is clearly distinguishable from the enabled styling (the user can tell the button is not yet actionable)
+
+<points>3</points>
+</step>
+
+<step>
+
+<name>
+test_enabled_button_fires
+</name>
+
+Satisfy the gating condition per the PRD (fill the required fields / make the required selection). Verify the values landed as you fill (capture the screen between fills on multi-field forms, per form-fill discipline).
+
+Verify:
+- The button transitions to an ENABLED state once the gating condition is met (it is no longer styled / marked disabled)
+
+Now tap the button.
+
+Verify:
+- The action is performed (the form submits / the record is created / navigation occurs / the expected outcome the PRD describes happens) — confirming the button fires its handler when enabled
+
+<points>3</points>
+</step>
+</steps>
+
+<full_points>6</full_points>
+
+</test_plan>

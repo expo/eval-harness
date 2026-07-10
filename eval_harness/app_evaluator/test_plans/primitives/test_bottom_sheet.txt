@@ -1,0 +1,66 @@
+<test_plan>
+
+<purpose>
+Primitive: Surface → Bottom sheet and drawer (presentation + drag-to-dismiss + keyboard avoidance + tab-bar hiding) (APP-AGNOSTIC).
+Verify that a bottom sheet / drawer opens as a partial overlay from the bottom (with the underlying screen still visible behind it), that it can be dragged down to dismiss, and — where applicable — that a text input inside the sheet is not obscured by the keyboard and that the app's floating tab bar is hidden while the sheet is open.
+
+This bundles the tightly-coupled primitives of the Bottom-sheet/drawer pattern, which share one surface.
+
+This test plan is APP-AGNOSTIC. Use the supplied App PRD to determine which surface is a bottom sheet / drawer (a filter sheet, an action sheet, a quick-add drawer, a detail drawer), and whether it contains a text input.
+</purpose>
+
+<seeding_and_precondition>
+Read the supplied App PRD to determine:
+
+- BOTTOM SHEET / DRAWER: a surface the PRD presents as a bottom sheet or drawer (anchored to the bottom edge, partial height, with a drag handle) — distinct from a full-screen modal. Note what opens it.
+- TEXT INPUT IN SHEET: whether the sheet contains a text input (determines whether the keyboard-avoidance verification applies).
+- FLOATING TAB BAR: whether the app has a floating / overlay tab bar that should be hidden while the sheet is open (determines whether the tab-bar-hiding verification applies).
+
+Setup for the formal test:
+- Reach the screen from which the sheet is opened (signed-in / unlocked, records seeded as needed).
+- Do NOT open the sheet during setup.
+
+If the PRD indicates the app uses no bottom sheet / drawer (only full-screen modals, or no overlays), record this primitive as not-applicable and immediately call complete_step with the note "N/A: PRD indicates app has no bottom sheet or drawer."
+</seeding_and_precondition>
+
+<steps>
+<step>
+
+<name>
+test_sheet_presents_as_partial_overlay
+</name>
+
+Open the bottom sheet / drawer via the PRD-specified affordance.
+
+Verify:
+- The sheet animates up from the bottom and occupies a PARTIAL portion of the screen, with the underlying screen still visible behind / around it (it is an overlay, not a full-screen replacement, and the underlying screen remains mounted)
+- If the app has a floating / overlay tab bar (per the PRD): the tab bar is NOT visible while the sheet is open (it is hidden to avoid z-index conflicts). If the PRD specifies no floating tab bar, record this verification as not-applicable for this app.
+- (non-fatal) A drag handle / grabber is visible at the top of the sheet
+
+<points>3</points>
+</step>
+
+<step>
+
+<name>
+test_sheet_keyboard_avoidance_and_drag_dismiss
+</name>
+
+If the sheet contains a text input (per the PRD): tap into that input to bring up the keyboard.
+
+Verify:
+- The focused text input inside the sheet remains VISIBLE above the keyboard (the sheet raised itself / adjusted so the keyboard does not obscure the input). If the sheet has no text input, record this verification as not-applicable for this app.
+
+Dismiss the keyboard if it is up (coordinate-tap a non-input area of the sheet or its header). Then drag the sheet DOWNWARD past its dismiss threshold (swipe down on the handle / sheet body).
+
+Verify:
+- Dragging down past the threshold dismisses the sheet (it animates away and is removed), and the underlying screen — including the floating tab bar if one was hidden — is restored
+- (non-fatal) The dismiss animation matched the drag (the sheet followed the gesture down rather than snapping shut abruptly or ignoring the drag)
+
+<points>4</points>
+</step>
+</steps>
+
+<full_points>7</full_points>
+
+</test_plan>
