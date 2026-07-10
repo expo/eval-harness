@@ -96,11 +96,12 @@ if [ -d "$WORKSPACE" ]; then
     rsync -a \
       --exclude node_modules --exclude .expo --exclude .git \
       --exclude ios/build --exclude android/.gradle --exclude android/build \
+      --exclude .mcp.json \
       "$WORKSPACE/" "$BUNDLE/app/" 2>/dev/null
   else
     cp -R "$WORKSPACE/." "$BUNDLE/app/" 2>/dev/null
     rm -rf "$BUNDLE/app/node_modules" "$BUNDLE/app/.expo" "$BUNDLE/app/.git" \
-           "$BUNDLE/app/ios/build" "$BUNDLE/app/android/.gradle" 2>/dev/null
+           "$BUNDLE/app/ios/build" "$BUNDLE/app/android/.gradle" "$BUNDLE/app/.mcp.json" 2>/dev/null
   fi
 fi
 
@@ -133,7 +134,8 @@ GIT_SHA="$(cd "$ROOT" && git rev-parse --short HEAD 2>/dev/null || echo unknown)
 RESULT_JSON="$OUT/result.json" RUN_ID="$RUN_ID" AGENT="$AGENT" GIT_SHA="$GIT_SHA" \
 PRD="${PRD:-eval_harness/app_evaluator/prds/hot_chocolate/prd/mvp.txt}" TEST_PLAN="${TEST_PLAN:-eval_harness/app_evaluator/test_plans/primitives}" \
 AGENT_MODEL="${AGENT_MODEL:-}" METRO_MODE="${METRO_MODE:-dev-build}" \
-EVAL_APP_BUNDLE_ID="${EVAL_APP_BUNDLE_ID:-}" "$PY" - "$BUNDLE/manifest.json" <<'PYEOF'
+EVAL_APP_BUNDLE_ID="${EVAL_APP_BUNDLE_ID:-}" EXPO_MCP_AUTH_STATUS="${EXPO_MCP_AUTH_STATUS:-not_attempted}" \
+"$PY" - "$BUNDLE/manifest.json" <<'PYEOF'
 import json, os, sys
 out = sys.argv[1]
 score = full = macro = micro = None
@@ -154,6 +156,7 @@ manifest = {
     "eval_app_bundle_id": os.environ.get("EVAL_APP_BUNDLE_ID") or None,
     "test_plan": os.environ.get("TEST_PLAN"),
     "prd": os.environ.get("PRD"),
+    "expo_mcp_auth_status": os.environ.get("EXPO_MCP_AUTH_STATUS"),
     "score": score, "full_points": full,
     "macro_avg_pct": macro, "micro_pct": micro,
     "artifacts": {

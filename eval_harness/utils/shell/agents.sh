@@ -12,11 +12,17 @@ eval::_agent_timeout() {
 # one-time bootstrap that seeds EXPO_MCP_CLIENT_ID/EXPO_MCP_REFRESH_TOKEN.
 # On any failure this logs and returns non-zero; callers must treat Expo MCP
 # as optional and continue authoring without it.
+#
+# Always exports EXPO_MCP_AUTH_STATUS so collect_artifacts.sh can record the
+# outcome in manifest.json even when this silently degrades (nothing else
+# about a "continue without Expo MCP" run makes that fact visible downstream
+# otherwise): unconfigured | refresh_failed | ok | ok_persist_failed.
 eval::refresh_expo_mcp_token() { # out_dir
   local out="$1"
   echo "================= STAGE B.5: refresh Expo MCP OAuth token ================="
   if [ -z "${EXPO_MCP_CLIENT_ID:-}" ] || [ -z "${EXPO_MCP_REFRESH_TOKEN:-}" ]; then
     echo "  Expo MCP not configured: set EXPO_MCP_CLIENT_ID + EXPO_MCP_REFRESH_TOKEN to enable it"
+    export EXPO_MCP_AUTH_STATUS="unconfigured"
     return 1
   fi
 
@@ -28,6 +34,7 @@ eval::refresh_expo_mcp_token() { # out_dir
     --data-urlencode "client_id=${EXPO_MCP_CLIENT_ID}" 2>"$out/mcp-refresh.err") || http_code="curl-fail"
   if [ "$http_code" != "200" ]; then
     echo "  ❌ Expo MCP token refresh failed (HTTP $http_code); continuing without Expo MCP"
+    export EXPO_MCP_AUTH_STATUS="refresh_failed"
     return 1
   fi
 
@@ -43,18 +50,22 @@ PY
   new_refresh_token="$(echo "$parsed" | sed -n '2p')"
   if [ -z "$access_token" ]; then
     echo "  ❌ Expo MCP token refresh response missing access_token; continuing without Expo MCP"
+    export EXPO_MCP_AUTH_STATUS="refresh_failed"
     return 1
   fi
   export EXPO_MCP_BEARER_TOKEN="$access_token"
+  export EXPO_MCP_AUTH_STATUS="ok"
   echo "  ✅ Expo MCP access token refreshed (len ${#access_token})"
 
   if [ -n "$new_refresh_token" ] && [ "$new_refresh_token" != "$EXPO_MCP_REFRESH_TOKEN" ]; then
     if ! command -v eas >/dev/null 2>&1; then
       echo "  ⚠️  eas-cli not on PATH; cannot persist rotated refresh_token (next run's refresh will fail)"
+      export EXPO_MCP_AUTH_STATUS="ok_persist_failed"
       return 0
     fi
     if [ -z "${EXPO_TOKEN:-}" ]; then
       echo "  ⚠️  EXPO_TOKEN unset; cannot persist rotated refresh_token (next run's refresh will fail)"
+      export EXPO_MCP_AUTH_STATUS="ok_persist_failed"
       return 0
     fi
     local rc
@@ -62,7 +73,10 @@ PY
       >"$out/mcp-refresh-env-update.log" 2>&1
     rc=$?
     eval::gate $rc "persist rotated Expo MCP refresh_token"
-    [ "$rc" != 0 ] && tail -20 "$out/mcp-refresh-env-update.log" | sed 's/^/    /'
+    if [ "$rc" != 0 ]; then
+      tail -20 "$out/mcp-refresh-env-update.log" | sed 's/^/    /'
+      export EXPO_MCP_AUTH_STATUS="ok_persist_failed"
+    fi
   fi
   return 0
 }
