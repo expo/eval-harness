@@ -98,30 +98,3 @@ eval::run_coding_agent() { # agent root workspace prd_file out_dir [model]
     return $rc
   fi
 }
-
-eval::run_coding_agent_repair() { # agent workspace prompt_file out_dir attempt [model]
-  local agent="$1" workspace="$2" prompt_file="$3" out="$4" attempt="$5" model="${6:-}"
-  [ "$agent" = "claude" ] && agent="claude-code"
-  echo "================= STAGE C repair $attempt: coding agent fixes validation failures ================="
-  local prompt TO
-  prompt="$(cat "$prompt_file")"
-  TO="$(eval::_agent_timeout)"
-  if [ "$agent" = "codex" ]; then
-    ( cd "$workspace" && $TO codex exec "$prompt" ) 2>&1 | tee "$out/c-repair-$attempt.log"
-    local rc=${PIPESTATUS[0]}
-    eval::gate $rc "codex repair pass $attempt"
-    return $rc
-  else
-    if [ -n "$model" ]; then
-      ( cd "$workspace" && $TO claude -p "$prompt" --model "$model" \
-          --dangerously-skip-permissions --add-dir "$workspace" ) 2>&1 | tee "$out/c-repair-$attempt.log"
-      local rc=${PIPESTATUS[0]}
-    else
-      ( cd "$workspace" && $TO claude -p "$prompt" \
-          --dangerously-skip-permissions --add-dir "$workspace" ) 2>&1 | tee "$out/c-repair-$attempt.log"
-      local rc=${PIPESTATUS[0]}
-    fi
-    eval::gate $rc "claude-code repair pass $attempt"
-    return $rc
-  fi
-}
