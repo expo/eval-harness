@@ -16,7 +16,7 @@ from eval_harness.skill_evaluator.static_checks import (
     run_static_checks,
     score_trigger_quality,
 )
-from eval_harness.skill_evaluator.utils import load_case_spec, unpack_artifact, write_authoring_env
+from eval_harness.skill_evaluator.utils import load_case_spec, unpack_artifact
 
 
 class SkillEvalCoreTests(unittest.TestCase):
@@ -28,7 +28,6 @@ class SkillEvalCoreTests(unittest.TestCase):
         for path in specs:
             spec = load_case_spec(path)
             self.assertTrue(spec.expected_skills, path.name)
-            self.assertIn("skills_available_mentioned", spec.scenario_prds)
             self.assertTrue(spec.static_uptake_checks, path.name)
 
     def test_case_spec_loads_core_case_without_skill_family(self):
@@ -38,10 +37,6 @@ class SkillEvalCoreTests(unittest.TestCase):
                 "id": "settings-ui",
                 "feature_focus": "native settings screen",
                 "expected_skills": ["building-native-ui", "expo-ui"],
-                "scenario_prds": {
-                    "skills_available_unmentioned": "eval_harness/skill_evaluator/prds/settings-ui/unmentioned.txt",
-                    "skills_available_mentioned": "eval_harness/skill_evaluator/prds/settings-ui/mentioned.txt",
-                },
                 "static_uptake_checks": [
                     {"id": "uses_expo_ui", "kind": "import", "target": "@expo/ui"}
                 ],
@@ -182,32 +177,6 @@ class SkillEvalCoreTests(unittest.TestCase):
         self.assertEqual(aggregate["expo-ui"]["outcome_delta"], 25.0)
         self.assertEqual(aggregate["expo-ui"]["classification"], "Helpful")
 
-    def test_resolve_authoring_env_writes_skill_case_prd_path(self):
-        with tempfile.TemporaryDirectory() as td:
-            repo = Path(td)
-            spec_path = repo / "case.json"
-            spec_path.write_text(json.dumps({
-                "id": "native-list",
-                "feature_focus": "native list UI",
-                "expected_skills": ["expo-ui"],
-                "scenario_prds": {
-                    "skills_off_tools_on": "eval_harness/skill_evaluator/prds/native-list/unmentioned.txt",
-                    "skills_available_unmentioned": "eval_harness/skill_evaluator/prds/native-list/unmentioned.txt",
-                    "skills_available_mentioned": "eval_harness/skill_evaluator/prds/native-list/mentioned.txt",
-                },
-                "static_uptake_checks": [
-                    {"id": "uses_expo_ui", "kind": "import", "target": "@expo/ui"}
-                ],
-            }))
-            env_file = repo / "authoring.env"
-
-            env = write_authoring_env(spec_path, "skills_available_mentioned", env_file)
-
-            self.assertEqual(env["PRD"], "eval_harness/skill_evaluator/prds/native-list/mentioned.txt")
-            self.assertEqual(env["SKILL_EVAL_CASE_ID"], "native-list")
-            self.assertEqual(env["SKILL_EVAL_EXPECTED_SKILLS"], "expo-ui")
-            self.assertIn("export PRD=eval_harness/skill_evaluator/prds/native-list/mentioned.txt", env_file.read_text())
-
     def test_unpack_and_discover_authored_artifact_layout_from_tarball(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -329,10 +298,6 @@ class SkillEvalCoreTests(unittest.TestCase):
             "id": "artifact-case",
             "feature_focus": "artifact analysis",
             "expected_skills": [skill],
-            "scenario_prds": {
-                "skills_available_unmentioned": "eval_harness/skill_evaluator/prds/artifact-case/unmentioned.txt",
-                "skills_available_mentioned": "eval_harness/skill_evaluator/prds/artifact-case/mentioned.txt",
-            },
             "static_uptake_checks": [
                 {"id": "uses_expo_ui", "kind": "import", "target": "@expo/ui"}
             ],

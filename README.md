@@ -27,9 +27,8 @@ eval_harness/
     test_plans/primitives/    # app-agnostic primitive plans
     reference_apps/notes/     # checked-in Notes reference app
   skill_evaluator/
-    prds/                     # skill-eval PRDs used by authoring_mode=skill_case
-    skill_cases/core5/        # skill case specs
-    main.py                   # analyze-artifacts and resolve-authoring-env CLI
+    skill_cases/core5/        # skill case specs (expected skills + static checks)
+    main.py                   # analyze-artifacts CLI
     analysis.py               # scoring, aggregation, metrics.json, report.html
     static_checks.py          # source checks and trace skill detection
     utils.py                  # case loading, artifact unpacking, small helpers
@@ -71,7 +70,6 @@ Run the full modular E2E workflow for Notes:
 ```bash
 eas workflow:run .eas/workflows/eval-e2e.yml \
   -F agent=claude-code \
-  -F authoring_mode=prd \
   -F prd=eval_harness/app_evaluator/prds/notes/prd/mvp.txt \
   -F test_plan=eval_harness/app_evaluator/test_plans/primitives/test_insert.txt \
   -F run_eval_ios=true \
@@ -83,27 +81,25 @@ Use Codex by changing the agent and ensuring `OPENAI_API_KEY` is present:
 ```bash
 eas workflow:run .eas/workflows/eval-e2e.yml \
   -F agent=codex \
-  -F authoring_mode=prd \
   -F prd=eval_harness/app_evaluator/prds/notes/prd/mvp.txt \
   -F test_plan=eval_harness/app_evaluator/test_plans/primitives/test_insert.txt \
   -F run_eval_ios=true \
   -F run_eval_skill=false
 ```
 
-Run a skill-case scenario through the same authoring workflow by switching
-`authoring_mode` to `skill_case`. In this mode `skill_case_spec` and
-`skill_scenario` resolve the PRD passed to the coding agent; the `prd` input is
-ignored for authoring. `test_plan` belongs to the app evaluator only, so it is
-only needed when `run_eval_ios=true`.
+Authoring always uses a direct PRD path now. To also run the skill-eval
+analyzer against the resulting artifact, set `run_eval_skill=true` and pass
+`skill_case_spec`/`skill_scenario` — these only drive the analysis step
+(`eval_skill` job), independent of which PRD authored the app:
 
 ```bash
 eas workflow:run .eas/workflows/eval-e2e.yml \
   -F agent=claude-code \
-  -F authoring_mode=skill_case \
-  -F skill_case_spec=eval_harness/skill_evaluator/skill_cases/core5/native-data-fetching.json \
-  -F skill_scenario=skills_available_unmentioned \
+  -F prd=eval_harness/app_evaluator/prds/notes/prd/mvp.txt \
   -F run_eval_ios=false \
-  -F run_eval_skill=true
+  -F run_eval_skill=true \
+  -F skill_case_spec=eval_harness/skill_evaluator/skill_cases/core5/native-data-fetching.json \
+  -F skill_scenario=skills_available_unmentioned
 ```
 
 ## Workflow Artifacts
@@ -143,7 +139,6 @@ plan is needed for author-only runs.
 ```bash
 eas workflow:run .eas/workflows/author-app.yml \
   -F agent=claude-code \
-  -F authoring_mode=prd \
   -F prd=eval_harness/app_evaluator/prds/notes/prd/mvp.txt
 ```
 

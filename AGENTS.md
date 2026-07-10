@@ -37,9 +37,12 @@ runner plus uploaded artifacts.
   `eval_harness/prompts/`, or `eval_harness/utils/`.
 - Expo project routing belongs in `app.config.js` and should remain configurable
   through `EAS_PROJECT_ID`, `EXPO_SLUG`, `EXPO_OWNER`, and `EXPO_APP_NAME`.
-- `authoring_mode=prd` passes the `prd` input directly to `author-app.sh`.
-- `authoring_mode=skill_case` resolves a PRD from `skill_case_spec` and
-  `skill_scenario`, then still calls the same `author-app.sh` path.
+- Authoring always uses a direct `prd` input, passed straight to `author-app.sh`.
+  There is no scenario-driven authoring mode.
+- `skill_case_spec`/`skill_scenario` are analysis-only inputs: they drive the
+  `eval_skill` job's `analyze-artifacts` call and are independent of how the app
+  was authored — a case spec's `expected_skills`/`static_uptake_checks` can be
+  scored against an artifact from any PRD.
 - `test_plan` is an app-evaluator input. It is not part of skill-use analysis.
 
 ## Evaluator Scoring Rules

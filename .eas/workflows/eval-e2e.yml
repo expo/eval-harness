@@ -58,14 +58,6 @@ on:
         default: true
         required: false
         description: Run the skill-eval analyzer job
-      authoring_mode:
-        type: choice
-        options:
-          - prd
-          - skill_case
-        default: prd
-        required: false
-        description: Author from a direct PRD path or a skill-case scenario PRD
       skill_case_spec:
         type: string
         default: eval_harness/skill_evaluator/skill_cases/core5/native-data-fetching.json
@@ -88,11 +80,8 @@ jobs:
     env:
       AGENT: ${{ inputs.agent || 'claude-code' }}
       AGENT_MODEL: ${{ inputs.agent_model || '' }}
-      AUTHORING_MODE: ${{ inputs.authoring_mode || 'prd' }}
       PRD: ${{ inputs.prd || 'eval_harness/app_evaluator/prds/hot_chocolate/prd/mvp.txt' }}
       TEST_PLAN: ${{ inputs.test_plan || 'eval_harness/app_evaluator/test_plans/primitives' }}
-      SKILL_CASE_SPEC: ${{ inputs.skill_case_spec || '' }}
-      SKILL_SCENARIO: ${{ inputs.skill_scenario || 'skills_available_unmentioned' }}
     steps:
       - uses: eas/checkout
 
@@ -138,7 +127,6 @@ jobs:
     env:
       AGENT: ${{ inputs.agent || 'claude-code' }}
       AGENT_MODEL: ${{ inputs.agent_model || '' }}
-      AUTHORING_MODE: ${{ inputs.authoring_mode || 'prd' }}
       PRD_OVERRIDE: ${{ inputs.prd || '' }}
       TEST_PLAN_OVERRIDE: ${{ inputs.test_plan || '' }}
       EVAL_IOS_APP_MODE: ${{ inputs.ios_app_mode || 'release' }}

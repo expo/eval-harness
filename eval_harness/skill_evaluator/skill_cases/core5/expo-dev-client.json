@@ -2,11 +2,6 @@
   "id": "expo-dev-client",
   "feature_focus": "dev-client-ready app configuration with native module support",
   "expected_skills": ["expo-dev-client"],
-  "scenario_prds": {
-    "skills_off_tools_on": "eval_harness/skill_evaluator/prds/expo-dev-client/unmentioned.txt",
-    "skills_available_unmentioned": "eval_harness/skill_evaluator/prds/expo-dev-client/unmentioned.txt",
-    "skills_available_mentioned": "eval_harness/skill_evaluator/prds/expo-dev-client/mentioned.txt"
-  },
   "static_uptake_checks": [
     {"id": "depends_expo_dev_client", "kind": "package_dependency", "target": "expo-dev-client"},
     {"id": "has_scheme", "kind": "text", "target": "scheme"},

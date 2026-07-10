@@ -1,1 +1,0 @@
-Build a styled Expo profile screen using utility classes for layout, spacing, and color.

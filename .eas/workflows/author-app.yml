@@ -26,28 +26,6 @@ on:
         default: eval_harness/app_evaluator/test_plans/primitives/test_insert.txt
         required: false
         description: Test plan file or directory under eval_harness/
-      authoring_mode:
-        type: choice
-        options:
-          - prd
-          - skill_case
-        default: prd
-        required: false
-        description: Author from a direct PRD path or a skill-case scenario PRD
-      skill_case_spec:
-        type: string
-        default: eval_harness/skill_evaluator/skill_cases/core5/native-data-fetching.json
-        required: false
-        description: Skill-eval case spec path
-      skill_scenario:
-        type: choice
-        options:
-          - skills_off_tools_on
-          - skills_available_unmentioned
-          - skills_available_mentioned
-        default: skills_available_unmentioned
-        required: false
-        description: Skill-eval scenario label and capability mode
 
 jobs:
   author_app:
@@ -56,11 +34,8 @@ jobs:
     env:
       AGENT: ${{ inputs.agent || 'claude-code' }}
       AGENT_MODEL: ${{ inputs.agent_model || '' }}
-      AUTHORING_MODE: ${{ inputs.authoring_mode || 'prd' }}
       PRD: ${{ inputs.prd || 'eval_harness/app_evaluator/prds/notes/prd/mvp.txt' }}
       TEST_PLAN: ${{ inputs.test_plan || 'eval_harness/app_evaluator/test_plans/primitives/test_insert.txt' }}
-      SKILL_CASE_SPEC: ${{ inputs.skill_case_spec || '' }}
-      SKILL_SCENARIO: ${{ inputs.skill_scenario || 'skills_available_unmentioned' }}
     steps:
       - uses: eas/checkout
 

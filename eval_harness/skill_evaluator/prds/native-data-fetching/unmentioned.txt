@@ -1,1 +1,0 @@
-Build a mobile app screen that loads remote cafe data, supports pull-to-refresh, and shows loading and error states.

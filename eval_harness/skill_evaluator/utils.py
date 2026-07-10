@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 from pathlib import Path
-import shlex
 import tarfile
 from typing import Any
 
@@ -15,7 +14,6 @@ class SkillEvalCase:
     id: str
     feature_focus: str
     expected_skills: list[str]
-    scenario_prds: dict[str, str]
     static_uptake_checks: list[dict[str, Any]]
 
 
@@ -26,7 +24,6 @@ def load_case_spec(path: Path | str) -> SkillEvalCase:
         "id",
         "feature_focus",
         "expected_skills",
-        "scenario_prds",
         "static_uptake_checks",
     ]
     missing = [key for key in required if key not in data]
@@ -36,35 +33,8 @@ def load_case_spec(path: Path | str) -> SkillEvalCase:
         id=str(data["id"]),
         feature_focus=str(data["feature_focus"]),
         expected_skills=list(data["expected_skills"]),
-        scenario_prds={str(k): str(v) for k, v in dict(data["scenario_prds"]).items()},
         static_uptake_checks=list(data["static_uptake_checks"]),
     )
-
-
-def resolve_case_prd(case: SkillEvalCase, scenario: str) -> str:
-    try:
-        return case.scenario_prds[scenario]
-    except KeyError as exc:
-        valid = ", ".join(sorted(case.scenario_prds))
-        raise ValueError(f"Scenario {scenario!r} is not declared by {case.id}; valid scenarios: {valid}") from exc
-
-
-def write_authoring_env(case_spec: Path | str, scenario: str, out_env: Path | str) -> dict[str, str]:
-    case = load_case_spec(case_spec)
-    env = {
-        "PRD": resolve_case_prd(case, scenario),
-        "SKILL_EVAL_CASE_ID": case.id,
-        "SKILL_EVAL_SCENARIO": scenario,
-        "SKILL_EVAL_FEATURE_FOCUS": case.feature_focus,
-        "SKILL_EVAL_EXPECTED_SKILLS": ",".join(case.expected_skills),
-    }
-    out_env = Path(out_env)
-    out_env.parent.mkdir(parents=True, exist_ok=True)
-    out_env.write_text(
-        "".join(f"export {key}={shlex.quote(value)}\n" for key, value in env.items()),
-        encoding="utf-8",
-    )
-    return env
 
 
 def load_structured(path: Path) -> dict[str, Any]:

@@ -6,7 +6,7 @@ import argparse
 from pathlib import Path
 
 from .analysis import analyze_artifacts, print_summary
-from .utils import unpack_artifact, write_authoring_env
+from .utils import unpack_artifact
 
 
 def main() -> None:
@@ -20,18 +20,9 @@ def main() -> None:
     artifacts.add_argument("--scenario", required=True)
     artifacts.add_argument("--out-dir", required=True, type=Path)
 
-    resolve = sub.add_parser("resolve-authoring-env", help="Resolve skill-case authoring env vars")
-    resolve.add_argument("--case", required=True, type=Path)
-    resolve.add_argument("--scenario", required=True)
-    resolve.add_argument("--out-env", required=True, type=Path)
-
     args = parser.parse_args()
     if args.cmd == "analyze-artifacts":
         _analyze_artifacts(args)
-    elif args.cmd == "resolve-authoring-env":
-        env = write_authoring_env(args.case, args.scenario, args.out_env)
-        for key, value in env.items():
-            print(f"{key}={value}")
 
 
 def _analyze_artifacts(args) -> None:
