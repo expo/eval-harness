@@ -81,7 +81,6 @@ jobs:
       AGENT: ${{ inputs.agent || 'claude-code' }}
       AGENT_MODEL: ${{ inputs.agent_model || '' }}
       PRD: ${{ inputs.prd || 'eval_harness/app_evaluator/prds/hot_chocolate/prd/mvp.txt' }}
-      TEST_PLAN: ${{ inputs.test_plan || 'eval_harness/app_evaluator/test_plans/primitives' }}
     steps:
       - uses: eas/checkout
 

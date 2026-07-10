@@ -9,7 +9,6 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 EVAL="$ROOT"
-PY="$(command -v python3 || command -v python)"
 # shellcheck source=eval_harness/utils/shell/eval_stages.sh
 source "$ROOT/eval_harness/utils/shell/eval_stages.sh"
 
@@ -28,8 +27,7 @@ if [ -z "$AGENT_MODEL" ]; then
 fi
 METRO_MODE="dev-build"
 PRD="${PRD:-eval_harness/app_evaluator/prds/hot_chocolate/prd/mvp.txt}"
-TEST_PLAN="${TEST_PLAN:-eval_harness/app_evaluator/test_plans/primitives}"
-export AGENT AGENT_MODEL METRO_MODE PRD TEST_PLAN
+export AGENT AGENT_MODEL METRO_MODE PRD
 
 # Lets the agent's own `eas init --id "$EAS_PROJECT_ID"` (see author_app.md) link its freshly
 # authored project to the same EAS project the harness itself uses, rather than needing to mint
@@ -51,7 +49,6 @@ echo "RUN_ID=$RUN_ID  AGENT=$AGENT  WORKSPACE=$WORKSPACE"
   echo "AGENT=$AGENT"
   echo "AGENT_MODEL=$AGENT_MODEL"
   echo "PRD=$PRD"
-  echo "TEST_PLAN=$TEST_PLAN"
   echo "METRO_MODE=$METRO_MODE"
 } >"$OUT/author.env"
 
@@ -101,142 +98,10 @@ export OTEL_RESOURCE_ATTRIBUTES="run.id=$RUN_ID,phase=agent-build,service.name=e
 
 eval::run_coding_agent "$AGENT" "$ROOT" "$WORKSPACE" "$EVAL/$PRD" "$OUT" "$AGENT_MODEL"
 
-validate_authored_app() {
-  local label="$1" rc TO="" clean_dir=""
-  echo "================= STAGE C2: validate authored app ($label) ================="
-  if command -v gtimeout >/dev/null 2>&1; then TO="gtimeout 900";
-  elif command -v timeout >/dev/null 2>&1; then TO="timeout 900"; fi
-  ( cd "$WORKSPACE" && $TO npm install ) >"$OUT/c-validate-npm-$label.log" 2>&1
-  rc=$?
-  eval::gate $rc "authored app npm install ($label)"
-  if [ "$rc" != 0 ]; then
-    echo "  --- c-validate-npm-$label.log tail ---"
-    tail -60 "$OUT/c-validate-npm-$label.log" | sed 's/^/    /'
-    return "$rc"
-  fi
-
-  ( cd "$WORKSPACE" && npx expo install --check ) >"$OUT/c-validate-expo-deps-$label.log" 2>&1
-  rc=$?
-  eval::gate $rc "authored app Expo dependency check ($label)"
-  if [ "$rc" != 0 ]; then
-    echo "  --- c-validate-expo-deps-$label.log tail ---"
-    tail -80 "$OUT/c-validate-expo-deps-$label.log" | sed 's/^/    /'
-    return "$rc"
-  fi
-
-  clean_dir="$OUT/clean-install-$label"
-  rm -rf "$clean_dir"
-  mkdir -p "$clean_dir"
-  ( cd "$WORKSPACE" && tar \
-      --exclude='./node_modules' \
-      --exclude='./.expo' \
-      --exclude='./ios' \
-      --exclude='./android' \
-      -cf - . ) | ( cd "$clean_dir" && tar -xf - )
-  ( cd "$clean_dir" && $TO npm install ) >"$OUT/c-validate-clean-npm-$label.log" 2>&1
-  rc=$?
-  rm -rf "$clean_dir"
-  eval::gate $rc "authored app clean npm install ($label)"
-  if [ "$rc" != 0 ]; then
-    echo "  --- c-validate-clean-npm-$label.log tail ---"
-    tail -80 "$OUT/c-validate-clean-npm-$label.log" | sed 's/^/    /'
-    return "$rc"
-  fi
-
-  ( cd "$WORKSPACE" && npx expo config --json ) >"$OUT/c-validate-expo-config-$label.json" 2>"$OUT/c-validate-expo-config-$label.err"
-  rc=$?
-  eval::gate $rc "authored app expo config ($label)"
-  if [ "$rc" != 0 ]; then
-    echo "  --- c-validate-expo-config-$label.err tail ---"
-    tail -60 "$OUT/c-validate-expo-config-$label.err" | sed 's/^/    /'
-    return "$rc"
-  fi
-
-  "$PY" - "$OUT/c-validate-expo-config-$label.json" >"$OUT/c-validate-required-config-$label.log" 2>&1 <<'PY'
-import json
-import sys
-
-data = json.load(open(sys.argv[1]))
-ios = data.get("ios") or {}
-bundle = ios.get("bundleIdentifier")
-scheme = data.get("scheme")
-if isinstance(scheme, list):
-    scheme = scheme[0] if scheme else None
-missing = []
-if not bundle:
-    missing.append("ios.bundleIdentifier")
-if not scheme:
-    missing.append("scheme")
-if missing:
-    print("Missing required Expo config field(s): " + ", ".join(missing))
-    sys.exit(1)
-print(f"bundleIdentifier={bundle}")
-print(f"scheme={scheme}")
-PY
-  rc=$?
-  eval::gate $rc "authored app required config ($label)"
-  if [ "$rc" != 0 ]; then
-    echo "  --- c-validate-required-config-$label.log ---"
-    cat "$OUT/c-validate-required-config-$label.log" | sed 's/^/    /'
-  fi
-  return "$rc"
-}
-
-write_repair_prompt() {
-  local attempt="$1" failed_label="$2" prompt_file="$OUT/c-repair-$attempt-prompt.md"
-  {
-    cat <<'EOF'
-The Expo app you just authored failed the harness validation step.
-
-Repair the existing project in the current working directory. Do not ask for
-confirmation. Modify package.json/source/config as needed, then run `npm install`
-yourself and keep fixing until it succeeds. Preserve the original PRD behavior
-and testIDs.
-
-Use Expo tooling for dependency compatibility. Do not hand-pin guessed Expo,
-React, React Native, or native-module versions.
-EOF
-    echo
-    echo "Failed validation label: $failed_label"
-    echo
-    echo "Tail of npm install log:"
-    echo '```'
-    tail -160 "$OUT/c-validate-npm-$failed_label.log" 2>/dev/null || true
-    echo '```'
-    echo
-    echo "Tail of clean npm install log:"
-    echo '```'
-    tail -160 "$OUT/c-validate-clean-npm-$failed_label.log" 2>/dev/null || true
-    echo '```'
-    echo
-    echo "Expo dependency compatibility check:"
-    echo '```'
-    cat "$OUT/c-validate-expo-deps-$failed_label.log" 2>/dev/null || true
-    echo '```'
-    echo
-    echo "Expo config validation output, if any:"
-    echo '```'
-    cat "$OUT/c-validate-required-config-$failed_label.log" 2>/dev/null || true
-    tail -80 "$OUT/c-validate-expo-config-$failed_label.err" 2>/dev/null || true
-    echo '```'
-  } >"$prompt_file"
-  echo "$prompt_file"
-}
-
 if [ ! -f "$WORKSPACE/package.json" ]; then
   echo "  ❌ coding agent did not produce package.json; downstream eval will collect diagnostics only"
 else
   echo "  ✅ authored package.json present"
-  validation_label="initial"
-  if ! validate_authored_app "$validation_label"; then
-    max_repairs="${AUTHOR_REPAIR_ATTEMPTS:-2}"
-    for attempt in $(seq 1 "$max_repairs"); do
-      prompt_file="$(write_repair_prompt "$attempt" "$validation_label")"
-      eval::run_coding_agent_repair "$AGENT" "$WORKSPACE" "$prompt_file" "$OUT" "$attempt" "$AGENT_MODEL"
-      validation_label="repair-$attempt"
-      validate_authored_app "$validation_label" && break
-    done
-  fi
 fi
 
 exit 0

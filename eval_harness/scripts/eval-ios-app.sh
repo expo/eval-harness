@@ -39,7 +39,7 @@ if [ -z "$AGENT_MODEL" ]; then
   if [ "$AGENT" = "codex" ]; then AGENT_MODEL="${CODEX_MODEL:-gpt-5-mini}"; else AGENT_MODEL="sonnet"; fi
 fi
 PRD="${PRD_OVERRIDE:-${PRD:-eval_harness/app_evaluator/prds/hot_chocolate/prd/mvp.txt}}"
-TEST_PLAN="${TEST_PLAN_OVERRIDE:-${TEST_PLAN:-eval_harness/app_evaluator/test_plans/primitives}}"
+TEST_PLAN="${TEST_PLAN_OVERRIDE:-eval_harness/app_evaluator/test_plans/primitives}"
 export RUN_ID RUN_START_MTIME OUT WORKSPACE TELEMETRY_DIR METRO_MODE AGENT AGENT_MODEL PRD TEST_PLAN
 
 ANTHROPIC_PROXY_PORT=8082
