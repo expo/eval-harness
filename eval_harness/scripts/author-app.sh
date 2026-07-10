@@ -86,6 +86,8 @@ fi
 eval::launch_otlp_receiver "$ROOT" "$OTLP_PORT" "$TELEMETRY_DIR/otel"
 eval::wait_for_port "$OTLP_PORT" && echo "  ✅ OTLP receiver on :$OTLP_PORT"
 
+eval::refresh_expo_mcp_token "$OUT" || true
+
 echo "================= STAGE C: coding agent authors app ================="
 export ANTHROPIC_BASE_URL="http://127.0.0.1:$ANTHROPIC_PROXY_PORT"
 export CLAUDE_CODE_ENABLE_TELEMETRY=1

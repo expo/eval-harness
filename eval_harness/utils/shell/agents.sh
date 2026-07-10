@@ -4,6 +4,85 @@ eval::_agent_timeout() {
   else echo "python3 $_EVAL_STAGES_DIR/timeout_exec.py 2400"; fi
 }
 
+# Refreshes the Expo MCP OAuth access token from a stored, rotating refresh
+# token, and persists the newly-rotated refresh_token back to the EAS
+# `production` environment so the next run can refresh again. mcp.expo.dev
+# supports only human browser OAuth (no service-account grant), and its
+# refresh_token rotates on every use -- see get-expo-mcp-token.ts for the
+# one-time bootstrap that seeds EXPO_MCP_CLIENT_ID/EXPO_MCP_REFRESH_TOKEN.
+# On any failure this logs and returns non-zero; callers must treat Expo MCP
+# as optional and continue authoring without it.
+eval::refresh_expo_mcp_token() { # out_dir
+  local out="$1"
+  echo "================= STAGE B.5: refresh Expo MCP OAuth token ================="
+  if [ -z "${EXPO_MCP_CLIENT_ID:-}" ] || [ -z "${EXPO_MCP_REFRESH_TOKEN:-}" ]; then
+    echo "  Expo MCP not configured: set EXPO_MCP_CLIENT_ID + EXPO_MCP_REFRESH_TOKEN to enable it"
+    return 1
+  fi
+
+  local resp_file="$out/mcp-refresh-response.json" http_code
+  http_code=$(curl -sS --max-time 20 -o "$resp_file" -w '%{http_code}' https://mcp.expo.dev/oauth/token \
+    -H "Content-Type: application/x-www-form-urlencoded" \
+    --data-urlencode "grant_type=refresh_token" \
+    --data-urlencode "refresh_token=${EXPO_MCP_REFRESH_TOKEN}" \
+    --data-urlencode "client_id=${EXPO_MCP_CLIENT_ID}" 2>"$out/mcp-refresh.err") || http_code="curl-fail"
+  if [ "$http_code" != "200" ]; then
+    echo "  ❌ Expo MCP token refresh failed (HTTP $http_code); continuing without Expo MCP"
+    return 1
+  fi
+
+  local parsed access_token new_refresh_token
+  parsed="$(python3 - "$resp_file" <<'PY'
+import json, sys
+data = json.load(open(sys.argv[1]))
+print(data.get("access_token", ""))
+print(data.get("refresh_token", ""))
+PY
+)"
+  access_token="$(echo "$parsed" | sed -n '1p')"
+  new_refresh_token="$(echo "$parsed" | sed -n '2p')"
+  if [ -z "$access_token" ]; then
+    echo "  ❌ Expo MCP token refresh response missing access_token; continuing without Expo MCP"
+    return 1
+  fi
+  export EXPO_MCP_BEARER_TOKEN="$access_token"
+  echo "  ✅ Expo MCP access token refreshed (len ${#access_token})"
+
+  if [ -n "$new_refresh_token" ] && [ "$new_refresh_token" != "$EXPO_MCP_REFRESH_TOKEN" ]; then
+    if ! command -v eas >/dev/null 2>&1; then
+      echo "  ⚠️  eas-cli not on PATH; cannot persist rotated refresh_token (next run's refresh will fail)"
+      return 0
+    fi
+    if [ -z "${EXPO_TOKEN:-}" ]; then
+      echo "  ⚠️  EXPO_TOKEN unset; cannot persist rotated refresh_token (next run's refresh will fail)"
+      return 0
+    fi
+    local rc
+    eas env:update production --variable-name EXPO_MCP_REFRESH_TOKEN --value "$new_refresh_token" --non-interactive \
+      >"$out/mcp-refresh-env-update.log" 2>&1
+    rc=$?
+    eval::gate $rc "persist rotated Expo MCP refresh_token"
+    [ "$rc" != 0 ] && tail -20 "$out/mcp-refresh-env-update.log" | sed 's/^/    /'
+  fi
+  return 0
+}
+
+# Claude Code's Expo plugin bundles an unauthenticated MCP entry. A project-
+# scope .mcp.json outranks it (matched by endpoint, not name), and prints the
+# --settings flag needed to pre-approve it non-interactively -- both prints
+# nothing (no-op) when EXPO_MCP_BEARER_TOKEN is unset, so callers can always
+# splice the result into their claude invocation unquoted.
+eval::_claude_expo_mcp_settings_arg() { # workspace
+  local workspace="$1"
+  if [ -z "${EXPO_MCP_BEARER_TOKEN:-}" ]; then
+    return 0
+  fi
+  cat > "$workspace/.mcp.json" <<EOF
+{"mcpServers":{"expo":{"type":"http","url":"https://mcp.expo.dev/mcp","headers":{"Authorization":"Bearer $EXPO_MCP_BEARER_TOKEN"}}}}
+EOF
+  echo '--settings {"enabledMcpjsonServers":["expo"]}'
+}
+
 # Writes Codex's user-level config.toml (model_provider routed through the
 # logging proxy + [otel] pointed at the OTLP receiver).
 eval::_write_codex_config() { # codex_home model openai_proxy_port otlp_port
@@ -83,15 +162,17 @@ eval::run_coding_agent() { # agent root workspace prd_file out_dir [model]
       echo "  ⚠️  claude plugin marketplace setup failed (continuing; see c-plugin.log)"
     claude plugin install expo@claude-plugins-official >>"$out/c-plugin.log" 2>&1 || \
       echo "  ⚠️  claude plugin install expo@claude-plugins-official failed (continuing; see c-plugin.log)"
+    local settings_arg
+    settings_arg="$(eval::_claude_expo_mcp_settings_arg "$workspace")"
     # Branch on model rather than expanding a possibly-empty array — macOS ships
     # bash 3.2, where "${arr[@]}" on an empty array trips `set -u`.
     if [ -n "$model" ]; then
       ( cd "$workspace" && $TO claude -p "$prompt" --model "$model" \
-          --dangerously-skip-permissions --add-dir "$workspace" ) 2>&1 | tee "$out/c-agent.log"
+          --dangerously-skip-permissions --add-dir "$workspace" $settings_arg ) 2>&1 | tee "$out/c-agent.log"
       local rc=${PIPESTATUS[0]}
     else
       ( cd "$workspace" && $TO claude -p "$prompt" \
-          --dangerously-skip-permissions --add-dir "$workspace" ) 2>&1 | tee "$out/c-agent.log"
+          --dangerously-skip-permissions --add-dir "$workspace" $settings_arg ) 2>&1 | tee "$out/c-agent.log"
       local rc=${PIPESTATUS[0]}
     fi
     eval::gate $rc "claude-code authored app"

@@ -49,6 +49,7 @@ jobs:
             --exclude 'agent-workspace/*/ios/build' \
             --exclude 'agent-workspace/*/android/.gradle' \
             --exclude 'agent-workspace/*/android/build' \
+            --exclude 'agent-workspace/*/.mcp.json' \
             --exclude 'eval-out/*/codex-home/skills' \
             --exclude 'eval-out/*/codex-home/.tmp' \
             --exclude 'eval-out/*/codex-home/tmp' \
