@@ -132,7 +132,7 @@ cp "$OUT"/*.log "$BUNDLE/logs/" 2>/dev/null
 # --- 6. manifest.json (stitches everything by run_id; embeds the score) ---
 GIT_SHA="$(cd "$ROOT" && git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 RESULT_JSON="$OUT/result.json" RUN_ID="$RUN_ID" AGENT="$AGENT" GIT_SHA="$GIT_SHA" \
-PRD="${PRD:-eval_harness/app_evaluator/prds/hot_chocolate/prd/mvp.txt}" TEST_PLAN="${TEST_PLAN:-eval_harness/app_evaluator/test_plans/primitives}" \
+PRD="${PRD:-eval_harness/prds/hot_chocolate/prd/mvp.txt}" TEST_PLAN="${TEST_PLAN:-eval_harness/evaluator/ios_agentic/test_plans/primitives}" \
 AGENT_MODEL="${AGENT_MODEL:-}" METRO_MODE="${METRO_MODE:-dev-build}" \
 EVAL_APP_BUNDLE_ID="${EVAL_APP_BUNDLE_ID:-}" EXPO_MCP_AUTH_STATUS="${EXPO_MCP_AUTH_STATUS:-not_attempted}" \
 "$PY" - "$BUNDLE/manifest.json" <<'PYEOF'

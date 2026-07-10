@@ -140,7 +140,7 @@ eval::run_coding_agent() { # agent root workspace prd_file out_dir [model]
   [ "$agent" = "claude" ] && agent="claude-code"
   echo "================= STAGE C: coding agent ($agent) authors the app ================="
   local prompt TO
-  prompt="$(cat "$root/eval_harness/prompts/author_app.md")"$'\n\n## App PRD\n\n'"$(cat "$prd_file")"
+  prompt="$(cat "$root/eval_harness/app_builder/prompts/author_app.md")"$'\n\n## App PRD\n\n'"$(cat "$prd_file")"
   TO="$(eval::_agent_timeout)"
 
   if [ "$agent" = "codex" ]; then

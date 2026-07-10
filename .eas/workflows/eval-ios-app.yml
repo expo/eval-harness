@@ -21,12 +21,12 @@ on:
         description: Signed download URL for an authored-app.tar.gz artifact
       prd:
         type: string
-        default: eval_harness/app_evaluator/prds/hot_chocolate/prd/mvp.txt
+        default: eval_harness/prds/hot_chocolate/prd/mvp.txt
         required: false
         description: PRD path under eval_harness/
       test_plan:
         type: string
-        default: eval_harness/app_evaluator/test_plans/primitives
+        default: eval_harness/evaluator/ios_agentic/test_plans/primitives
         required: false
         description: Test plan file or directory under eval_harness/
       ios_app_mode:
@@ -90,7 +90,7 @@ jobs:
           fi
 
       - name: Build, run, and evaluate authored app
-        run: bash ./eval_harness/scripts/eval-ios-app.sh
+        run: bash ./eval_harness/evaluator/ios_agentic/scripts/eval-ios-app.sh
 
       - name: Package eval output
         if: ${{ always() }}

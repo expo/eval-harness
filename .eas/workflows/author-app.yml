@@ -18,7 +18,7 @@ on:
         description: Optional model alias/name; defaults to sonnet for Claude Code and gpt-5-mini for Codex
       prd:
         type: string
-        default: eval_harness/app_evaluator/prds/notes/prd/mvp.txt
+        default: eval_harness/prds/notes/prd/mvp.txt
         required: false
         description: PRD path under eval_harness/
 
@@ -29,7 +29,7 @@ jobs:
     env:
       AGENT: ${{ inputs.agent || 'claude-code' }}
       AGENT_MODEL: ${{ inputs.agent_model || '' }}
-      PRD: ${{ inputs.prd || 'eval_harness/app_evaluator/prds/notes/prd/mvp.txt' }}
+      PRD: ${{ inputs.prd || 'eval_harness/prds/notes/prd/mvp.txt' }}
     steps:
       - uses: eas/checkout
 
@@ -38,7 +38,7 @@ jobs:
           if [ -n "${ANTHROPIC_API_KEY:-}" ]; then echo "ANTHROPIC_API_KEY bound (len ${#ANTHROPIC_API_KEY})"; else echo "MISSING"; exit 1; fi
 
       - name: Author app with coding agent
-        run: bash ./eval_harness/scripts/author-app.sh
+        run: bash ./eval_harness/app_builder/scripts/author-app.sh
 
       - name: Package authored app
         if: ${{ always() }}

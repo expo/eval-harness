@@ -7,7 +7,7 @@
 # agent-workspace/ + eval-out/ as the artifact consumed by the macOS eval job.
 set -uo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 EVAL="$ROOT"
 # shellcheck source=eval_harness/utils/shell/eval_stages.sh
 source "$ROOT/eval_harness/utils/shell/eval_stages.sh"
@@ -25,8 +25,7 @@ AGENT_MODEL="${AGENT_MODEL:-}"
 if [ -z "$AGENT_MODEL" ]; then
   if [ "$AGENT" = "codex" ]; then AGENT_MODEL="${CODEX_MODEL:-gpt-5-mini}"; else AGENT_MODEL="sonnet"; fi
 fi
-METRO_MODE="dev-build"
-PRD="${PRD:-eval_harness/app_evaluator/prds/hot_chocolate/prd/mvp.txt}"
+PRD="${PRD:-eval_harness/prds/hot_chocolate/prd/mvp.txt}"
 export AGENT AGENT_MODEL METRO_MODE PRD
 
 # Lets the agent's own `eas init --id "$EAS_PROJECT_ID"` (see author_app.md) link its freshly

@@ -34,7 +34,7 @@ jobs:
       - uses: eas/checkout
 
       - name: Run agent skill smoke
-        run: bash ./eval_harness/scripts/smoke-agent-skill.sh
+        run: bash ./eval_harness/app_builder/scripts/smoke-agent-skill.sh
 
       - name: Package smoke output
         if: ${{ always() }}

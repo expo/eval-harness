@@ -19,23 +19,29 @@ has a stable primitive test plan.
   smoke-*.yml                 # narrow infrastructure smoke tests
 
 eval_harness/
-  app_evaluator/
-    agent_device/             # agent-device bridge and tools
-    maestro/                  # Maestro bridge and tools
-    core/                     # evaluator scoring, prompts, and tracing internals
-    prds/                     # Notes, Hot Chocolate, and Wiki Reader app PRDs
-    test_plans/primitives/    # app-agnostic primitive plans
-    reference_apps/notes/     # checked-in Notes reference app
-  skill_evaluator/
-    skill_cases/core5/        # skill case specs (expected skills + static checks)
-    main.py                   # analyze-artifacts CLI
-    analysis.py               # scoring, aggregation, metrics.json, report.html
-    static_checks.py          # source checks and trace skill detection
-    utils.py                  # case loading, artifact unpacking, small helpers
-    tests/                    # skill evaluator unit tests
-  scripts/                    # Workflow entrypoints
-  prompts/                    # coding-agent prompt templates
-  utils/                      # artifacts, iOS, shell, and telemetry helpers
+  app_builder/
+    prompts/                  # coding-agent authoring prompt template
+    scripts/                  # authoring + agent-skill-visibility entrypoints
+  evaluator/
+    ios_agentic/
+      agent_device/           # agent-device bridge and tools
+      maestro/                # Maestro bridge and tools
+      core/                   # evaluator scoring and tracing internals
+      prompts/                # agentic evaluator's system prompt
+      scripts/                # iOS build+eval entrypoints
+    skill_invocation/
+      skill_cases/core5/      # skill case specs (expected skills + static checks)
+      main.py                 # analyze-artifacts CLI
+      analysis.py             # scoring, aggregation, metrics.json, report.html
+      static_checks.py        # source checks and trace skill detection
+      utils.py                # case loading, artifact unpacking, small helpers
+      tests/                  # skill evaluator unit tests
+      scripts/                # skill-use analysis entrypoint
+  prds/                       # Notes, Hot Chocolate, and Wiki Reader app PRDs (shared)
+  test_plans/primitives/      # app-agnostic primitive plans
+  reference_apps/notes/       # checked-in Notes reference app
+  utils/                      # artifacts, iOS, shell, and telemetry helpers (shared)
+    scripts/                  # shared telemetry smoke entrypoint
 ```
 
 ## Setup
@@ -70,8 +76,8 @@ Run the full modular E2E workflow for Notes:
 ```bash
 eas workflow:run .eas/workflows/eval-e2e.yml \
   -F agent=claude-code \
-  -F prd=eval_harness/app_evaluator/prds/notes/prd/mvp.txt \
-  -F test_plan=eval_harness/app_evaluator/test_plans/primitives/test_insert.txt \
+  -F prd=eval_harness/prds/notes/prd/mvp.txt \
+  -F test_plan=eval_harness/evaluator/ios_agentic/test_plans/primitives/test_insert.txt \
   -F run_eval_ios=true \
   -F run_eval_skill=false
 ```
@@ -81,8 +87,8 @@ Use Codex by changing the agent and ensuring `OPENAI_API_KEY` is present:
 ```bash
 eas workflow:run .eas/workflows/eval-e2e.yml \
   -F agent=codex \
-  -F prd=eval_harness/app_evaluator/prds/notes/prd/mvp.txt \
-  -F test_plan=eval_harness/app_evaluator/test_plans/primitives/test_insert.txt \
+  -F prd=eval_harness/prds/notes/prd/mvp.txt \
+  -F test_plan=eval_harness/evaluator/ios_agentic/test_plans/primitives/test_insert.txt \
   -F run_eval_ios=true \
   -F run_eval_skill=false
 ```
@@ -95,10 +101,10 @@ analyzer against the resulting artifact, set `run_eval_skill=true` and pass
 ```bash
 eas workflow:run .eas/workflows/eval-e2e.yml \
   -F agent=claude-code \
-  -F prd=eval_harness/app_evaluator/prds/notes/prd/mvp.txt \
+  -F prd=eval_harness/prds/notes/prd/mvp.txt \
   -F run_eval_ios=false \
   -F run_eval_skill=true \
-  -F skill_case_spec=eval_harness/skill_evaluator/skill_cases/core5/native-data-fetching.json \
+  -F skill_case_spec=eval_harness/evaluator/skill_invocation/skill_cases/core5/native-data-fetching.json \
   -F skill_scenario=skills_available_unmentioned
 ```
 
@@ -139,7 +145,7 @@ plan is needed for author-only runs.
 ```bash
 eas workflow:run .eas/workflows/author-app.yml \
   -F agent=claude-code \
-  -F prd=eval_harness/app_evaluator/prds/notes/prd/mvp.txt
+  -F prd=eval_harness/prds/notes/prd/mvp.txt
 ```
 
 Use `eval-ios-app.yml` to replay the iOS/evaluator half against a previously
@@ -172,9 +178,9 @@ debugging driver behavior, but collaborators should start with EAS workflows
 because they match the runner environment.
 
 ```bash
-uv run python -m eval_harness.app_evaluator.main \
-  eval_harness/app_evaluator/test_plans/primitives/test_insert.txt \
-  --prd eval_harness/app_evaluator/prds/notes/prd/mvp.txt \
+uv run python -m eval_harness.evaluator.ios_agentic.main \
+  eval_harness/evaluator/ios_agentic/test_plans/primitives/test_insert.txt \
+  --prd eval_harness/prds/notes/prd/mvp.txt \
   -d agent-device \
   --hybrid-restart \
   -o /tmp/notes-result.json \
@@ -184,13 +190,13 @@ uv run python -m eval_harness.app_evaluator.main \
 Run shell parse checks after touching harness scripts:
 
 ```bash
-find eval_harness/scripts eval_harness/utils -name '*.sh' -print0 | xargs -0 bash -n
+find eval_harness -name '*.sh' -print0 | xargs -0 bash -n
 ```
 
 Run skill evaluator tests:
 
 ```bash
-PYTHONPATH=. uv run python -m unittest eval_harness.skill_evaluator.tests.test_skill_eval_core
+PYTHONPATH=. uv run python -m unittest eval_harness.evaluator.skill_invocation.tests.test_skill_eval_core
 ```
 
 Validate EAS workflows:

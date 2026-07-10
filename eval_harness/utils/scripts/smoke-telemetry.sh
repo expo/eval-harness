@@ -13,7 +13,7 @@
 # All telemetry lands under $TELEMETRY_DIR for the workflow to upload as an artifact.
 set -uo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 TELEMETRY_DIR="${TELEMETRY_DIR:-$ROOT/telemetry}"
 mkdir -p "$TELEMETRY_DIR"
 

@@ -2,9 +2,9 @@
 # Analyze an authored-app artifact for Expo skill-use evidence.
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 
-CASE_SPEC="${CASE_SPEC:-eval_harness/skill_evaluator/skill_cases/core5/native-data-fetching.json}"
+CASE_SPEC="${CASE_SPEC:-eval_harness/evaluator/skill_invocation/skill_cases/core5/native-data-fetching.json}"
 SCENARIO="${SCENARIO:-skills_available_unmentioned}"
 OUT_DIR="${OUT_DIR:-skill-eval-report}"
 AUTHORED_ARTIFACT="${AUTHORED_ARTIFACT:-}"
@@ -29,5 +29,5 @@ if [ -n "$EVAL_ARTIFACT" ]; then
 fi
 
 PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}" \
-  python3 -m eval_harness.skill_evaluator.main analyze-artifacts "${args[@]}"
+  python3 -m eval_harness.evaluator.skill_invocation.main analyze-artifacts "${args[@]}"
 find "$OUT_DIR" -maxdepth 3 -type f -print | sort

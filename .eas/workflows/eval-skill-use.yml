@@ -3,7 +3,7 @@
 #
 # Example:
 #   eas workflow:run .eas/workflows/eval-skill-use.yml \
-#     -F case_spec=eval_harness/skill_evaluator/skill_cases/core5/expo-ui-lists.json \
+#     -F case_spec=eval_harness/evaluator/skill_invocation/skill_cases/core5/expo-ui-lists.json \
 #     -F authored_app_url='https://wf-artifacts.eascdn.net/.../authored-app.tar.gz?...' \
 #     -F scenario=skills_available_unmentioned
 name: eval-skill-use
@@ -14,7 +14,7 @@ on:
       case_spec:
         type: string
         required: true
-        description: Skill-eval case spec path under eval_harness/skill_evaluator/skill_cases/
+        description: Skill-eval case spec path under eval_harness/evaluator/skill_invocation/skill_cases/
       authored_app_artifact_id:
         type: string
         required: false
@@ -103,7 +103,7 @@ jobs:
           EVAL_ARTIFACT="$EVAL_ARTIFACT" \
           SCENARIO='${{ inputs.scenario }}' \
           OUT_DIR=skill-eval-report \
-          bash ./eval_harness/scripts/eval-skill-use.sh
+          bash ./eval_harness/evaluator/skill_invocation/scripts/eval-skill-use.sh
 
       - name: Package skill-eval report
         if: ${{ always() }}

@@ -4,24 +4,24 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from eval_harness.skill_evaluator.analysis import (
+from eval_harness.evaluator.skill_invocation.analysis import (
     aggregate_skill_results,
     analyze_artifacts,
     classify_skill,
     discover_artifact_layout,
     score_case_run,
 )
-from eval_harness.skill_evaluator.static_checks import (
+from eval_harness.evaluator.skill_invocation.static_checks import (
     detect_triggered_skills,
     run_static_checks,
     score_trigger_quality,
 )
-from eval_harness.skill_evaluator.utils import load_case_spec, unpack_artifact
+from eval_harness.evaluator.skill_invocation.utils import load_case_spec, unpack_artifact
 
 
 class SkillEvalCoreTests(unittest.TestCase):
     def test_core5_case_specs_load(self):
-        case_dir = Path(__file__).parents[2] / "skill_evaluator" / "skill_cases" / "core5"
+        case_dir = Path(__file__).parents[1] / "skill_cases" / "core5"
         specs = sorted(case_dir.glob("*.json"))
 
         self.assertEqual(len(specs), 5)

@@ -3,7 +3,7 @@
 # skills/plugins without running the full app authoring/evaluation harness.
 set -uo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 AGENT="${AGENT:-codex}"
 [ "$AGENT" = "claude" ] && AGENT="claude-code"
 AGENT_MODEL="${AGENT_MODEL:-}"

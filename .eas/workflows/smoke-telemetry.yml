@@ -31,7 +31,7 @@ jobs:
         # ANTHROPIC_API_KEY / OPENAI_API_KEY arrive via `environment: production`
         # injection above — no env: mapping needed. Model overrides (CC_MODEL /
         # CODEX_MODEL) default inside smoke-telemetry.sh.
-        run: bash ./eval_harness/scripts/smoke-telemetry.sh
+        run: bash ./eval_harness/utils/scripts/smoke-telemetry.sh
 
       # tar ourselves -> clean `telemetry/` root (upload_artifact bakes in abs paths)
       - name: Package telemetry

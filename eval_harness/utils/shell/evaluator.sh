@@ -16,7 +16,7 @@ eval::run_evaluator() { # eval_dir test_plan prd out_json out_dir [extra args...
   else TO="python3 $_EVAL_STAGES_DIR/timeout_exec.py 1800"; fi
   local rc
   if [ "${EVAL_STREAM_LOGS:-1}" = "1" ]; then
-    ( cd "$eval_dir" && $TO uv run python -m eval_harness.app_evaluator.main \
+    ( cd "$eval_dir" && $TO uv run python -m eval_harness.evaluator.ios_agentic.main \
         "$test_plan" \
         --prd "$prd" \
         -d agent-device \
@@ -24,7 +24,7 @@ eval::run_evaluator() { # eval_dir test_plan prd out_json out_dir [extra args...
         -o "$out_json" --verbose "$@" ) 2>&1 | tee "$out/s7-eval.log"
     rc=${PIPESTATUS[0]}
   else
-    ( cd "$eval_dir" && $TO uv run python -m eval_harness.app_evaluator.main \
+    ( cd "$eval_dir" && $TO uv run python -m eval_harness.evaluator.ios_agentic.main \
         "$test_plan" \
         --prd "$prd" \
         -d agent-device \

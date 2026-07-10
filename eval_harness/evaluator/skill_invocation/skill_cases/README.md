@@ -31,8 +31,8 @@ from — pick whatever label fits the comparison you're running, for example:
 Analyze an EAS-authored app bundle:
 
 ```bash
-PYTHONPATH=. python3 -m eval_harness.skill_evaluator.main analyze-artifacts \
-  --case eval_harness/skill_evaluator/skill_cases/core5/expo-ui-lists.json \
+PYTHONPATH=. python3 -m eval_harness.evaluator.skill_invocation.main analyze-artifacts \
+  --case eval_harness/evaluator/skill_invocation/skill_cases/core5/expo-ui-lists.json \
   --authored-artifact /path/to/authored-app.tar.gz \
   --scenario skills_available_unmentioned \
   --out-dir skill-eval-report

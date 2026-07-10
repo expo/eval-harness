@@ -9,32 +9,43 @@ runner plus uploaded artifacts.
 
 ## Current Shape
 
-- `eval_harness/app_evaluator/`: mobile app evaluator package. It drives iOS apps with `agent-device` and scores app-agnostic primitive test plans against a PRD.
-- `eval_harness/skill_evaluator/`: v0 skill-use analyzer package. It inspects authored app artifacts, authoring traces, static uptake checks, and optional evaluator outcomes.
-- `eval_harness/scripts/`: workflow entrypoints called by `.eas/workflows/*.yml`.
-- `eval_harness/prompts/`: coding-agent prompt templates.
-- `eval_harness/utils/`: shared artifacts, iOS, shell, and telemetry helpers.
-- `eval_harness/app_evaluator/reference_apps/notes/`: known-good reference app for smoke testing.
+- `eval_harness/app_builder/`: authoring side. `prompts/author_app.md` is the
+  coding-agent prompt template; `scripts/` holds its workflow entrypoints
+  (`author-app.sh`, `smoke-agent-skill.sh`).
+- `eval_harness/evaluator/ios_agentic/`: mobile app evaluator package. It drives
+  iOS apps with `agent-device` and scores app-agnostic primitive test plans
+  against a PRD. `prompts/prompt_agent.py` is its system prompt; `scripts/`
+  holds `eval-ios-app.sh` and `smoke-eval-standalone.sh`.
+- `eval_harness/evaluator/skill_invocation/`: v0 skill-use analyzer package. It
+  inspects authored app artifacts, authoring traces, static uptake checks, and
+  optional evaluator outcomes. `scripts/` holds `eval-skill-use.sh`.
+- `eval_harness/prds/`: Notes/Hot Chocolate/Wiki Reader PRDs — shared between
+  app_builder (authoring input) and evaluator/ios_agentic (injected scoring
+  context via `--prd`).
+- `eval_harness/utils/`: shared artifacts, iOS, shell, and telemetry helpers
+  used by both app_builder and evaluator. `scripts/` holds the shared
+  `smoke-telemetry.sh`.
+- `eval_harness/evaluator/ios_agentic/reference_apps/notes/`: known-good
+  reference app for smoke testing.
 
 ## Important Invariants
 
 - `eval-e2e.yml` is the front door. The smaller workflows are replay/debug
   entrypoints, not the primary user journey.
-- The app evaluator CLI is `python -m eval_harness.app_evaluator.main`.
-- The skill evaluator CLI is `python -m eval_harness.skill_evaluator.main`.
+- The app evaluator CLI is `python -m eval_harness.evaluator.ios_agentic.main`.
+- The skill evaluator CLI is `python -m eval_harness.evaluator.skill_invocation.main`.
 - Notes smoke input paths:
-  - PRD: `eval_harness/app_evaluator/prds/notes/prd/mvp.txt`
-  - plan: `eval_harness/app_evaluator/test_plans/primitives/test_insert.txt`
-  - app: `eval_harness/app_evaluator/reference_apps/notes/`
+  - PRD: `eval_harness/prds/notes/prd/mvp.txt`
+  - plan: `eval_harness/evaluator/ios_agentic/test_plans/primitives/test_insert.txt`
+  - app: `eval_harness/evaluator/ios_agentic/reference_apps/notes/`
 - Artifact bundles keep their index file named `manifest.json`.
 - Skill-eval report artifacts are named `skill-eval-report` and contain
   `metrics.json` plus `report.html`.
 - `eval_harness/utils/artifacts/collect_artifacts.sh` is a helper called from shell traps, not a workflow job.
 - `eval_harness/legacy/` is archival. Do not wire new workflows or docs to files there.
 - Do not add new root-level harness folders unless there is a strong reason.
-  Runtime/evaluator code should live under `eval_harness/app_evaluator/`,
-  `eval_harness/skill_evaluator/`, `eval_harness/scripts/`,
-  `eval_harness/prompts/`, or `eval_harness/utils/`.
+  Runtime/evaluator code should live under `eval_harness/app_builder/`,
+  `eval_harness/evaluator/`, `eval_harness/prds/`, or `eval_harness/utils/`.
 - Expo project routing belongs in `app.config.js` and should remain configurable
   through `EAS_PROJECT_ID`, `EXPO_SLUG`, `EXPO_OWNER`, and `EXPO_APP_NAME`.
 - Authoring always uses a direct `prd` input, passed straight to `author-app.sh`.
@@ -82,8 +93,8 @@ runner plus uploaded artifacts.
 ## PRD And Prompt Guidance
 
 - PRDs should describe product behavior, not patch over framework mistakes.
-  Framework-specific guardrails belong in `eval_harness/prompts/` only when they
-  are part of the experimental condition.
+  Framework-specific guardrails belong in `eval_harness/app_builder/prompts/`
+  only when they are part of the experimental condition.
 - Notes is the stable reference target. Use it first when proving harness changes.
 - Hot Chocolate and other richer PRDs are better for product realism, but expect
   authored-app defects to be part of the signal.
@@ -91,7 +102,7 @@ runner plus uploaded artifacts.
 ## Verification Commands
 
 ```bash
-find eval_harness/scripts eval_harness/utils -name '*.sh' -print0 | xargs -0 bash -n
-PYTHONPATH=. uv run python -m unittest eval_harness.skill_evaluator.tests.test_skill_eval_core
+find eval_harness -name '*.sh' -print0 | xargs -0 bash -n
+PYTHONPATH=. uv run python -m unittest eval_harness.evaluator.skill_invocation.tests.test_skill_eval_core
 node /Users/adityashukla/.codex/plugins/cache/openai-curated-remote/expo/1.0.2/skills/expo-cicd-workflows/scripts/validate.js .eas/workflows/*.yml
 ```

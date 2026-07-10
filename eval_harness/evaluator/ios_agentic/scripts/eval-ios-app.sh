@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Build, run, and evaluate an app authored by eval_harness/scripts/author-app.sh.
+# Build, run, and evaluate an app authored by eval_harness/app_builder/scripts/author-app.sh.
 #
 # This is the macOS half of eval-e2e.yml. The workflow downloads and extracts the
 # authored-app artifact first, so this script expects agent-workspace/<RUN_ID> and
 # eval-out/<RUN_ID>/author.env to already exist.
 set -uo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 EVAL="$ROOT"
 # shellcheck source=eval_harness/utils/shell/eval_stages.sh
 source "$ROOT/eval_harness/utils/shell/eval_stages.sh"
@@ -38,8 +38,8 @@ AGENT_MODEL="${AGENT_MODEL:-}"
 if [ -z "$AGENT_MODEL" ]; then
   if [ "$AGENT" = "codex" ]; then AGENT_MODEL="${CODEX_MODEL:-gpt-5-mini}"; else AGENT_MODEL="sonnet"; fi
 fi
-PRD="${PRD_OVERRIDE:-${PRD:-eval_harness/app_evaluator/prds/hot_chocolate/prd/mvp.txt}}"
-TEST_PLAN="${TEST_PLAN_OVERRIDE:-eval_harness/app_evaluator/test_plans/primitives}"
+PRD="${PRD_OVERRIDE:-${PRD:-eval_harness/prds/hot_chocolate/prd/mvp.txt}}"
+TEST_PLAN="${TEST_PLAN_OVERRIDE:-eval_harness/evaluator/ios_agentic/test_plans/primitives}"
 export RUN_ID RUN_START_MTIME OUT WORKSPACE TELEMETRY_DIR METRO_MODE AGENT AGENT_MODEL PRD TEST_PLAN
 
 ANTHROPIC_PROXY_PORT=8082
