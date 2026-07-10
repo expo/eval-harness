@@ -15,7 +15,7 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 EVAL="$ROOT"
-APP="$ROOT/eval_harness/evaluator/ios_agentic/reference_apps/notes"
+APP="$ROOT/eval_harness/reference_apps/notes"
 OUT="$ROOT/eval-out"; mkdir -p "$OUT"
 export CI=1 EXPO_NO_TELEMETRY=1
 
@@ -36,7 +36,7 @@ if ! eval::probe_snapshot "$OUT" "host.exp.Exponent"; then
     exit 1
 fi
 eval::run_evaluator "$EVAL" \
-    eval_harness/evaluator/ios_agentic/test_plans/primitives/test_insert.txt \
+    eval_harness/test_plans/primitives/test_insert.txt \
     eval_harness/prds/notes/prd/mvp.txt \
     "$OUT/result.json" \
     "$OUT" \

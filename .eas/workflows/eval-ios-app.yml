@@ -26,7 +26,7 @@ on:
         description: PRD path under eval_harness/
       test_plan:
         type: string
-        default: eval_harness/evaluator/ios_agentic/test_plans/primitives
+        default: eval_harness/test_plans/primitives
         required: false
         description: Test plan file or directory under eval_harness/
       ios_app_mode:

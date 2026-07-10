@@ -22,11 +22,13 @@ runner plus uploaded artifacts.
 - `eval_harness/prds/`: Notes/Hot Chocolate/Wiki Reader PRDs — shared between
   app_builder (authoring input) and evaluator/ios_agentic (injected scoring
   context via `--prd`).
+- `eval_harness/test_plans/`: app-agnostic primitive test plans — evaluator-only,
+  but kept at the top level alongside `reference_apps/` rather than nested.
+- `eval_harness/reference_apps/notes/`: known-good reference app for smoke
+  testing.
 - `eval_harness/utils/`: shared artifacts, iOS, shell, and telemetry helpers
   used by both app_builder and evaluator. `scripts/` holds the shared
   `smoke-telemetry.sh`.
-- `eval_harness/evaluator/ios_agentic/reference_apps/notes/`: known-good
-  reference app for smoke testing.
 
 ## Important Invariants
 
@@ -36,8 +38,8 @@ runner plus uploaded artifacts.
 - The skill evaluator CLI is `python -m eval_harness.evaluator.skill_invocation.main`.
 - Notes smoke input paths:
   - PRD: `eval_harness/prds/notes/prd/mvp.txt`
-  - plan: `eval_harness/evaluator/ios_agentic/test_plans/primitives/test_insert.txt`
-  - app: `eval_harness/evaluator/ios_agentic/reference_apps/notes/`
+  - plan: `eval_harness/test_plans/primitives/test_insert.txt`
+  - app: `eval_harness/reference_apps/notes/`
 - Artifact bundles keep their index file named `manifest.json`.
 - Skill-eval report artifacts are named `skill-eval-report` and contain
   `metrics.json` plus `report.html`.
@@ -45,7 +47,8 @@ runner plus uploaded artifacts.
 - `eval_harness/legacy/` is archival. Do not wire new workflows or docs to files there.
 - Do not add new root-level harness folders unless there is a strong reason.
   Runtime/evaluator code should live under `eval_harness/app_builder/`,
-  `eval_harness/evaluator/`, `eval_harness/prds/`, or `eval_harness/utils/`.
+  `eval_harness/evaluator/`, `eval_harness/prds/`, `eval_harness/test_plans/`,
+  `eval_harness/reference_apps/`, or `eval_harness/utils/`.
 - Expo project routing belongs in `app.config.js` and should remain configurable
   through `EAS_PROJECT_ID`, `EXPO_SLUG`, `EXPO_OWNER`, and `EXPO_APP_NAME`.
 - Authoring always uses a direct `prd` input, passed straight to `author-app.sh`.

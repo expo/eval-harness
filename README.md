@@ -77,7 +77,7 @@ Run the full modular E2E workflow for Notes:
 eas workflow:run .eas/workflows/eval-e2e.yml \
   -F agent=claude-code \
   -F prd=eval_harness/prds/notes/prd/mvp.txt \
-  -F test_plan=eval_harness/evaluator/ios_agentic/test_plans/primitives/test_insert.txt \
+  -F test_plan=eval_harness/test_plans/primitives/test_insert.txt \
   -F run_eval_ios=true \
   -F run_eval_skill=false
 ```
@@ -88,7 +88,7 @@ Use Codex by changing the agent and ensuring `OPENAI_API_KEY` is present:
 eas workflow:run .eas/workflows/eval-e2e.yml \
   -F agent=codex \
   -F prd=eval_harness/prds/notes/prd/mvp.txt \
-  -F test_plan=eval_harness/evaluator/ios_agentic/test_plans/primitives/test_insert.txt \
+  -F test_plan=eval_harness/test_plans/primitives/test_insert.txt \
   -F run_eval_ios=true \
   -F run_eval_skill=false
 ```
@@ -179,7 +179,7 @@ because they match the runner environment.
 
 ```bash
 uv run python -m eval_harness.evaluator.ios_agentic.main \
-  eval_harness/evaluator/ios_agentic/test_plans/primitives/test_insert.txt \
+  eval_harness/test_plans/primitives/test_insert.txt \
   --prd eval_harness/prds/notes/prd/mvp.txt \
   -d agent-device \
   --hybrid-restart \
