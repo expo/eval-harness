@@ -41,8 +41,6 @@ eval_harness/
 dataset/
   prds/                       # Notes, Hot Chocolate, and Wiki Reader app PRDs (shared)
   test_plans/primitives/      # app-agnostic primitive plans
-
-reference_apps/notes/         # checked-in Notes reference app
 ```
 
 ## Setup

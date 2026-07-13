@@ -27,8 +27,6 @@ runner plus uploaded artifacts.
   `eval_harness/` since it's a dataset, not runtime code.
 - `dataset/test_plans/`: app-agnostic primitive test plans — evaluator-only,
   also at the repo root alongside `dataset/prds/` for the same reason.
-- `reference_apps/notes/`: known-good reference app. Also at the repo root,
-  not under `eval_harness/`, for the same reason as `dataset/`.
 
 ## Important Invariants
 
@@ -40,7 +38,6 @@ runner plus uploaded artifacts.
   proving harness changes):
   - PRD: `dataset/prds/notes/prd/mvp.txt`
   - plan: `dataset/test_plans/primitives/test_insert.txt`
-  - app: `reference_apps/notes/`
 - Artifact bundles keep their index file named `manifest.json`.
 - Skill-eval report artifacts are named `skill-eval-report` and contain
   `metrics.json` plus `report.html`.
@@ -48,9 +45,8 @@ runner plus uploaded artifacts.
 - `eval_harness/legacy/` is archival. Do not wire new workflows or docs to files there.
 - Do not add new root-level folders unless there is a strong reason. Runtime
   code should live under `eval_harness/app_builder/`, `eval_harness/evaluator/`,
-  or `eval_harness/utils/`. `dataset/` (PRDs, test plans) and `reference_apps/`
-  are the two intentional exceptions, since they're data/fixtures rather than
-  runtime code.
+  or `eval_harness/utils/`. `dataset/` (PRDs, test plans) is the one
+  intentional exception, since it's data/fixtures rather than runtime code.
 - Expo project routing belongs in `app.config.js` and should remain configurable
   through `EAS_PROJECT_ID`, `EXPO_SLUG`, `EXPO_OWNER`, and `EXPO_APP_NAME`.
 - Authoring always uses a direct `prd` input, passed straight to `author-app.sh`.
