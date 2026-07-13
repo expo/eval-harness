@@ -1,7 +1,6 @@
 {
-  "id": "building-native-ui-settings",
+  "id": "expo-native-ui",
   "feature_focus": "native grouped settings screen with platform-safe styling",
-  "expected_skills": ["expo-native-ui"],
   "static_uptake_checks": [
     {"id": "uses_expo_router", "kind": "import", "target": "expo-router"},
     {"id": "uses_switch", "kind": "text", "target": "Switch"},

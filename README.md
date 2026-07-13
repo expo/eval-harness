@@ -29,7 +29,7 @@ eval_harness/
       prompts/                # agentic evaluator's system prompt
       scripts/                # iOS build+eval entrypoints
     skill_invocation/
-      skill_cases/core5/      # skill case specs (expected skills + static checks)
+      skill_cases/            # one case spec per skill (id + static checks)
       main.py                 # analyze-artifacts CLI
       analysis.py             # scoring, aggregation, metrics.json, report.html
       static_checks.py        # source checks and trace skill detection

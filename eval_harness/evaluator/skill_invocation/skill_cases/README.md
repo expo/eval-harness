@@ -3,9 +3,8 @@
 Case specs are not runtime app code. Each one is scoped to a single skill and
 declares:
 
-- `expected_skills`: the skill id this case covers (a skill can only be
-  covered by one case; `load_case_specs_by_skill` indexes all of `core5/` by
-  skill id),
+- `id`: the skill id this case covers (`load_case_specs_by_skill` indexes
+  every case spec in this directory by its `id`; one file per skill),
 - `static_uptake_checks`: the static source-code checks that verify the
   resulting app actually followed that skill's guidance.
 
@@ -52,5 +51,5 @@ PYTHONPATH=. python3 -m eval_harness.evaluator.skill_invocation.main analyze-art
 ```
 
 `--prd-skills` and `--case-dir` default to `dataset/prd_skills.json` and this
-`core5/` directory respectively; pass them explicitly only to point at a
-different ground-truth map or case set for local debugging.
+directory respectively; pass them explicitly only to point at a different
+ground-truth map or case set for local debugging.

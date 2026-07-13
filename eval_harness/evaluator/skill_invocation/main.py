@@ -10,7 +10,7 @@ from .utils import unpack_artifact
 
 _PACKAGE_DIR = Path(__file__).resolve().parent
 _REPO_ROOT = _PACKAGE_DIR.parents[2]
-_DEFAULT_CASE_DIR = _PACKAGE_DIR / "skill_cases" / "core5"
+_DEFAULT_CASE_DIR = _PACKAGE_DIR / "skill_cases"
 _DEFAULT_PRD_SKILLS = _REPO_ROOT / "dataset" / "prd_skills.json"
 
 
@@ -29,7 +29,7 @@ def main() -> None:
     )
     artifacts.add_argument(
         "--case-dir", type=Path, default=_DEFAULT_CASE_DIR,
-        help="Directory of case specs providing static_uptake_checks per skill (default: skill_cases/core5)",
+        help="Directory of case specs providing static_uptake_checks per skill (default: skill_cases)",
     )
 
     args = parser.parse_args()

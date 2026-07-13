@@ -1,7 +1,6 @@
 {
-  "id": "native-data-fetching",
+  "id": "expo-data-fetching",
   "feature_focus": "mobile-safe async data loading, refresh, and error states",
-  "expected_skills": ["expo-data-fetching"],
   "static_uptake_checks": [
     {"id": "uses_effect_or_query", "kind": "text_any", "target": "useEffect|useQuery|SWR"},
     {"id": "has_loading_state", "kind": "text", "target": "loading"},

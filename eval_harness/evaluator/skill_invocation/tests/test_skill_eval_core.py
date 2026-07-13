@@ -28,14 +28,14 @@ def _trace(agent, tool_calls_by_step):
 
 
 class SkillEvalCoreTests(unittest.TestCase):
-    def test_core5_case_specs_load(self):
-        case_dir = Path(__file__).parents[1] / "skill_cases" / "core5"
+    def test_case_specs_load(self):
+        case_dir = Path(__file__).parents[1] / "skill_cases"
         specs = sorted(case_dir.glob("*.json"))
 
         self.assertEqual(len(specs), 5)
         for path in specs:
             spec = load_case_spec(path)
-            self.assertTrue(spec.expected_skills, path.name)
+            self.assertTrue(spec.id, path.name)
             self.assertTrue(spec.static_uptake_checks, path.name)
 
     def test_app_name_from_prd_extracts_app_segment(self):
@@ -44,8 +44,8 @@ class SkillEvalCoreTests(unittest.TestCase):
         self.assertEqual(app_name_from_prd("dataset/prds/notes/prd/mvp.txt"), "notes")
         self.assertIsNone(app_name_from_prd("some/other/path.txt"))
 
-    def test_load_case_specs_by_skill_indexes_core5_by_skill_id(self):
-        case_dir = Path(__file__).parents[1] / "skill_cases" / "core5"
+    def test_load_case_specs_by_skill_indexes_by_id(self):
+        case_dir = Path(__file__).parents[1] / "skill_cases"
 
         by_skill = load_case_specs_by_skill(case_dir)
 
@@ -57,9 +57,8 @@ class SkillEvalCoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             spec_path = Path(td) / "case.json"
             spec_path.write_text(json.dumps({
-                "id": "settings-ui",
+                "id": "expo-native-ui",
                 "feature_focus": "native settings screen",
-                "expected_skills": ["expo-native-ui", "expo-ui"],
                 "static_uptake_checks": [
                     {"id": "uses_expo_ui", "kind": "import", "target": "@expo/ui"}
                 ],
@@ -67,8 +66,8 @@ class SkillEvalCoreTests(unittest.TestCase):
 
             spec = load_case_spec(spec_path)
 
-        self.assertEqual(spec.id, "settings-ui")
-        self.assertEqual(spec.expected_skills, ["expo-native-ui", "expo-ui"])
+        self.assertEqual(spec.id, "expo-native-ui")
+        self.assertFalse(hasattr(spec, "expected_skills"))
         self.assertFalse(hasattr(spec, "skill_family"))
         self.assertFalse(hasattr(spec, "test_plan"))
 
@@ -435,7 +434,7 @@ class SkillEvalCoreTests(unittest.TestCase):
     def _write_ground_truth(self, root: Path, *skills: str) -> tuple[Path, Path]:
         """Write a minimal dataset/prd_skills.json (app "test-app" -> skills)
         plus a case-spec directory covering each skill, mirroring the real
-        dataset/prd_skills.json + skill_cases/core5 pairing."""
+        dataset/prd_skills.json + skill_cases pairing."""
         prd_skills_path = root / "prd_skills.json"
         prd_skills_path.write_text(json.dumps({"test-app": list(skills)}))
 
@@ -445,7 +444,6 @@ class SkillEvalCoreTests(unittest.TestCase):
             (case_dir / f"{skill}.json").write_text(json.dumps({
                 "id": skill,
                 "feature_focus": "artifact analysis",
-                "expected_skills": [skill],
                 "static_uptake_checks": [
                     {"id": "uses_expo_ui", "kind": "import", "target": "@expo/ui"}
                 ],

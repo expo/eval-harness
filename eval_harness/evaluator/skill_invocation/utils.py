@@ -13,7 +13,6 @@ from typing import Any
 class SkillEvalCase:
     id: str
     feature_focus: str
-    expected_skills: list[str]
     static_uptake_checks: list[dict[str, Any]]
 
 
@@ -23,7 +22,6 @@ def load_case_spec(path: Path | str) -> SkillEvalCase:
     required = [
         "id",
         "feature_focus",
-        "expected_skills",
         "static_uptake_checks",
     ]
     missing = [key for key in required if key not in data]
@@ -32,23 +30,21 @@ def load_case_spec(path: Path | str) -> SkillEvalCase:
     return SkillEvalCase(
         id=str(data["id"]),
         feature_focus=str(data["feature_focus"]),
-        expected_skills=list(data["expected_skills"]),
         static_uptake_checks=list(data["static_uptake_checks"]),
     )
 
 
 def load_case_specs_by_skill(case_dir: Path | str) -> dict[str, SkillEvalCase]:
-    """Index every case spec under `case_dir` by each skill id it declares.
-
-    Lets analysis auto-resolve "which case file covers this skill" instead of
-    a human picking one file by hand. If two case files somehow declare the
-    same skill id, the first one found (sorted by filename) wins.
+    """Index every case spec under `case_dir` by its `id` -- one case per
+    skill, `id` *is* the skill id it covers. Lets analysis auto-resolve
+    "which case file covers this skill" instead of a human picking one file
+    by hand. If two case files somehow share an `id`, the first one found
+    (sorted by filename) wins.
     """
     by_skill: dict[str, SkillEvalCase] = {}
     for path in sorted(Path(case_dir).glob("*.json")):
         case = load_case_spec(path)
-        for skill_id in case.expected_skills:
-            by_skill.setdefault(skill_id, case)
+        by_skill.setdefault(case.id, case)
     return by_skill
 
 

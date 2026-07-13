@@ -60,7 +60,7 @@ runner plus uploaded artifacts.
   their uptake, is resolved automatically: `analyze_artifacts` reads the `prd`
   recorded in the artifact's `manifest.json`, looks up the app's expected
   skill set in `dataset/prd_skills.json`, and loads each skill's
-  `static_uptake_checks` from whichever `skill_cases/core5/*.json` declares
+  `static_uptake_checks` from whichever `skill_cases/*.json` declares
   it. There is no manual case-spec selection anymore.
 - `test_plan` is an app-evaluator input. It is not part of skill-use analysis.
 
