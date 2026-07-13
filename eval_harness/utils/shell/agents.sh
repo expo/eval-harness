@@ -135,49 +135,73 @@ EOF
 
 # Runs the selected coding agent. Globals it reads when agent=codex:
 #   CODEX_HOME, OPENAI_PROXY_PORT, OTLP_PORT, CODEX_MODEL
+# Also reads SCENARIO (default skills_available_unmentioned) and, only for the
+# "skills_available_mentioned" scenario, SKILL_MENTION (a skill id to name
+# explicitly in the prompt). "skills_unavailable" is the enforced
+# negative-control config: skill install and Expo MCP wiring are both skipped
+# entirely, so nothing exists for the agent to trigger -- see
+# skill_invocation's UNAVAILABLE_SCENARIOS, which scores against this same
+# enforced absence.
 eval::run_coding_agent() { # agent root workspace prd_file out_dir [model]
   local agent="$1" root="$2" workspace="$3" prd_file="$4" out="$5" model="${6:-}"
   [ "$agent" = "claude" ] && agent="claude-code"
+  local scenario="${SCENARIO:-skills_available_unmentioned}"
+  local skills_enabled=1
+  [ "$scenario" = "skills_unavailable" ] && skills_enabled=0
   echo "================= STAGE C: coding agent ($agent) authors the app ================="
+  echo "  scenario=$scenario  skills_enabled=$skills_enabled"
   local prompt TO
   prompt="$(cat "$root/eval_harness/app_builder/prompts/author_app.md")"$'\n\n## App PRD\n\n'"$(cat "$prd_file")"
+  if [ "$scenario" = "skills_available_mentioned" ] && [ -n "${SKILL_MENTION:-}" ]; then
+    prompt="$prompt"$'\n\n## Guidance\n\nExplicitly use Expo'"'"'s "'"$SKILL_MENTION"'" skill/guidance for the relevant part of this feature.'
+  fi
   TO="$(eval::_agent_timeout)"
 
   if [ "$agent" = "codex" ]; then
     if ! command -v codex >/dev/null 2>&1; then echo "  ❌ codex not on PATH"; return 127; fi
     export CODEX_HOME="${CODEX_HOME:-$out/codex-home}"
-    eval::_write_codex_config "$CODEX_HOME" "${model:-${CODEX_MODEL:-gpt-5-mini}}" \
+    local codex_bearer="${EXPO_MCP_BEARER_TOKEN:-}"
+    [ "$skills_enabled" = 1 ] || codex_bearer=""
+    EXPO_MCP_BEARER_TOKEN="$codex_bearer" eval::_write_codex_config "$CODEX_HOME" "${model:-${CODEX_MODEL:-gpt-5-mini}}" \
       "${OPENAI_PROXY_PORT:-8082}" "${OTLP_PORT:-4318}"
-    # Install Expo skills into the authored workspace. A fresh CI CODEX_HOME
-    # does not have the reserved openai-curated marketplace configured, so use
-    # Expo's generic skills installer. Expo MCP requires OAuth; wire it only
-    # when a dedicated MCP bearer token has been provided.
-    {
-      if [ -n "${EXPO_MCP_BEARER_TOKEN:-}" ]; then
-        echo "Expo MCP configured with EXPO_MCP_BEARER_TOKEN"
-      else
-        echo "Expo MCP not configured: set EXPO_MCP_BEARER_TOKEN to enable it"
-      fi
-      codex mcp list --json || true
-      ( cd "$workspace" && npx -y skills add expo/skills --yes )
-    } >"$out/c-plugin.log" 2>&1 || \
-      echo "  ⚠️  npx skills add expo/skills failed (continuing; see c-plugin.log)"
+    if [ "$skills_enabled" = 1 ]; then
+      # Install Expo skills into the authored workspace. A fresh CI CODEX_HOME
+      # does not have the reserved openai-curated marketplace configured, so use
+      # Expo's generic skills installer. Expo MCP requires OAuth; wire it only
+      # when a dedicated MCP bearer token has been provided.
+      {
+        if [ -n "$codex_bearer" ]; then
+          echo "Expo MCP configured with EXPO_MCP_BEARER_TOKEN"
+        else
+          echo "Expo MCP not configured: set EXPO_MCP_BEARER_TOKEN to enable it"
+        fi
+        codex mcp list --json || true
+        ( cd "$workspace" && npx -y skills add expo/skills --yes )
+      } >"$out/c-plugin.log" 2>&1 || \
+        echo "  ⚠️  npx skills add expo/skills failed (continuing; see c-plugin.log)"
+    else
+      echo "skills_unavailable scenario: skipping Expo skill install and MCP wiring" >"$out/c-plugin.log"
+    fi
     ( cd "$workspace" && $TO codex exec "$prompt" ) 2>&1 | tee "$out/c-agent.log"
     local rc=${PIPESTATUS[0]}
     eval::gate $rc "codex authored app"
     return $rc
   else
     if ! command -v claude >/dev/null 2>&1; then echo "  ❌ claude not on PATH"; return 127; fi
-    # Install the official Expo plugin: bundles the Expo skills AND the Expo MCP
-    # server, so we don't hand-wire `claude mcp add`. EAS workers start with a
-    # clean Claude home, so seed the marketplace before installing the plugin.
-    claude plugin marketplace add anthropics/claude-plugins-official >"$out/c-plugin.log" 2>&1 || \
-      claude plugin marketplace update claude-plugins-official >>"$out/c-plugin.log" 2>&1 || \
-      echo "  ⚠️  claude plugin marketplace setup failed (continuing; see c-plugin.log)"
-    claude plugin install expo@claude-plugins-official >>"$out/c-plugin.log" 2>&1 || \
-      echo "  ⚠️  claude plugin install expo@claude-plugins-official failed (continuing; see c-plugin.log)"
-    local settings_arg
-    settings_arg="$(eval::_claude_expo_mcp_settings_arg "$workspace")"
+    local settings_arg=""
+    if [ "$skills_enabled" = 1 ]; then
+      # Install the official Expo plugin: bundles the Expo skills AND the Expo
+      # MCP server, so we don't hand-wire `claude mcp add`. EAS workers start
+      # with a clean Claude home, so seed the marketplace before installing.
+      claude plugin marketplace add anthropics/claude-plugins-official >"$out/c-plugin.log" 2>&1 || \
+        claude plugin marketplace update claude-plugins-official >>"$out/c-plugin.log" 2>&1 || \
+        echo "  ⚠️  claude plugin marketplace setup failed (continuing; see c-plugin.log)"
+      claude plugin install expo@claude-plugins-official >>"$out/c-plugin.log" 2>&1 || \
+        echo "  ⚠️  claude plugin install expo@claude-plugins-official failed (continuing; see c-plugin.log)"
+      settings_arg="$(eval::_claude_expo_mcp_settings_arg "$workspace")"
+    else
+      echo "skills_unavailable scenario: skipping Expo plugin install and MCP wiring" >"$out/c-plugin.log"
+    fi
     # Branch on model rather than expanding a possibly-empty array — macOS ships
     # bash 3.2, where "${arr[@]}" on an empty array trips `set -u`.
     if [ -n "$model" ]; then

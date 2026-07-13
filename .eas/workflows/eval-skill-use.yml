@@ -37,7 +37,7 @@ on:
       scenario:
         type: choice
         options:
-          - skills_off_tools_on
+          - skills_unavailable
           - skills_available_unmentioned
           - skills_available_mentioned
         default: skills_available_unmentioned

@@ -14,17 +14,25 @@ checks are relevant to what you're measuring.
 V0 reports metrics per skill and overall only. It intentionally does not invent
 skill-family aggregation, use screenshots, or run an LLM judge.
 
-## Scenario labels
+## Scenarios
 
-`--scenario` is a free-form label you attach at analysis time, used only to
-group results (e.g. `aggregate_skill_results` treats `skills_off_tools_on` /
-`plugin_off_baseline` / `skills_off` as a baseline group when computing an
-outcome delta against other runs). It no longer selects which PRD to author
-from — pick whatever label fits the comparison you're running, for example:
+Scenario is an authoring-time *enforced configuration*, not just an
+analysis-time label: `author-app.sh`'s `SCENARIO` env var controls what
+`eval::run_coding_agent` actually makes available to the coding agent, and the
+value that ran is recorded into `manifest.json` as ground truth. Analysis
+(`--scenario`) prefers that recorded value over whatever was passed in, so a
+mismatched flag can't silently corrupt results.
 
-- `skills_off_tools_on`: a baseline run with the skill/plugin unavailable.
-- `skills_available_unmentioned`: skill available, not explicitly named anywhere.
-- `skills_available_mentioned`: skill available and explicitly named/relevant.
+- `skills_unavailable`: skill install and Expo MCP are both skipped entirely
+  during authoring. This is the negative control — `expected_skills` is
+  forced to `[]` regardless of the case spec, so any skill that still shows
+  up in the trace is a genuine false-positive trigger.
+- `skills_available_unmentioned`: skill available; the PRD/prompt never names
+  it. Tests whether the agent discovers it unprompted.
+- `skills_available_mentioned`: skill available and explicitly named via
+  `SKILL_MENTION` (appended to the authoring prompt). The easier bar — if
+  this doesn't trigger, the skill itself is likely broken, not just
+  under-discovered.
 
 ## Artifact Analysis
 

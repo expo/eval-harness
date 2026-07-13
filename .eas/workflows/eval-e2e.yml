@@ -66,12 +66,20 @@ on:
       skill_scenario:
         type: choice
         options:
-          - skills_off_tools_on
+          - skills_unavailable
           - skills_available_unmentioned
           - skills_available_mentioned
         default: skills_available_unmentioned
         required: false
-        description: Skill-eval scenario label and capability mode
+        description: >-
+          Authoring-enforced skill scenario. skills_unavailable disables skill
+          install and Expo MCP entirely (negative control); the other two only
+          differ in whether the prompt explicitly names skill_mention.
+      skill_mention:
+        type: string
+        default: ''
+        required: false
+        description: Skill id to explicitly name in the prompt; only used when skill_scenario=skills_available_mentioned
 
 jobs:
   author_app:
@@ -81,6 +89,8 @@ jobs:
       AGENT: ${{ inputs.agent || 'claude-code' }}
       AGENT_MODEL: ${{ inputs.agent_model || '' }}
       PRD: ${{ inputs.prd || 'dataset/prds/hot_chocolate/prd/mvp.txt' }}
+      SCENARIO: ${{ inputs.skill_scenario || 'skills_available_unmentioned' }}
+      SKILL_MENTION: ${{ inputs.skill_mention || '' }}
     steps:
       - uses: eas/checkout
 

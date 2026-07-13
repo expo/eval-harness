@@ -135,6 +135,7 @@ RESULT_JSON="$OUT/result.json" RUN_ID="$RUN_ID" AGENT="$AGENT" GIT_SHA="$GIT_SHA
 PRD="${PRD:-dataset/prds/hot_chocolate/prd/mvp.txt}" TEST_PLAN="${TEST_PLAN:-dataset/test_plans/primitives}" \
 AGENT_MODEL="${AGENT_MODEL:-}" METRO_MODE="${METRO_MODE:-dev-build}" \
 EVAL_APP_BUNDLE_ID="${EVAL_APP_BUNDLE_ID:-}" EXPO_MCP_AUTH_STATUS="${EXPO_MCP_AUTH_STATUS:-not_attempted}" \
+SCENARIO="${SCENARIO:-}" \
 "$PY" - "$BUNDLE/manifest.json" <<'PYEOF'
 import json, os, sys
 out = sys.argv[1]
@@ -157,6 +158,7 @@ manifest = {
     "test_plan": os.environ.get("TEST_PLAN"),
     "prd": os.environ.get("PRD"),
     "expo_mcp_auth_status": os.environ.get("EXPO_MCP_AUTH_STATUS"),
+    "scenario": os.environ.get("SCENARIO") or None,
     "score": score, "full_points": full,
     "macro_avg_pct": macro, "micro_pct": micro,
     "artifacts": {
