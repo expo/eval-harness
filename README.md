@@ -16,7 +16,6 @@ has a stable primitive test plan.
   author-app.yml              # Linux authoring replay/debug workflow
   eval-ios-app.yml            # macOS iOS evaluator replay/debug workflow
   eval-skill-use.yml          # Linux skill-use report replay/debug workflow
-  smoke-*.yml                 # narrow infrastructure smoke tests
 
 eval_harness/
   app_builder/
@@ -37,11 +36,13 @@ eval_harness/
       utils.py                # case loading, artifact unpacking, small helpers
       tests/                  # skill evaluator unit tests
       scripts/                # skill-use analysis entrypoint
+  utils/                      # artifacts, iOS, shell, and telemetry helpers (shared)
+
+dataset/
   prds/                       # Notes, Hot Chocolate, and Wiki Reader app PRDs (shared)
   test_plans/primitives/      # app-agnostic primitive plans
-  reference_apps/notes/       # checked-in Notes reference app
-  utils/                      # artifacts, iOS, shell, and telemetry helpers (shared)
-    scripts/                  # shared telemetry smoke entrypoint
+
+reference_apps/notes/         # checked-in Notes reference app
 ```
 
 ## Setup
@@ -76,8 +77,8 @@ Run the full modular E2E workflow for Notes:
 ```bash
 eas workflow:run .eas/workflows/eval-e2e.yml \
   -F agent=claude-code \
-  -F prd=eval_harness/prds/notes/prd/mvp.txt \
-  -F test_plan=eval_harness/test_plans/primitives/test_insert.txt \
+  -F prd=dataset/prds/notes/prd/mvp.txt \
+  -F test_plan=dataset/test_plans/primitives/test_insert.txt \
   -F run_eval_ios=true \
   -F run_eval_skill=false
 ```
@@ -87,8 +88,8 @@ Use Codex by changing the agent and ensuring `OPENAI_API_KEY` is present:
 ```bash
 eas workflow:run .eas/workflows/eval-e2e.yml \
   -F agent=codex \
-  -F prd=eval_harness/prds/notes/prd/mvp.txt \
-  -F test_plan=eval_harness/test_plans/primitives/test_insert.txt \
+  -F prd=dataset/prds/notes/prd/mvp.txt \
+  -F test_plan=dataset/test_plans/primitives/test_insert.txt \
   -F run_eval_ios=true \
   -F run_eval_skill=false
 ```
@@ -101,7 +102,7 @@ analyzer against the resulting artifact, set `run_eval_skill=true` and pass
 ```bash
 eas workflow:run .eas/workflows/eval-e2e.yml \
   -F agent=claude-code \
-  -F prd=eval_harness/prds/notes/prd/mvp.txt \
+  -F prd=dataset/prds/notes/prd/mvp.txt \
   -F run_eval_ios=false \
   -F run_eval_skill=true \
   -F skill_case_spec=eval_harness/evaluator/skill_invocation/skill_cases/core5/native-data-fetching.json \
@@ -145,7 +146,7 @@ plan is needed for author-only runs.
 ```bash
 eas workflow:run .eas/workflows/author-app.yml \
   -F agent=claude-code \
-  -F prd=eval_harness/prds/notes/prd/mvp.txt
+  -F prd=dataset/prds/notes/prd/mvp.txt
 ```
 
 Use `eval-ios-app.yml` to replay the iOS/evaluator half against a previously
@@ -155,14 +156,6 @@ probe logic.
 Use `eval-skill-use.yml` to replay the skill-use analyzer against a prior
 `authored-app` artifact, optionally with an eval output artifact. It uploads the
 same `skill-eval-report` artifact described above.
-
-Use `smoke-eval-standalone.yml` as a preflight for evaluator machinery. It runs
-the checked-in Notes reference app, which separates evaluator/device problems
-from coding-agent/authored-app problems.
-
-Use `smoke-agent-skill.yml` to check whether Claude Code or Codex can see and
-invoke Expo skills in the Workflow environment. Use `smoke-telemetry.yml` to
-check proxy capture and trace reconstruction without authoring an app.
 
 ## Braintrust
 
@@ -179,8 +172,8 @@ because they match the runner environment.
 
 ```bash
 uv run python -m eval_harness.evaluator.ios_agentic.main \
-  eval_harness/test_plans/primitives/test_insert.txt \
-  --prd eval_harness/prds/notes/prd/mvp.txt \
+  dataset/test_plans/primitives/test_insert.txt \
+  --prd dataset/prds/notes/prd/mvp.txt \
   -d agent-device \
   --hybrid-restart \
   -o /tmp/notes-result.json \

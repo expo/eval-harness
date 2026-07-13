@@ -4,18 +4,18 @@ CLI entry point for the agentic evaluator.
 Usage:
     # Single test plan (generic primitive plan + app PRD injected at runtime)
     python -m eval_harness.evaluator.ios_agentic.main \
-        eval_harness/test_plans/primitives/test_insert.txt \
-        --prd eval_harness/prds/notes/prd/mvp.txt \
+        dataset/test_plans/primitives/test_insert.txt \
+        --prd dataset/prds/notes/prd/mvp.txt \
         -d agent-device --hybrid-restart \
         --seed-iterations 200 --max-iterations 50 \
         -o /tmp/result.json --verbose
 
     # Entire directory of test plans
     python -m eval_harness.evaluator.ios_agentic.main \
-        eval_harness/test_plans/primitives/ --prd eval_harness/prds/notes/prd/mvp.txt -o results.json --verbose
+        dataset/test_plans/primitives/ --prd dataset/prds/notes/prd/mvp.txt -o results.json --verbose
 
     # Or via the installed console script:
-    agentic-evaluator eval_harness/test_plans/primitives/test_insert.txt --prd eval_harness/prds/notes/prd/mvp.txt ...
+    agentic-evaluator dataset/test_plans/primitives/test_insert.txt --prd dataset/prds/notes/prd/mvp.txt ...
 """
 
 import argparse

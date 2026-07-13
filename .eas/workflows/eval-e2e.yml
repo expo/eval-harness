@@ -32,14 +32,14 @@ on:
         description: Optional model alias/name; defaults to sonnet for Claude Code and gpt-5-mini for Codex
       prd:
         type: string
-        default: eval_harness/prds/hot_chocolate/prd/mvp.txt
+        default: dataset/prds/hot_chocolate/prd/mvp.txt
         required: false
-        description: PRD path under eval_harness/
+        description: PRD path under dataset/
       test_plan:
         type: string
-        default: eval_harness/test_plans/primitives
+        default: dataset/test_plans/primitives
         required: false
-        description: Test plan file or directory under eval_harness/
+        description: Test plan file or directory under dataset/
       ios_app_mode:
         type: choice
         options:
@@ -80,7 +80,7 @@ jobs:
     env:
       AGENT: ${{ inputs.agent || 'claude-code' }}
       AGENT_MODEL: ${{ inputs.agent_model || '' }}
-      PRD: ${{ inputs.prd || 'eval_harness/prds/hot_chocolate/prd/mvp.txt' }}
+      PRD: ${{ inputs.prd || 'dataset/prds/hot_chocolate/prd/mvp.txt' }}
     steps:
       - uses: eas/checkout
 

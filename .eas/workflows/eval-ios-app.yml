@@ -21,14 +21,14 @@ on:
         description: Signed download URL for an authored-app.tar.gz artifact
       prd:
         type: string
-        default: eval_harness/prds/hot_chocolate/prd/mvp.txt
+        default: dataset/prds/hot_chocolate/prd/mvp.txt
         required: false
-        description: PRD path under eval_harness/
+        description: PRD path under dataset/
       test_plan:
         type: string
-        default: eval_harness/test_plans/primitives
+        default: dataset/test_plans/primitives
         required: false
-        description: Test plan file or directory under eval_harness/
+        description: Test plan file or directory under dataset/
       ios_app_mode:
         type: choice
         options:
