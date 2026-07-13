@@ -34,12 +34,10 @@ on:
         type: string
         default: dataset/prds/hot_chocolate/prd/mvp.txt
         required: false
-        description: PRD path under dataset/
-      test_plan:
-        type: string
-        default: dataset/test_plans/primitives
-        required: false
-        description: Test plan file or directory under dataset/
+        description: >-
+          PRD path under dataset/. Also determines which test plans run in
+          eval_ios (auto-resolved from dataset/prd_test_plans.json) and which
+          skills are expected in eval_skill (dataset/prd_skills.json).
       ios_app_mode:
         type: choice
         options:
@@ -133,7 +131,6 @@ jobs:
       AGENT: ${{ inputs.agent || 'claude-code' }}
       AGENT_MODEL: ${{ inputs.agent_model || '' }}
       PRD_OVERRIDE: ${{ inputs.prd || '' }}
-      TEST_PLAN_OVERRIDE: ${{ inputs.test_plan || '' }}
       EVAL_IOS_APP_MODE: ${{ inputs.ios_app_mode || 'release' }}
     steps:
       - uses: eas/checkout

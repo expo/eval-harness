@@ -39,7 +39,10 @@ if [ -z "$AGENT_MODEL" ]; then
   if [ "$AGENT" = "codex" ]; then AGENT_MODEL="${CODEX_MODEL:-gpt-5-mini}"; else AGENT_MODEL="sonnet"; fi
 fi
 PRD="${PRD_OVERRIDE:-${PRD:-dataset/prds/hot_chocolate/prd/mvp.txt}}"
-TEST_PLAN="${TEST_PLAN_OVERRIDE:-dataset/test_plans/primitives}"
+# Empty by default: the evaluator auto-resolves which test plans are relevant
+# to $PRD's app from dataset/prd_test_plans.json. Set TEST_PLAN_OVERRIDE to
+# point at one specific file/directory instead (local debugging only).
+TEST_PLAN="${TEST_PLAN_OVERRIDE:-}"
 export RUN_ID RUN_START_MTIME OUT WORKSPACE TELEMETRY_DIR METRO_MODE AGENT AGENT_MODEL PRD TEST_PLAN
 
 ANTHROPIC_PROXY_PORT=8082

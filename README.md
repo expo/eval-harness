@@ -41,6 +41,8 @@ eval_harness/
 dataset/
   prds/                       # Notes, Hot Chocolate, and Wiki Reader app PRDs (shared)
   test_plans/primitives/      # app-agnostic primitive plans
+  prd_skills.json             # app -> expected skill ids (skill-eval ground truth)
+  prd_test_plans.json         # app -> relevant test-plan filenames (iOS-eval ground truth)
 ```
 
 ## Setup
@@ -76,7 +78,6 @@ Run the full modular E2E workflow for Notes:
 eas workflow:run .eas/workflows/eval-e2e.yml \
   -F agent=claude-code \
   -F prd=dataset/prds/notes/prd/mvp.txt \
-  -F test_plan=dataset/test_plans/primitives/test_insert.txt \
   -F run_eval_ios=true \
   -F run_eval_skill=false
 ```
@@ -87,18 +88,18 @@ Use Codex by changing the agent and ensuring `OPENAI_API_KEY` is present:
 eas workflow:run .eas/workflows/eval-e2e.yml \
   -F agent=codex \
   -F prd=dataset/prds/notes/prd/mvp.txt \
-  -F test_plan=dataset/test_plans/primitives/test_insert.txt \
   -F run_eval_ios=true \
   -F run_eval_skill=false
 ```
 
-Authoring always uses a direct PRD path. To also run the skill-eval analyzer
-against the resulting artifact, set `run_eval_skill=true`. `skill_scenario`
-feeds both the authoring step (it's an enforced config, not just a label —
-see `skill_cases/README.md`) and the analysis step; `skill_mention` only
-matters for the `skills_available_mentioned` scenario. Which skill(s) are
-expected and how to verify their uptake is resolved automatically from the
-PRD via `dataset/prd_skills.json` — no case spec to pass in:
+Authoring always uses a direct PRD path. Which test plans run in `eval_ios`,
+and which skill(s) are expected in `eval_skill` (`run_eval_skill=true`), are
+both resolved automatically from that same PRD — via
+`dataset/prd_test_plans.json` and `dataset/prd_skills.json` respectively, no
+manual test-plan or case-spec selection needed. `skill_scenario` feeds both
+the authoring step (it's an enforced config, not just a label — see
+`skill_cases/README.md`) and the analysis step; `skill_mention` only matters
+for the `skills_available_mentioned` scenario:
 
 ```bash
 eas workflow:run .eas/workflows/eval-e2e.yml \
@@ -186,10 +187,11 @@ Run shell parse checks after touching harness scripts:
 find eval_harness -name '*.sh' -print0 | xargs -0 bash -n
 ```
 
-Run skill evaluator tests:
+Run skill evaluator and iOS test-plan-resolution tests:
 
 ```bash
 PYTHONPATH=. uv run python -m unittest eval_harness.evaluator.skill_invocation.tests.test_skill_eval_core
+PYTHONPATH=. uv run python -m unittest eval_harness.evaluator.ios_agentic.tests.test_test_plan_resolution
 ```
 
 Validate EAS workflows:

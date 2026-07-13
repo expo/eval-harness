@@ -2,20 +2,24 @@
 CLI entry point for the agentic evaluator.
 
 Usage:
-    # Single test plan (generic primitive plan + app PRD injected at runtime)
+    # Auto-resolve which test plans to run from the PRD's ground truth
+    # (dataset/prd_test_plans.json) -- the normal path, no explicit test_path.
     python -m eval_harness.evaluator.ios_agentic.main \
-        dataset/test_plans/primitives/test_insert.txt \
         --prd dataset/prds/notes/prd/mvp.txt \
         -d agent-device --hybrid-restart \
         --seed-iterations 200 --max-iterations 50 \
         -o /tmp/result.json --verbose
 
-    # Entire directory of test plans
+    # Explicit single test plan, or a directory of test plans (overrides
+    # auto-resolution; useful for local debugging one primitive at a time)
+    python -m eval_harness.evaluator.ios_agentic.main \
+        dataset/test_plans/primitives/test_insert.txt \
+        --prd dataset/prds/notes/prd/mvp.txt -o /tmp/result.json --verbose
     python -m eval_harness.evaluator.ios_agentic.main \
         dataset/test_plans/primitives/ --prd dataset/prds/notes/prd/mvp.txt -o results.json --verbose
 
     # Or via the installed console script:
-    agentic-evaluator dataset/test_plans/primitives/test_insert.txt --prd dataset/prds/notes/prd/mvp.txt ...
+    agentic-evaluator --prd dataset/prds/notes/prd/mvp.txt ...
 """
 
 import argparse
@@ -28,6 +32,21 @@ warnings.filterwarnings("ignore", message="urllib3 v2 only supports OpenSSL")
 
 from .maestro.evaluator import MaestroEvaluator
 from .agent_device.evaluator import AgentDeviceEvaluator
+
+_PACKAGE_DIR = Path(__file__).resolve().parent
+_REPO_ROOT = _PACKAGE_DIR.parents[2]
+_DEFAULT_TEST_PLANS_DIR = _REPO_ROOT / "dataset" / "test_plans" / "primitives"
+_DEFAULT_PRD_TEST_PLANS = _REPO_ROOT / "dataset" / "prd_test_plans.json"
+
+
+def _app_name_from_prd(prd_path: str) -> str | None:
+    """Extract the app name from a `dataset/prds/<app>/prd/*.txt` style path."""
+    parts = Path(prd_path).parts
+    if "prds" in parts:
+        idx = parts.index("prds")
+        if idx + 1 < len(parts):
+            return parts[idx + 1]
+    return None
 
 
 def _find_test_plans(path: Path) -> list[Path]:
@@ -43,9 +62,49 @@ def _find_test_plans(path: Path) -> list[Path]:
     sys.exit(1)
 
 
+def _resolve_test_plans_from_prd(prd: Path, prd_test_plans_path: Path, test_plans_dir: Path) -> list[Path]:
+    """Ground-truth lookup mirroring skill_invocation's prd_skills.json: which
+    test plans are relevant to this PRD's app, instead of running every
+    primitive in the directory (many of which don't apply, or actively
+    contradict a given app's spec)."""
+    app_name = _app_name_from_prd(str(prd))
+    if not app_name:
+        print(f"Error: could not derive app name from --prd {prd}")
+        sys.exit(1)
+    if not prd_test_plans_path.exists():
+        print(f"Error: prd_test_plans map not found at {prd_test_plans_path}")
+        sys.exit(1)
+    mapping = json.loads(prd_test_plans_path.read_text(encoding="utf-8"))
+    plan_names = mapping.get(app_name)
+    if not plan_names:
+        print(f"Error: no test-plan ground truth for app {app_name!r} in {prd_test_plans_path}")
+        sys.exit(1)
+    plans = [test_plans_dir / name for name in plan_names]
+    missing = [str(p) for p in plans if not p.exists()]
+    if missing:
+        print(f"Error: test plan(s) listed in {prd_test_plans_path} not found: {', '.join(missing)}")
+        sys.exit(1)
+    return plans
+
+
 def main():
     parser = argparse.ArgumentParser(description="Adaptive Maestro Evaluator")
-    parser.add_argument("test_path", type=Path, help="Path to a test plan .txt file or directory of test plans")
+    parser.add_argument(
+        "test_path", type=Path, nargs="*",
+        help="Path(s) to a test plan .txt file or directory of test plans. When omitted, the "
+             "test plans relevant to --prd's app are resolved automatically from "
+             "dataset/prd_test_plans.json.",
+    )
+    parser.add_argument(
+        "--prd-test-plans", type=Path, default=_DEFAULT_PRD_TEST_PLANS,
+        help="Path to the app -> relevant-test-plans ground-truth map, used only when no "
+             "test_path is given (default: dataset/prd_test_plans.json)",
+    )
+    parser.add_argument(
+        "--test-plans-dir", type=Path, default=_DEFAULT_TEST_PLANS_DIR,
+        help="Directory the ground-truth map's test-plan filenames are resolved against "
+             "(default: dataset/test_plans/primitives)",
+    )
     parser.add_argument("-o", "--output", type=Path, default=Path("evaluation-finished.json"), help="Output JSON path")
     parser.add_argument("-p", "--platform", choices=["ios", "android"], default="ios")
     parser.add_argument("-d", "--driver", choices=["maestro", "agent-device"], default="maestro", help="Device automation driver")
@@ -76,14 +135,22 @@ def main():
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
 
-    test_plans = _find_test_plans(args.test_path)
-
-    if args.native_restart:
-        print("Note: --native-restart is now the default for -d agent-device; flag retained as a no-op.")
-
     if args.prd and not args.prd.exists():
         print(f"Error: --prd path does not exist: {args.prd}")
         sys.exit(1)
+
+    if args.test_path:
+        test_plans = []
+        for path in args.test_path:
+            test_plans.extend(_find_test_plans(path))
+    else:
+        if not args.prd:
+            print("Error: --prd is required to auto-resolve test plans (or pass an explicit test_path)")
+            sys.exit(1)
+        test_plans = _resolve_test_plans_from_prd(args.prd, args.prd_test_plans, args.test_plans_dir)
+
+    if args.native_restart:
+        print("Note: --native-restart is now the default for -d agent-device; flag retained as a no-op.")
 
     evaluator_kwargs = dict(
         platform=args.platform,

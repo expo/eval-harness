@@ -132,7 +132,7 @@ cp "$OUT"/*.log "$BUNDLE/logs/" 2>/dev/null
 # --- 6. manifest.json (stitches everything by run_id; embeds the score) ---
 GIT_SHA="$(cd "$ROOT" && git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 RESULT_JSON="$OUT/result.json" RUN_ID="$RUN_ID" AGENT="$AGENT" GIT_SHA="$GIT_SHA" \
-PRD="${PRD:-dataset/prds/hot_chocolate/prd/mvp.txt}" TEST_PLAN="${TEST_PLAN:-dataset/test_plans/primitives}" \
+PRD="${PRD:-dataset/prds/hot_chocolate/prd/mvp.txt}" TEST_PLAN="${TEST_PLAN:-}" \
 AGENT_MODEL="${AGENT_MODEL:-}" METRO_MODE="${METRO_MODE:-dev-build}" \
 EVAL_APP_BUNDLE_ID="${EVAL_APP_BUNDLE_ID:-}" EXPO_MCP_AUTH_STATUS="${EXPO_MCP_AUTH_STATUS:-not_attempted}" \
 SCENARIO="${SCENARIO:-}" \
@@ -155,7 +155,7 @@ manifest = {
     "agent_model": os.environ.get("AGENT_MODEL") or None,
     "metro_mode": os.environ.get("METRO_MODE"),
     "eval_app_bundle_id": os.environ.get("EVAL_APP_BUNDLE_ID") or None,
-    "test_plan": os.environ.get("TEST_PLAN"),
+    "test_plan": os.environ.get("TEST_PLAN") or "auto-resolved from dataset/prd_test_plans.json",
     "prd": os.environ.get("PRD"),
     "expo_mcp_auth_status": os.environ.get("EXPO_MCP_AUTH_STATUS"),
     "scenario": os.environ.get("SCENARIO") or None,

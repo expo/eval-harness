@@ -46,8 +46,8 @@ runner plus uploaded artifacts.
 - Do not add new root-level folders unless there is a strong reason. Runtime
   code should live under `eval_harness/app_builder/`, `eval_harness/evaluator/`,
   or `eval_harness/utils/`. `dataset/` (PRDs, test plans, `prd_skills.json`
-  ground truth) is the one intentional exception, since it's data/fixtures
-  rather than runtime code.
+  and `prd_test_plans.json` ground truth) is the one intentional exception,
+  since it's data/fixtures rather than runtime code.
 - Expo project routing belongs in `app.config.js` and should remain configurable
   through `EAS_PROJECT_ID`, `EXPO_SLUG`, `EXPO_OWNER`, and `EXPO_APP_NAME`.
 - Authoring always uses a direct `prd` input, passed straight to `author-app.sh`.
@@ -62,7 +62,13 @@ runner plus uploaded artifacts.
   skill set in `dataset/prd_skills.json`, and loads each skill's
   `static_uptake_checks` from whichever `skill_cases/*.json` declares
   it. There is no manual case-spec selection anymore.
-- `test_plan` is an app-evaluator input. It is not part of skill-use analysis.
+- Which test plans run for a given authored app is resolved automatically the
+  same way: the `ios_agentic` CLI reads the `prd` recorded in `author.env`,
+  looks up the app's relevant test-plan filenames in
+  `dataset/prd_test_plans.json`, and resolves them against
+  `dataset/test_plans/primitives/`. There is no manual `test_plan` workflow
+  input anymore; pass an explicit test-plan file/directory positionally to
+  the CLI only for local debugging (overrides auto-resolution).
 
 ## Evaluator Scoring Rules
 
@@ -110,5 +116,6 @@ runner plus uploaded artifacts.
 ```bash
 find eval_harness -name '*.sh' -print0 | xargs -0 bash -n
 PYTHONPATH=. uv run python -m unittest eval_harness.evaluator.skill_invocation.tests.test_skill_eval_core
+PYTHONPATH=. uv run python -m unittest eval_harness.evaluator.ios_agentic.tests.test_test_plan_resolution
 node /Users/adityashukla/.codex/plugins/cache/openai-curated-remote/expo/1.0.2/skills/expo-cicd-workflows/scripts/validate.js .eas/workflows/*.yml
 ```
