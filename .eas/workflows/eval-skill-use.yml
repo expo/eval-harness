@@ -1,9 +1,11 @@
 # Analyze a prior authored-app artifact for Expo skill trigger quality, context
 # uptake, and optional outcome evidence from a prior evaluator artifact.
+# Expected skills and their static_uptake_checks are resolved automatically
+# from the artifact's authored PRD via dataset/prd_skills.json -- no case spec
+# to pass in.
 #
 # Example:
 #   eas workflow:run .eas/workflows/eval-skill-use.yml \
-#     -F case_spec=eval_harness/evaluator/skill_invocation/skill_cases/core5/expo-ui-lists.json \
 #     -F authored_app_url='https://wf-artifacts.eascdn.net/.../authored-app.tar.gz?...' \
 #     -F scenario=skills_available_unmentioned
 name: eval-skill-use
@@ -11,10 +13,6 @@ name: eval-skill-use
 on:
   workflow_dispatch:
     inputs:
-      case_spec:
-        type: string
-        required: true
-        description: Skill-eval case spec path under eval_harness/evaluator/skill_invocation/skill_cases/
       authored_app_artifact_id:
         type: string
         required: false
@@ -92,13 +90,11 @@ jobs:
 
       - name: Analyze skill-eval artifacts
         run: |
-          CASE_SPEC='${{ inputs.case_spec }}'
           AUTHORED_ARTIFACT='${{ steps.download_author.outputs.artifact_path || steps.download_author_from_url.outputs.artifact_path }}'
           EVAL_ARTIFACT='${{ steps.download_eval.outputs.artifact_path || steps.download_eval_from_url.outputs.artifact_path }}'
           if [ "$EVAL_ARTIFACT" = "undefined" ] || [ "$EVAL_ARTIFACT" = "null" ]; then
             EVAL_ARTIFACT=""
           fi
-          CASE_SPEC="$CASE_SPEC" \
           AUTHORED_ARTIFACT="$AUTHORED_ARTIFACT" \
           EVAL_ARTIFACT="$EVAL_ARTIFACT" \
           SCENARIO='${{ inputs.scenario }}' \

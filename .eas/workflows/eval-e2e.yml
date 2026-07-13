@@ -58,11 +58,6 @@ on:
         default: true
         required: false
         description: Run the skill-eval analyzer job
-      skill_case_spec:
-        type: string
-        default: eval_harness/evaluator/skill_invocation/skill_cases/core5/native-data-fetching.json
-        required: false
-        description: Skill-eval case spec path
       skill_scenario:
         type: choice
         options:
@@ -208,7 +203,6 @@ jobs:
 
       - name: Analyze authored app for skill eval
         run: |
-          CASE_SPEC='${{ inputs.skill_case_spec }}' \
           AUTHORED_ARTIFACT='${{ steps.download_author.outputs.artifact_path }}' \
           SCENARIO='${{ inputs.skill_scenario }}' \
           OUT_DIR=skill-eval-report \

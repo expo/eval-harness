@@ -45,16 +45,23 @@ runner plus uploaded artifacts.
 - `eval_harness/legacy/` is archival. Do not wire new workflows or docs to files there.
 - Do not add new root-level folders unless there is a strong reason. Runtime
   code should live under `eval_harness/app_builder/`, `eval_harness/evaluator/`,
-  or `eval_harness/utils/`. `dataset/` (PRDs, test plans) is the one
-  intentional exception, since it's data/fixtures rather than runtime code.
+  or `eval_harness/utils/`. `dataset/` (PRDs, test plans, `prd_skills.json`
+  ground truth) is the one intentional exception, since it's data/fixtures
+  rather than runtime code.
 - Expo project routing belongs in `app.config.js` and should remain configurable
   through `EAS_PROJECT_ID`, `EXPO_SLUG`, `EXPO_OWNER`, and `EXPO_APP_NAME`.
 - Authoring always uses a direct `prd` input, passed straight to `author-app.sh`.
-  There is no scenario-driven authoring mode.
-- `skill_case_spec`/`skill_scenario` are analysis-only inputs: they drive the
-  `eval_skill` job's `analyze-artifacts` call and are independent of how the app
-  was authored — a case spec's `expected_skills`/`static_uptake_checks` can be
-  scored against an artifact from any PRD.
+  `skill_scenario` (default `skills_available_unmentioned`) is an *authoring-time
+  enforced config*, not just an analysis label: it controls whether
+  `eval::run_coding_agent` installs skills/wires Expo MCP at all, and
+  `skill_mention` names a skill explicitly in the prompt for the
+  `skills_available_mentioned` scenario. See `skill_cases/README.md`.
+- Which skill(s) are expected for a given authored app, and how to verify
+  their uptake, is resolved automatically: `analyze_artifacts` reads the `prd`
+  recorded in the artifact's `manifest.json`, looks up the app's expected
+  skill set in `dataset/prd_skills.json`, and loads each skill's
+  `static_uptake_checks` from whichever `skill_cases/core5/*.json` declares
+  it. There is no manual case-spec selection anymore.
 - `test_plan` is an app-evaluator input. It is not part of skill-use analysis.
 
 ## Evaluator Scoring Rules

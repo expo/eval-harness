@@ -9,7 +9,15 @@ from pathlib import Path
 from typing import Any
 
 from .static_checks import detect_triggered_skills, load_trace, run_static_checks, score_trigger_quality, TriggerQuality
-from .utils import SkillEvalCase, dedupe, flatten_strings, load_case_spec, read_json, write_json
+from .utils import (
+    app_name_from_prd,
+    dedupe,
+    flatten_strings,
+    load_case_specs_by_skill,
+    load_prd_skills,
+    read_json,
+    write_json,
+)
 
 
 TRACE_CANDIDATES = (
@@ -58,32 +66,45 @@ class CaseRunScore:
 
 
 def analyze_artifacts(
-    case_spec: Path | str,
     authored_artifact: Path | str,
     eval_artifact: Path | str | None,
     scenario: str,
     out_dir: Path | str,
+    *,
+    prd_skills_path: Path | str,
+    case_dir: Path | str,
 ) -> dict[str, Any]:
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    case = load_case_spec(case_spec)
     author_layout = discover_artifact_layout(authored_artifact)
     eval_layout = discover_artifact_layout(eval_artifact) if eval_artifact else None
     warnings: list[str] = []
 
     scenario = _resolve_scenario(scenario, author_layout, warnings)
+    app_name, app_expected_skills = _resolve_app_expected_skills(
+        author_layout, prd_skills_path, warnings
+    )
     # The "unavailable" scenario is an enforced negative control (see
     # author-app.sh): skills/MCP were genuinely disabled during authoring, so
-    # nothing can legitimately trigger regardless of what the case declares.
-    expected_skills = [] if scenario in UNAVAILABLE_SCENARIOS else case.expected_skills
+    # nothing can legitimately trigger regardless of the app's ground truth.
+    expected_skills = [] if scenario in UNAVAILABLE_SCENARIOS else app_expected_skills
+
+    cases_by_skill = load_case_specs_by_skill(case_dir)
+    static_checks: list[dict[str, Any]] = []
+    for skill_id in expected_skills:
+        case = cases_by_skill.get(skill_id)
+        if case is None:
+            warnings.append(f"no case spec (static uptake checks) for skill {skill_id!r}")
+            continue
+        static_checks.extend(case.static_uptake_checks)
 
     if author_layout.app_dir is None:
         warnings.append("app tree not found")
         static_passed = 0
-        static_total = len(case.static_uptake_checks)
+        static_total = len(static_checks)
         static_rows: list[dict[str, Any]] = []
     else:
-        static = run_static_checks(author_layout.app_dir, case.static_uptake_checks)
+        static = run_static_checks(author_layout.app_dir, static_checks)
         static_passed = static.passed
         static_total = static.total
         static_rows = [asdict(check) for check in static.checks]
@@ -110,7 +131,7 @@ def analyze_artifacts(
     outcome_status = "complete" if evaluator_pct is not None else "pending"
 
     run = {
-        "case_id": case.id,
+        "app": app_name,
         "scenario": scenario,
         "skill_id": ",".join(expected_skills),
         "trigger_recall": score.trigger_quality.recall,
@@ -122,8 +143,9 @@ def analyze_artifacts(
         "build_success": build_success,
     }
     payload = {
-        "summary": f"Skill eval artifact analysis for {case.id}",
-        "case": asdict(case),
+        "summary": f"Skill eval artifact analysis for {app_name or 'unknown app'}",
+        "app": app_name,
+        "expected_skills": expected_skills,
         "scenario": scenario,
         "outcome_status": outcome_status,
         "warnings": warnings,
@@ -145,6 +167,33 @@ def analyze_artifacts(
     write_json(payload, out_dir / "metrics.json")
     write_html_report(payload, out_dir / "report.html")
     return payload
+
+
+def _resolve_app_expected_skills(
+    author_layout: ArtifactLayout, prd_skills_path: Path | str, warnings: list[str]
+) -> tuple[str | None, list[str]]:
+    """Ground truth lookup: manifest's recorded `prd` -> app name -> expected
+    skill set from dataset/prd_skills.json. Never raises -- an unmapped or
+    missing app just means an empty expected set plus a warning, matching the
+    rest of this module's "degrade, don't crash" philosophy."""
+    prd = None
+    if author_layout.manifest_path and author_layout.manifest_path.exists():
+        prd = (read_json(author_layout.manifest_path) or {}).get("prd")
+    app_name = app_name_from_prd(prd) if prd else None
+    if not app_name:
+        warnings.append(f"could not derive app name from manifest prd={prd!r}")
+        return app_name, []
+
+    prd_skills_path = Path(prd_skills_path)
+    if not prd_skills_path.exists():
+        warnings.append(f"prd_skills map not found at {prd_skills_path}")
+        return app_name, []
+
+    app_expected_skills = load_prd_skills(prd_skills_path).get(app_name)
+    if app_expected_skills is None:
+        warnings.append(f"no ground-truth skill set for app {app_name!r} in {prd_skills_path}")
+        return app_name, []
+    return app_name, app_expected_skills
 
 
 def _resolve_scenario(scenario: str, author_layout: ArtifactLayout, warnings: list[str]) -> str:
@@ -241,7 +290,7 @@ def aggregate_skill_results(runs: list[dict[str, Any]]) -> dict[str, dict[str, A
 def print_summary(payload: dict[str, Any]) -> None:
     run = (payload.get("runs") or [{}])[0]
     print("----- skill-eval summary -----")
-    print(f"case_id={run.get('case_id')}")
+    print(f"app={run.get('app')}")
     print(f"scenario={run.get('scenario')}")
     print(f"expected_skills={run.get('skill_id')}")
     print(f"detected_skills={','.join(run.get('detected_skills') or [])}")
@@ -257,7 +306,7 @@ def write_html_report(payload: dict[str, Any], path: Path | str) -> None:
     for run in payload.get("runs", []):
         rows.append(
             "<tr>"
-            f"<td>{_e(run.get('case_id'))}</td>"
+            f"<td>{_e(run.get('app'))}</td>"
             f"<td>{_e(run.get('scenario'))}</td>"
             f"<td>{_e(run.get('skill_id'))}</td>"
             f"<td>{_e(', '.join(run.get('detected_skills') or []))}</td>"
@@ -285,7 +334,7 @@ def write_html_report(payload: dict[str, Any], path: Path | str) -> None:
   <p>{_e(payload.get('summary', ''))}</p>
   <p class="note">Initial v0 signal: trace trigger detection, static code uptake checks, and optional evaluator score. No LLM judge or screenshot evidence is used.</p>
   <table>
-    <thead><tr><th>Case</th><th>Scenario</th><th>Expected</th><th>Detected</th><th>Exact match</th><th>Recall</th><th>Precision</th><th>Uptake</th><th>Evaluator</th></tr></thead>
+    <thead><tr><th>App</th><th>Scenario</th><th>Expected</th><th>Detected</th><th>Exact match</th><th>Recall</th><th>Precision</th><th>Uptake</th><th>Evaluator</th></tr></thead>
     <tbody>{''.join(rows)}</tbody>
   </table>
 </body>

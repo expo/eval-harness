@@ -92,10 +92,13 @@ eas workflow:run .eas/workflows/eval-e2e.yml \
   -F run_eval_skill=false
 ```
 
-Authoring always uses a direct PRD path now. To also run the skill-eval
-analyzer against the resulting artifact, set `run_eval_skill=true` and pass
-`skill_case_spec`/`skill_scenario` — these only drive the analysis step
-(`eval_skill` job), independent of which PRD authored the app:
+Authoring always uses a direct PRD path. To also run the skill-eval analyzer
+against the resulting artifact, set `run_eval_skill=true`. `skill_scenario`
+feeds both the authoring step (it's an enforced config, not just a label —
+see `skill_cases/README.md`) and the analysis step; `skill_mention` only
+matters for the `skills_available_mentioned` scenario. Which skill(s) are
+expected and how to verify their uptake is resolved automatically from the
+PRD via `dataset/prd_skills.json` — no case spec to pass in:
 
 ```bash
 eas workflow:run .eas/workflows/eval-e2e.yml \
@@ -103,7 +106,6 @@ eas workflow:run .eas/workflows/eval-e2e.yml \
   -F prd=dataset/prds/notes/prd/mvp.txt \
   -F run_eval_ios=false \
   -F run_eval_skill=true \
-  -F skill_case_spec=eval_harness/evaluator/skill_invocation/skill_cases/core5/native-data-fetching.json \
   -F skill_scenario=skills_available_unmentioned
 ```
 

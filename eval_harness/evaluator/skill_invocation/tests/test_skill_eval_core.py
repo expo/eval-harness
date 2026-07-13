@@ -15,7 +15,9 @@ from eval_harness.evaluator.skill_invocation.static_checks import (
     run_static_checks,
     score_trigger_quality,
 )
-from eval_harness.evaluator.skill_invocation.utils import load_case_spec, unpack_artifact
+from eval_harness.evaluator.skill_invocation.utils import load_case_spec, load_case_specs_by_skill, unpack_artifact
+
+TEST_PRD = "dataset/prds/test-app/prd/mvp.txt"
 
 
 def _trace(agent, tool_calls_by_step):
@@ -35,6 +37,21 @@ class SkillEvalCoreTests(unittest.TestCase):
             spec = load_case_spec(path)
             self.assertTrue(spec.expected_skills, path.name)
             self.assertTrue(spec.static_uptake_checks, path.name)
+
+    def test_app_name_from_prd_extracts_app_segment(self):
+        from eval_harness.evaluator.skill_invocation.utils import app_name_from_prd
+
+        self.assertEqual(app_name_from_prd("dataset/prds/notes/prd/mvp.txt"), "notes")
+        self.assertIsNone(app_name_from_prd("some/other/path.txt"))
+
+    def test_load_case_specs_by_skill_indexes_core5_by_skill_id(self):
+        case_dir = Path(__file__).parents[1] / "skill_cases" / "core5"
+
+        by_skill = load_case_specs_by_skill(case_dir)
+
+        self.assertIn("expo-data-fetching", by_skill)
+        self.assertIn("expo-native-ui", by_skill)
+        self.assertTrue(by_skill["expo-data-fetching"].static_uptake_checks)
 
     def test_case_spec_loads_core_case_without_skill_family(self):
         with tempfile.TemporaryDirectory() as td:
@@ -243,19 +260,24 @@ class SkillEvalCoreTests(unittest.TestCase):
     def test_analyze_artifacts_reports_author_only_outcome_pending(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
-            case_path = self._write_case(root, "expo-ui")
+            prd_skills_path, case_dir = self._write_ground_truth(root, "expo-ui")
             authored = root / "authored"
             app = authored / "agent-workspace" / "run-1"
-            traces = authored / "eval-out" / "run-1" / "bundle" / "telemetry" / "traces"
+            bundle = authored / "eval-out" / "run-1" / "bundle"
+            traces = bundle / "telemetry" / "traces"
             app.mkdir(parents=True)
             traces.mkdir(parents=True)
             (app / "package.json").write_text(json.dumps({"dependencies": {"@expo/ui": "1.0.0"}}))
             (app / "index.tsx").write_text("import { Host } from '@expo/ui';\nexport default Host;\n")
+            (bundle / "manifest.json").write_text(json.dumps({"prd": TEST_PRD}))
             trace = _trace("claude-code", [[{"name": "Skill", "args": {"skill": "expo:expo-ui"}}]])
             trace["braintrust_url"] = "https://www.braintrust.dev/app/project/traces/abc"
             (traces / "claude-code-authoring.json").write_text(json.dumps(trace))
 
-            payload = analyze_artifacts(case_path, authored, None, "skills_available_unmentioned", root / "out")
+            payload = analyze_artifacts(
+                authored, None, "skills_available_unmentioned", root / "out",
+                prd_skills_path=prd_skills_path, case_dir=case_dir,
+            )
 
             self.assertEqual(payload["outcome_status"], "pending")
             self.assertEqual(payload["runs"][0]["trigger_recall"], 1.0)
@@ -268,14 +290,16 @@ class SkillEvalCoreTests(unittest.TestCase):
     def test_analyze_artifacts_merges_eval_result(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
-            case_path = self._write_case(root, "expo-ui")
+            prd_skills_path, case_dir = self._write_ground_truth(root, "expo-ui")
             authored = root / "authored"
             app = authored / "agent-workspace" / "run-1"
-            traces = authored / "eval-out" / "run-1" / "bundle" / "telemetry" / "traces"
+            bundle = authored / "eval-out" / "run-1" / "bundle"
+            traces = bundle / "telemetry" / "traces"
             app.mkdir(parents=True)
             traces.mkdir(parents=True)
             (app / "package.json").write_text(json.dumps({"dependencies": {"@expo/ui": "1.0.0"}}))
             (app / "index.tsx").write_text("import { Host } from '@expo/ui';\nexport default Host;\n")
+            (bundle / "manifest.json").write_text(json.dumps({"prd": TEST_PRD}))
             trace = _trace("claude-code", [[{"name": "Skill", "args": {"skill": "expo:expo-ui"}}]])
             (traces / "claude-code-authoring.json").write_text(json.dumps(trace))
             eval_out = root / "eval"
@@ -283,7 +307,10 @@ class SkillEvalCoreTests(unittest.TestCase):
             result.mkdir(parents=True, exist_ok=True)
             (result / "result.json").write_text(json.dumps({"macro_avg_pct": 87.5}))
 
-            payload = analyze_artifacts(case_path, authored, eval_out, "skills_available_mentioned", root / "out")
+            payload = analyze_artifacts(
+                authored, eval_out, "skills_available_mentioned", root / "out",
+                prd_skills_path=prd_skills_path, case_dir=case_dir,
+            )
 
         self.assertEqual(payload["outcome_status"], "complete")
         self.assertEqual(payload["runs"][0]["evaluator_pct"], 87.5)
@@ -294,14 +321,20 @@ class SkillEvalCoreTests(unittest.TestCase):
     def test_analyze_artifacts_marks_missing_trace_without_crashing(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
-            case_path = self._write_case(root, "expo-ui")
+            prd_skills_path, case_dir = self._write_ground_truth(root, "expo-ui")
             authored = root / "authored"
             app = authored / "agent-workspace" / "run-1"
+            bundle = authored / "eval-out" / "run-1" / "bundle"
             app.mkdir(parents=True)
+            bundle.mkdir(parents=True)
             (app / "package.json").write_text(json.dumps({"dependencies": {"@expo/ui": "1.0.0"}}))
             (app / "index.tsx").write_text("import { Host } from '@expo/ui';\nexport default Host;\n")
+            (bundle / "manifest.json").write_text(json.dumps({"prd": TEST_PRD}))
 
-            payload = analyze_artifacts(case_path, authored, None, "skills_available_unmentioned", root / "out")
+            payload = analyze_artifacts(
+                authored, None, "skills_available_unmentioned", root / "out",
+                prd_skills_path=prd_skills_path, case_dir=case_dir,
+            )
 
         self.assertIn("author trace not found", payload["warnings"])
         self.assertEqual(payload["runs"][0]["trigger_recall"], 0.0)
@@ -310,36 +343,46 @@ class SkillEvalCoreTests(unittest.TestCase):
     def test_analyze_artifacts_marks_missing_app_without_crashing(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
-            case_path = self._write_case(root, "expo-ui")
+            prd_skills_path, case_dir = self._write_ground_truth(root, "expo-ui")
             authored = root / "authored"
-            traces = authored / "eval-out" / "run-1" / "bundle" / "telemetry" / "traces"
+            bundle = authored / "eval-out" / "run-1" / "bundle"
+            traces = bundle / "telemetry" / "traces"
             traces.mkdir(parents=True)
+            (bundle / "manifest.json").write_text(json.dumps({"prd": TEST_PRD}))
             trace = _trace("claude-code", [[{"name": "Skill", "args": {"skill": "expo:expo-ui"}}]])
             (traces / "claude-code-authoring.json").write_text(json.dumps(trace))
 
-            payload = analyze_artifacts(case_path, authored, None, "skills_available_unmentioned", root / "out")
+            payload = analyze_artifacts(
+                authored, None, "skills_available_unmentioned", root / "out",
+                prd_skills_path=prd_skills_path, case_dir=case_dir,
+            )
 
         self.assertIn("app tree not found", payload["warnings"])
         self.assertEqual(payload["static_checks"], [])
         self.assertEqual(payload["runs"][0]["uptake_rate"], 0.0)
 
     def test_analyze_artifacts_forces_empty_expectation_for_unavailable_scenario(self):
-        # The negative-control scenario: even though the case declares
-        # expected_skills, "skills_unavailable" must zero it out, so a clean
-        # (correctly silent) run scores as a pass rather than "missing skill".
+        # The negative-control scenario: even though the app's ground truth
+        # declares expected skills, "skills_unavailable" must zero it out, so
+        # a clean (correctly silent) run scores as a pass, not "missing skill".
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
-            case_path = self._write_case(root, "expo-ui")
+            prd_skills_path, case_dir = self._write_ground_truth(root, "expo-ui")
             authored = root / "authored"
             app = authored / "agent-workspace" / "run-1"
-            traces = authored / "eval-out" / "run-1" / "bundle" / "telemetry" / "traces"
+            bundle = authored / "eval-out" / "run-1" / "bundle"
+            traces = bundle / "telemetry" / "traces"
             app.mkdir(parents=True)
             traces.mkdir(parents=True)
             (app / "package.json").write_text(json.dumps({"dependencies": {}}))
+            (bundle / "manifest.json").write_text(json.dumps({"prd": TEST_PRD}))
             trace = _trace("claude-code", [[{"name": "Bash", "args": {"command": "ls"}}]])
             (traces / "claude-code-authoring.json").write_text(json.dumps(trace))
 
-            payload = analyze_artifacts(case_path, authored, None, "skills_unavailable", root / "out")
+            payload = analyze_artifacts(
+                authored, None, "skills_unavailable", root / "out",
+                prd_skills_path=prd_skills_path, case_dir=case_dir,
+            )
 
         self.assertEqual(payload["runs"][0]["skill_id"], "")
         self.assertEqual(payload["runs"][0]["trigger_recall"], 1.0)
@@ -352,34 +395,62 @@ class SkillEvalCoreTests(unittest.TestCase):
         # the mismatch rather than silently trusting the wrong one.
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
-            case_path = self._write_case(root, "expo-ui")
+            prd_skills_path, case_dir = self._write_ground_truth(root, "expo-ui")
             authored = root / "authored"
             app = authored / "agent-workspace" / "run-1"
-            traces = authored / "eval-out" / "run-1" / "bundle" / "telemetry" / "traces"
             bundle = authored / "eval-out" / "run-1" / "bundle"
+            traces = bundle / "telemetry" / "traces"
             app.mkdir(parents=True)
             traces.mkdir(parents=True)
             (app / "package.json").write_text(json.dumps({"dependencies": {}}))
-            (bundle / "manifest.json").write_text(json.dumps({"scenario": "skills_unavailable"}))
+            (bundle / "manifest.json").write_text(json.dumps({"prd": TEST_PRD, "scenario": "skills_unavailable"}))
             trace = _trace("claude-code", [])
             (traces / "claude-code-authoring.json").write_text(json.dumps(trace))
 
-            payload = analyze_artifacts(case_path, authored, None, "skills_available_mentioned", root / "out")
+            payload = analyze_artifacts(
+                authored, None, "skills_available_mentioned", root / "out",
+                prd_skills_path=prd_skills_path, case_dir=case_dir,
+            )
 
         self.assertEqual(payload["scenario"], "skills_unavailable")
         self.assertTrue(any("scenario mismatch" in w for w in payload["warnings"]))
 
-    def _write_case(self, root: Path, skill: str) -> Path:
-        case_path = root / "case.json"
-        case_path.write_text(json.dumps({
-            "id": "artifact-case",
-            "feature_focus": "artifact analysis",
-            "expected_skills": [skill],
-            "static_uptake_checks": [
-                {"id": "uses_expo_ui", "kind": "import", "target": "@expo/ui"}
-            ],
-        }))
-        return case_path
+    def test_analyze_artifacts_warns_when_app_missing_from_prd_skills_map(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            prd_skills_path, case_dir = self._write_ground_truth(root, "expo-ui")
+            authored = root / "authored"
+            bundle = authored / "eval-out" / "run-1" / "bundle"
+            bundle.mkdir(parents=True)
+            (bundle / "manifest.json").write_text(json.dumps({"prd": "dataset/prds/unmapped-app/prd/mvp.txt"}))
+
+            payload = analyze_artifacts(
+                authored, None, "skills_available_unmentioned", root / "out",
+                prd_skills_path=prd_skills_path, case_dir=case_dir,
+            )
+
+        self.assertEqual(payload["expected_skills"], [])
+        self.assertTrue(any("no ground-truth skill set" in w for w in payload["warnings"]))
+
+    def _write_ground_truth(self, root: Path, *skills: str) -> tuple[Path, Path]:
+        """Write a minimal dataset/prd_skills.json (app "test-app" -> skills)
+        plus a case-spec directory covering each skill, mirroring the real
+        dataset/prd_skills.json + skill_cases/core5 pairing."""
+        prd_skills_path = root / "prd_skills.json"
+        prd_skills_path.write_text(json.dumps({"test-app": list(skills)}))
+
+        case_dir = root / "cases"
+        case_dir.mkdir(exist_ok=True)
+        for skill in skills:
+            (case_dir / f"{skill}.json").write_text(json.dumps({
+                "id": skill,
+                "feature_focus": "artifact analysis",
+                "expected_skills": [skill],
+                "static_uptake_checks": [
+                    {"id": "uses_expo_ui", "kind": "import", "target": "@expo/ui"}
+                ],
+            }))
+        return prd_skills_path, case_dir
 
 
 if __name__ == "__main__":

@@ -37,6 +37,36 @@ def load_case_spec(path: Path | str) -> SkillEvalCase:
     )
 
 
+def load_case_specs_by_skill(case_dir: Path | str) -> dict[str, SkillEvalCase]:
+    """Index every case spec under `case_dir` by each skill id it declares.
+
+    Lets analysis auto-resolve "which case file covers this skill" instead of
+    a human picking one file by hand. If two case files somehow declare the
+    same skill id, the first one found (sorted by filename) wins.
+    """
+    by_skill: dict[str, SkillEvalCase] = {}
+    for path in sorted(Path(case_dir).glob("*.json")):
+        case = load_case_spec(path)
+        for skill_id in case.expected_skills:
+            by_skill.setdefault(skill_id, case)
+    return by_skill
+
+
+def load_prd_skills(path: Path | str) -> dict[str, list[str]]:
+    """Load the app -> expected-skill-ids ground truth map (dataset/prd_skills.json)."""
+    return {str(k): list(v) for k, v in read_json(path).items()}
+
+
+def app_name_from_prd(prd_path: str) -> str | None:
+    """Extract the app name from a `dataset/prds/<app>/prd/*.txt` style path."""
+    parts = Path(prd_path).parts
+    if "prds" in parts:
+        idx = parts.index("prds")
+        if idx + 1 < len(parts):
+            return parts[idx + 1]
+    return None
+
+
 def load_structured(path: Path) -> dict[str, Any]:
     text = path.read_text(encoding="utf-8")
     if path.suffix.lower() == ".json":
