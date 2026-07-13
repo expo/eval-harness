@@ -39,27 +39,59 @@ mkdir -p "$BUNDLE/app" "$BUNDLE/telemetry/traces" "$BUNDLE/eval/traces" "$BUNDLE
 
 # --- 1. reconstruct agent/evaluator execution traces from session logs (offline) ---
 BT_FLAG=""; [ -n "${BRAINTRUST_API_KEY:-}" ] && BT_FLAG="--braintrust"
+
+# Never let a fresh reconstruction that found 0 sessions clobber an
+# already-present trace that has real sessions. This is exactly what happens
+# when this script re-runs on the macOS eval_ios worker (where the coding
+# agent never ran, so reconstruction always finds nothing there) after
+# inheriting a correct trace from the downloaded authored-app artifact --
+# without this guard, the second run silently overwrites it with an empty one.
+_keep_better_trace() { # tmp_path dest_path
+  local tmp="$1" dest="$2"
+  if [ ! -f "$tmp" ]; then
+    return
+  fi
+  local tmp_sessions
+  tmp_sessions="$("$PY" -c "
+import json, sys
+try:
+    print(json.load(open(sys.argv[1])).get('n_sessions', 0))
+except Exception:
+    print(0)
+" "$tmp" 2>/dev/null)"
+  if [ "${tmp_sessions:-0}" != "0" ] || [ ! -s "$dest" ]; then
+    mv -f "$tmp" "$dest"
+  else
+    echo "  ℹ️  skipping trace overwrite: new reconstruction found 0 sessions, keeping existing $dest"
+    rm -f "$tmp"
+  fi
+}
+
 collect_author_trace() {
   local before_args=""
   if [ -n "${EVAL_PHASE_START_MTIME:-}" ]; then
     before_args="--before-mtime $EVAL_PHASE_START_MTIME"
   fi
   if [ "$AGENT" = "codex" ]; then
+    local dest="$BUNDLE/telemetry/traces/codex-authoring.json" tmp="$BUNDLE/telemetry/traces/codex-authoring.json.tmp"
     run_trace_py "$ROOT/eval_harness/utils/telemetry/tracing/codex_rollout.py" \
       --sessions-dir "${CODEX_HOME:-$HOME/.codex}/sessions" \
-      --out "$BUNDLE/telemetry/traces/codex-authoring.json" \
+      --out "$tmp" \
       --since-mtime "$RUN_START_MTIME" $before_args \
       --run-id "$RUN_ID" --source "codex-authoring" \
       --session-name "Codex Authoring Session" $BT_FLAG \
       >"$OUT/collect-author-trace.log" 2>&1 || echo "  ⚠️  codex author trace reconstruction failed (see collect-author-trace.log)"
+    _keep_better_trace "$tmp" "$dest"
   else
+    local dest="$BUNDLE/telemetry/traces/claude-code-authoring.json" tmp="$BUNDLE/telemetry/traces/claude-code-authoring.json.tmp"
     run_trace_py "$ROOT/eval_harness/utils/telemetry/tracing/cc_transcript.py" \
       --projects-dir "$HOME/.claude/projects" \
-      --out "$BUNDLE/telemetry/traces/claude-code-authoring.json" \
+      --out "$tmp" \
       --since-mtime "$RUN_START_MTIME" $before_args \
       --run-id "$RUN_ID" --source "claude-code-authoring" \
       --session-name "Claude Code Authoring Session" $BT_FLAG \
       >"$OUT/collect-author-trace.log" 2>&1 || echo "  ⚠️  claude author trace reconstruction failed (see collect-author-trace.log)"
+    _keep_better_trace "$tmp" "$dest"
   fi
 }
 
@@ -130,15 +162,36 @@ fi
 cp "$OUT"/*.log "$BUNDLE/logs/" 2>/dev/null
 
 # --- 6. manifest.json (stitches everything by run_id; embeds the score) ---
+# This script runs on both the Linux author_app worker and the macOS eval_ios
+# worker (via each script's own EXIT trap), but most of these fields
+# (scenario, expo_mcp_auth_status, prd) are only ever known/set on the Linux
+# side. Rather than re-deriving from env vars that are genuinely absent on
+# the second run and silently regressing to null/defaults, merge: prefer a
+# freshly-set env var, else fall back to whatever the existing manifest.json
+# (inherited from the downloaded authored-app artifact) already had.
 GIT_SHA="$(cd "$ROOT" && git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 RESULT_JSON="$OUT/result.json" RUN_ID="$RUN_ID" AGENT="$AGENT" GIT_SHA="$GIT_SHA" \
-PRD="${PRD:-dataset/prds/hot_chocolate/prd/mvp.txt}" TEST_PLAN="${TEST_PLAN:-}" \
-AGENT_MODEL="${AGENT_MODEL:-}" METRO_MODE="${METRO_MODE:-dev-build}" \
-EVAL_APP_BUNDLE_ID="${EVAL_APP_BUNDLE_ID:-}" EXPO_MCP_AUTH_STATUS="${EXPO_MCP_AUTH_STATUS:-not_attempted}" \
+PRD="${PRD:-}" TEST_PLAN="${TEST_PLAN:-}" \
+AGENT_MODEL="${AGENT_MODEL:-}" METRO_MODE="${METRO_MODE:-}" \
+EVAL_APP_BUNDLE_ID="${EVAL_APP_BUNDLE_ID:-}" EXPO_MCP_AUTH_STATUS="${EXPO_MCP_AUTH_STATUS:-}" \
 SCENARIO="${SCENARIO:-}" \
 "$PY" - "$BUNDLE/manifest.json" <<'PYEOF'
 import json, os, sys
 out = sys.argv[1]
+
+existing = {}
+if os.path.exists(out):
+    try:
+        existing = json.load(open(out)) or {}
+    except Exception:
+        existing = {}
+
+def preferred(env_key, manifest_key, default=None):
+    fresh = os.environ.get(env_key) or None
+    if fresh is not None:
+        return fresh
+    return existing.get(manifest_key, default)
+
 score = full = macro = micro = None
 rj = os.environ.get("RESULT_JSON", "")
 if rj and os.path.exists(rj):
@@ -148,17 +201,23 @@ if rj and os.path.exists(rj):
         macro, micro = d.get("macro_avg_pct"), d.get("micro_pct")
     except Exception:
         pass
+if score is None:
+    score = existing.get("score")
+    full = existing.get("full_points")
+    macro = existing.get("macro_avg_pct")
+    micro = existing.get("micro_pct")
+
 manifest = {
     "run_id": os.environ.get("RUN_ID"),
     "git_sha": os.environ.get("GIT_SHA"),
     "agent": os.environ.get("AGENT"),
-    "agent_model": os.environ.get("AGENT_MODEL") or None,
-    "metro_mode": os.environ.get("METRO_MODE"),
-    "eval_app_bundle_id": os.environ.get("EVAL_APP_BUNDLE_ID") or None,
-    "test_plan": os.environ.get("TEST_PLAN") or "auto-resolved from dataset/prd_test_plans.json",
-    "prd": os.environ.get("PRD"),
-    "expo_mcp_auth_status": os.environ.get("EXPO_MCP_AUTH_STATUS"),
-    "scenario": os.environ.get("SCENARIO") or None,
+    "agent_model": preferred("AGENT_MODEL", "agent_model"),
+    "metro_mode": preferred("METRO_MODE", "metro_mode", "dev-build"),
+    "eval_app_bundle_id": preferred("EVAL_APP_BUNDLE_ID", "eval_app_bundle_id"),
+    "test_plan": preferred("TEST_PLAN", "test_plan") or "auto-resolved from dataset/prd_test_plans.json",
+    "prd": preferred("PRD", "prd", "dataset/prds/hot_chocolate/prd/mvp.txt"),
+    "expo_mcp_auth_status": preferred("EXPO_MCP_AUTH_STATUS", "expo_mcp_auth_status", "not_attempted"),
+    "scenario": preferred("SCENARIO", "scenario"),
     "score": score, "full_points": full,
     "macro_avg_pct": macro, "micro_pct": micro,
     "artifacts": {

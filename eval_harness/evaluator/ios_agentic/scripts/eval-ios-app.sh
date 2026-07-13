@@ -43,7 +43,7 @@ PRD="${PRD_OVERRIDE:-${PRD:-dataset/prds/hot_chocolate/prd/mvp.txt}}"
 # to $PRD's app from dataset/prd_test_plans.json. Set TEST_PLAN_OVERRIDE to
 # point at one specific file/directory instead (local debugging only).
 TEST_PLAN="${TEST_PLAN_OVERRIDE:-}"
-export RUN_ID RUN_START_MTIME OUT WORKSPACE TELEMETRY_DIR METRO_MODE AGENT AGENT_MODEL PRD TEST_PLAN
+export RUN_ID RUN_START_MTIME OUT WORKSPACE TELEMETRY_DIR METRO_MODE AGENT AGENT_MODEL PRD TEST_PLAN SCENARIO
 
 ANTHROPIC_PROXY_PORT=8082
 OTLP_PORT=4318
