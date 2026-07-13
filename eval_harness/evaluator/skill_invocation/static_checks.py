@@ -5,10 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 from pathlib import Path
+import re
 from typing import Any, Iterable
 
-from . import CORE_SKILLS
-from .utils import dedupe, flatten_strings, read_json
+from .utils import dedupe, read_json
 
 
 SOURCE_SUFFIXES = {".js", ".jsx", ".ts", ".tsx", ".json", ".mjs", ".cjs"}
@@ -50,13 +50,10 @@ class StaticUptakeResult:
         return round(self.passed / self.total, 4)
 
 
-SKILL_ALIASES = {
-    "building-native-ui": ["building-native-ui", "building native ui", "native ui"],
-    "expo-ui": ["expo-ui", "@expo/ui", "expo ui"],
-    "native-data-fetching": ["native-data-fetching", "native data fetching"],
-    "expo-dev-client": ["expo-dev-client", "dev client", "development client"],
-    "expo-tailwind-setup": ["expo-tailwind-setup", "tailwind setup", "nativewind"],
-}
+# Codex has no dedicated skill-invocation tool; skills are files under
+# .agents/skills/<id>/ that it can only reach via shell commands. Matching the
+# path (not free text) avoids false positives from unrelated command output.
+_CODEX_SKILL_PATH_RE = re.compile(r"\.agents/skills/([A-Za-z0-9_-]+)/")
 
 
 @dataclass
@@ -76,18 +73,42 @@ def load_trace(path: Path | str) -> dict[str, Any]:
 
 
 def detect_triggered_skills(trace: dict[str, Any]) -> list[str]:
-    text = "\n".join(flatten_strings(trace)).lower()
+    """Detect genuinely-invoked skills from the trace's own tool-call structure.
+
+    Deliberately does not flatten the trace to free text and substring-match --
+    that matches incidental noise (npm/package.json output, unrelated repo file
+    listings) as readily as real use. Detection is agent-specific because the
+    two agents expose skill invocation differently:
+      - Claude Code has a dedicated `Skill` tool; `args["skill"]` is
+        "<plugin>:<skill-id>" (e.g. "expo:expo-router").
+      - Codex has no such tool; a skill can only be read via a shell command,
+        so we match the `.agents/skills/<id>/` path in `exec_command` args.
+    """
+    agent = (trace.get("agent") or "").lower()
     observed: list[str] = []
-    for skill in CORE_SKILLS:
-        aliases = SKILL_ALIASES.get(skill, [skill])
-        if any(alias.lower() in text for alias in aliases):
-            observed.append(skill)
-    return observed
+    for session in trace.get("sessions", []):
+        for turn in session.get("turns", []):
+            for step in turn.get("steps", []):
+                for call in step.get("tool_calls") or []:
+                    observed.extend(_skills_from_tool_call(agent, call))
+    return dedupe(observed)
+
+
+def _skills_from_tool_call(agent: str, call: dict[str, Any]) -> list[str]:
+    name = call.get("name")
+    args = call.get("args") or {}
+    if name == "Skill":
+        skill = str(args.get("skill") or "")
+        return [skill.rsplit(":", 1)[-1]] if skill else []
+    if name == "exec_command":
+        cmd = str(args.get("cmd") or args.get("command") or "")
+        return _CODEX_SKILL_PATH_RE.findall(cmd)
+    return []
 
 
 def score_trigger_quality(expected_skills: Iterable[str], triggered_skills: Iterable[str]) -> TriggerQuality:
     expected = dedupe(list(expected_skills))
-    triggered = dedupe([skill for skill in triggered_skills if skill in CORE_SKILLS])
+    triggered = dedupe(list(triggered_skills))
     expected_set = set(expected)
     triggered_set = set(triggered)
     matched = [skill for skill in expected if skill in triggered_set]

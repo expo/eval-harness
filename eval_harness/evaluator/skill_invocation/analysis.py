@@ -21,7 +21,10 @@ TRACE_CANDIDATES = (
     "codex.json",
 )
 
-BASELINE_SCENARIOS = {"plugin_off_baseline", "skills_off_tools_on", "skills_off"}
+# Authoring-enforced negative-control scenario: skills/MCP were genuinely
+# unavailable, so expected_skills is forced to [] regardless of the case spec.
+UNAVAILABLE_SCENARIOS = {"skills_unavailable"}
+BASELINE_SCENARIOS = UNAVAILABLE_SCENARIOS
 
 
 @dataclass
@@ -68,6 +71,12 @@ def analyze_artifacts(
     eval_layout = discover_artifact_layout(eval_artifact) if eval_artifact else None
     warnings: list[str] = []
 
+    scenario = _resolve_scenario(scenario, author_layout, warnings)
+    # The "unavailable" scenario is an enforced negative control (see
+    # author-app.sh): skills/MCP were genuinely disabled during authoring, so
+    # nothing can legitimately trigger regardless of what the case declares.
+    expected_skills = [] if scenario in UNAVAILABLE_SCENARIOS else case.expected_skills
+
     if author_layout.app_dir is None:
         warnings.append("app tree not found")
         static_passed = 0
@@ -90,7 +99,7 @@ def analyze_artifacts(
     evaluator_pct = _read_evaluator_pct(result_path) if result_path else None
     build_success = True if result_path else None
     score = score_case_run(
-        expected_skills=case.expected_skills,
+        expected_skills=expected_skills,
         triggered_skills=triggered,
         static_passed=static_passed,
         static_total=static_total,
@@ -99,15 +108,14 @@ def analyze_artifacts(
     )
     uptake = score.context_uptake.uptake_rate
     outcome_status = "complete" if evaluator_pct is not None else "pending"
-    classification = _classification_for_run(score, evaluator_pct, build_success, outcome_status)
 
     run = {
         "case_id": case.id,
         "scenario": scenario,
-        "skill_id": ",".join(case.expected_skills),
-        "classification": classification,
+        "skill_id": ",".join(expected_skills),
         "trigger_recall": score.trigger_quality.recall,
         "trigger_precision": score.trigger_quality.precision,
+        "trigger_exact_match": set(score.trigger_quality.triggered_skills) == set(expected_skills),
         "detected_skills": score.trigger_quality.triggered_skills,
         "uptake_rate": uptake,
         "evaluator_pct": evaluator_pct,
@@ -134,17 +142,23 @@ def analyze_artifacts(
         },
         "braintrust_refs": _collect_braintrust_refs(author_layout, eval_layout, trace),
     }
-    if outcome_status == "pending":
-        for skill in payload["skills"].values():
-            skill["classification"] = "Outcome pending"
-            skill["outcome_delta"] = None
-    else:
-        for skill in payload["skills"].values():
-            if skill.get("baseline_evaluator_pct") is None:
-                skill["classification"] = classification
     write_json(payload, out_dir / "metrics.json")
     write_html_report(payload, out_dir / "report.html")
     return payload
+
+
+def _resolve_scenario(scenario: str, author_layout: ArtifactLayout, warnings: list[str]) -> str:
+    """Prefer the scenario actually recorded at authoring time (ground truth
+    in manifest.json) over the analysis-time input -- the two can drift if the
+    wrong artifact is paired with the wrong `--scenario` flag."""
+    if not author_layout.manifest_path or not author_layout.manifest_path.exists():
+        return scenario
+    recorded = (read_json(author_layout.manifest_path) or {}).get("scenario")
+    if not recorded:
+        return scenario
+    if scenario and recorded != scenario:
+        warnings.append(f"scenario mismatch: input={scenario!r} manifest={recorded!r}; using manifest")
+    return recorded
 
 
 def discover_artifact_layout(root: Path | str) -> ArtifactLayout:
@@ -188,27 +202,6 @@ def score_case_run(
     )
 
 
-def classify_skill(
-    trigger_recall: float,
-    trigger_precision: float,
-    uptake_rate: float | None,
-    outcome_delta: float,
-    build_success_rate: float,
-    *,
-    min_trigger: float = 0.75,
-    min_uptake: float = 0.6,
-    min_positive_delta: float = 1.0,
-    min_build_success: float = 0.8,
-) -> str:
-    if build_success_rate < min_build_success or outcome_delta < min_positive_delta:
-        return "Unhelpful"
-    if trigger_recall < min_trigger or trigger_precision < min_trigger:
-        return "Needs trigger tuning"
-    if uptake_rate is None or uptake_rate < min_uptake:
-        return "Needs content tuning"
-    return "Helpful"
-
-
 def aggregate_skill_results(runs: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for run in runs:
@@ -228,6 +221,7 @@ def aggregate_skill_results(runs: list[dict[str, Any]]) -> dict[str, dict[str, A
             outcome_delta = round(skill_eval - baseline_eval, 4)
         recall = _avg(_values(skill_rows, "trigger_recall")) or 0.0
         precision = _avg(_values(skill_rows, "trigger_precision")) or 0.0
+        exact_match_rate = _avg([1.0 if row.get("trigger_exact_match") else 0.0 for row in skill_rows])
         uptake = _avg(_values(skill_rows, "uptake_rate"))
         build_success_rate = _avg([1.0 if row.get("build_success") else 0.0 for row in skill_rows]) or 0.0
         out[skill_id] = {
@@ -237,15 +231,9 @@ def aggregate_skill_results(runs: list[dict[str, Any]]) -> dict[str, dict[str, A
             "outcome_delta": outcome_delta,
             "trigger_recall": round(recall, 4),
             "trigger_precision": round(precision, 4),
+            "trigger_accuracy": None if exact_match_rate is None else round(exact_match_rate, 4),
             "uptake_rate": None if uptake is None else round(uptake, 4),
             "build_success_rate": round(build_success_rate, 4),
-            "classification": classify_skill(
-                recall,
-                precision,
-                uptake,
-                outcome_delta if outcome_delta is not None else 0.0,
-                build_success_rate,
-            ),
         }
     return out
 
@@ -259,7 +247,9 @@ def print_summary(payload: dict[str, Any]) -> None:
     print(f"detected_skills={','.join(run.get('detected_skills') or [])}")
     print(f"uptake_rate={run.get('uptake_rate')}")
     print(f"evaluator_pct={run.get('evaluator_pct')}")
-    print(f"classification={run.get('classification')}")
+    print(f"trigger_recall={run.get('trigger_recall')}")
+    print(f"trigger_precision={run.get('trigger_precision')}")
+    print(f"trigger_exact_match={run.get('trigger_exact_match')}")
 
 
 def write_html_report(payload: dict[str, Any], path: Path | str) -> None:
@@ -271,7 +261,7 @@ def write_html_report(payload: dict[str, Any], path: Path | str) -> None:
             f"<td>{_e(run.get('scenario'))}</td>"
             f"<td>{_e(run.get('skill_id'))}</td>"
             f"<td>{_e(', '.join(run.get('detected_skills') or []))}</td>"
-            f"<td>{_e(run.get('classification'))}</td>"
+            f"<td>{_e(run.get('trigger_exact_match'))}</td>"
             f"<td>{_e(_pct(run.get('trigger_recall')))}</td>"
             f"<td>{_e(_pct(run.get('trigger_precision')))}</td>"
             f"<td>{_e(_pct(run.get('uptake_rate')))}</td>"
@@ -295,30 +285,13 @@ def write_html_report(payload: dict[str, Any], path: Path | str) -> None:
   <p>{_e(payload.get('summary', ''))}</p>
   <p class="note">Initial v0 signal: trace trigger detection, static code uptake checks, and optional evaluator score. No LLM judge or screenshot evidence is used.</p>
   <table>
-    <thead><tr><th>Case</th><th>Scenario</th><th>Expected</th><th>Detected</th><th>Class</th><th>Recall</th><th>Precision</th><th>Uptake</th><th>Evaluator</th></tr></thead>
+    <thead><tr><th>Case</th><th>Scenario</th><th>Expected</th><th>Detected</th><th>Exact match</th><th>Recall</th><th>Precision</th><th>Uptake</th><th>Evaluator</th></tr></thead>
     <tbody>{''.join(rows)}</tbody>
   </table>
 </body>
 </html>
 """
     Path(path).write_text(doc, encoding="utf-8")
-
-
-def _classification_for_run(
-    score: CaseRunScore,
-    evaluator_pct: float | None,
-    build_success: bool | None,
-    outcome_status: str,
-) -> str:
-    if outcome_status == "pending":
-        return "Outcome pending"
-    return classify_skill(
-        score.trigger_quality.recall,
-        score.trigger_quality.precision,
-        score.context_uptake.uptake_rate,
-        evaluator_pct or 0.0,
-        1.0 if build_success else 0.0,
-    )
 
 
 def _find_app_dir(root: Path) -> Path | None:
