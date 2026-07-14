@@ -19,6 +19,22 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 source "$ROOT/eval_harness/utils/shell/eval_stages.sh"
 
 OUT="$(mktemp -d)"
+
+# eval::refresh_expo_mcp_token's persist step shells out to `eas env:update`.
+# Unlike author-app.sh (which installs eas-cli in its own STAGE A before ever
+# calling the refresh function), this is this script's only job, so it must
+# install eas-cli itself -- otherwise the refresh call can succeed while the
+# persist call silently no-ops on a missing binary, leaving the now-rotated
+# (and therefore already-consumed) refresh_token never saved back to EAS.
+# Only bother when MCP is actually configured -- eval::refresh_expo_mcp_token
+# returns immediately without needing `eas` at all otherwise (the common case
+# for anyone not using Expo MCP), so skip the ~10-20s install cost then.
+if [ -n "${EXPO_MCP_CLIENT_ID:-}" ] && [ -n "${EXPO_MCP_REFRESH_TOKEN:-}" ] \
+   && ! command -v eas >/dev/null 2>&1; then
+  npm install -g eas-cli >"$OUT/eas-cli-install.log" 2>&1
+  eas --version >/dev/null 2>&1; eval::gate $? "eas-cli install" 1>&2
+fi
+
 # Redirect the function's own diagnostic echo lines to stderr so stdout carries
 # only the final key=value pair below -- the workflow step captures stdout with
 # $(...) and needs it free of anything but these two lines.
