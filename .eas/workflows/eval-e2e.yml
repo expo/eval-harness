@@ -75,7 +75,35 @@ on:
         description: Skill id to explicitly name in the prompt; only used when skill_scenario=skills_available_mentioned
 
 jobs:
+  # Refreshes the Expo MCP OAuth access token exactly once per workflow run and
+  # fans it out as a job output, rather than letting every author_app job
+  # refresh (and self-persist the rotated refresh_token) independently -- see
+  # provision-mcp-token.sh for why that's a real race once more than one
+  # author_app job runs in the same invocation (e.g. one per PRD).
+  provision_mcp_token:
+    name: provision Expo MCP token
+    runs_on: linux-medium
+    environment: production
+    outputs:
+      bearer_token: ${{ steps.provision.outputs.bearer_token }}
+      auth_status: ${{ steps.provision.outputs.auth_status }}
+    steps:
+      - uses: eas/checkout
+
+      - name: refresh Expo MCP OAuth token
+        id: provision
+        run: |
+          out=$(bash ./eval_harness/utils/shell/provision-mcp-token.sh)
+          bearer_token=$(echo "$out" | sed -n 's/^bearer_token=//p')
+          auth_status=$(echo "$out" | sed -n 's/^auth_status=//p')
+          echo "auth_status=$auth_status (bearer_token len ${#bearer_token})"
+          # set-output rejects an empty VALUE; author-app.sh treats the "none"
+          # placeholder the same as unset.
+          set-output bearer_token "${bearer_token:-none}"
+          set-output auth_status "${auth_status:-unconfigured}"
+
   author_app:
+    needs: [provision_mcp_token]
     runs_on: linux-medium
     environment: production
     env:
@@ -84,6 +112,8 @@ jobs:
       PRD: ${{ inputs.prd || 'dataset/prds/hot_chocolate/prd/mvp.txt' }}
       SCENARIO: ${{ inputs.skill_scenario || 'skills_available_unmentioned' }}
       SKILL_MENTION: ${{ inputs.skill_mention || '' }}
+      EXPO_MCP_BEARER_TOKEN: ${{ needs.provision_mcp_token.outputs.bearer_token }}
+      EXPO_MCP_AUTH_STATUS: ${{ needs.provision_mcp_token.outputs.auth_status }}
     steps:
       - uses: eas/checkout
 
