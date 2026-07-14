@@ -1,0 +1,31 @@
+# THROWAWAY, temporary: determines empirically whether a real pull_request-
+# triggered EAS workflow checks out the PR's own head commit or the base
+# branch (main). Neither Expo's docs nor the public eas-cli source confirm
+# this either way. Reads PR_CHECKOUT_TEST_MARKER.txt -- if a test PR that
+# edits this file shows the EDITED value here, checkout uses the PR's head;
+# if it shows the unedited main value, checkout uses the base branch.
+# Remove this file (and PR_CHECKOUT_TEST_MARKER.txt) once we have the answer.
+name: debug-pr-checkout-ref
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - PR_CHECKOUT_TEST_MARKER.txt
+
+jobs:
+  check_ref:
+    name: check which ref got checked out
+    runs_on: linux-medium
+    steps:
+      - uses: eas/checkout
+
+      - name: show marker file + git state
+        run: |
+          echo "=== PR_CHECKOUT_TEST_MARKER.txt content ==="
+          cat PR_CHECKOUT_TEST_MARKER.txt
+          echo "=== git log -1 ==="
+          git log -1 --oneline
+          echo "=== git rev-parse HEAD ==="
+          git rev-parse HEAD
