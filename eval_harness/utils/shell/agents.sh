@@ -142,6 +142,10 @@ EOF
 # entirely, so nothing exists for the agent to trigger -- see
 # skill_invocation's UNAVAILABLE_SCENARIOS, which scores against this same
 # enforced absence.
+# SKILL_PLUGIN_DIR (claude-code only): when set, skips the marketplace
+# install/lookup entirely and loads the plugin via `--plugin-dir` from this
+# local path instead -- used by the skills-repo CI integration so a PR's own
+# proposed skill changes get exercised, not whatever's currently published.
 eval::run_coding_agent() { # agent root workspace prd_file out_dir [model]
   local agent="$1" root="$2" workspace="$3" prd_file="$4" out="$5" model="${6:-}"
   [ "$agent" = "claude" ] && agent="claude-code"
@@ -188,16 +192,25 @@ eval::run_coding_agent() { # agent root workspace prd_file out_dir [model]
     return $rc
   else
     if ! command -v claude >/dev/null 2>&1; then echo "  ❌ claude not on PATH"; return 127; fi
-    local settings_arg=""
+    local settings_arg="" plugin_arg=""
     if [ "$skills_enabled" = 1 ]; then
-      # Install the official Expo plugin: bundles the Expo skills AND the Expo
-      # MCP server, so we don't hand-wire `claude mcp add`. EAS workers start
-      # with a clean Claude home, so seed the marketplace before installing.
-      claude plugin marketplace add anthropics/claude-plugins-official >"$out/c-plugin.log" 2>&1 || \
-        claude plugin marketplace update claude-plugins-official >>"$out/c-plugin.log" 2>&1 || \
-        echo "  ⚠️  claude plugin marketplace setup failed (continuing; see c-plugin.log)"
-      claude plugin install expo@claude-plugins-official >>"$out/c-plugin.log" 2>&1 || \
-        echo "  ⚠️  claude plugin install expo@claude-plugins-official failed (continuing; see c-plugin.log)"
+      if [ -n "${SKILL_PLUGIN_DIR:-}" ]; then
+        # CI-only path (see skills-repo integration): load the plugin straight
+        # from a local checkout -- e.g. a PR's own proposed skill changes --
+        # instead of the published marketplace version, so the eval actually
+        # exercises what the PR changed rather than what's already released.
+        plugin_arg="--plugin-dir $SKILL_PLUGIN_DIR"
+        echo "loading plugin from SKILL_PLUGIN_DIR=$SKILL_PLUGIN_DIR (skipping marketplace install)" >"$out/c-plugin.log"
+      else
+        # Install the official Expo plugin: bundles the Expo skills AND the Expo
+        # MCP server, so we don't hand-wire `claude mcp add`. EAS workers start
+        # with a clean Claude home, so seed the marketplace before installing.
+        claude plugin marketplace add anthropics/claude-plugins-official >"$out/c-plugin.log" 2>&1 || \
+          claude plugin marketplace update claude-plugins-official >>"$out/c-plugin.log" 2>&1 || \
+          echo "  ⚠️  claude plugin marketplace setup failed (continuing; see c-plugin.log)"
+        claude plugin install expo@claude-plugins-official >>"$out/c-plugin.log" 2>&1 || \
+          echo "  ⚠️  claude plugin install expo@claude-plugins-official failed (continuing; see c-plugin.log)"
+      fi
       settings_arg="$(eval::_claude_expo_mcp_settings_arg "$workspace")"
     else
       echo "skills_unavailable scenario: skipping Expo plugin install and MCP wiring" >"$out/c-plugin.log"
@@ -206,11 +219,11 @@ eval::run_coding_agent() { # agent root workspace prd_file out_dir [model]
     # bash 3.2, where "${arr[@]}" on an empty array trips `set -u`.
     if [ -n "$model" ]; then
       ( cd "$workspace" && $TO claude -p "$prompt" --model "$model" \
-          --dangerously-skip-permissions --add-dir "$workspace" $settings_arg ) 2>&1 | tee "$out/c-agent.log"
+          --dangerously-skip-permissions --add-dir "$workspace" $settings_arg $plugin_arg ) 2>&1 | tee "$out/c-agent.log"
       local rc=${PIPESTATUS[0]}
     else
       ( cd "$workspace" && $TO claude -p "$prompt" \
-          --dangerously-skip-permissions --add-dir "$workspace" $settings_arg ) 2>&1 | tee "$out/c-agent.log"
+          --dangerously-skip-permissions --add-dir "$workspace" $settings_arg $plugin_arg ) 2>&1 | tee "$out/c-agent.log"
       local rc=${PIPESTATUS[0]}
     fi
     eval::gate $rc "claude-code authored app"
