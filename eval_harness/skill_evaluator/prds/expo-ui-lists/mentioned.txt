@@ -1,1 +1,0 @@
-Build a native-looking cafe browser using @expo/ui. Use native list rows for a searchable cafe list, disclosure rows, and a details panel.

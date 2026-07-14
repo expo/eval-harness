@@ -1,1 +1,0 @@
-Build a native-looking cafe browser with a searchable list of cafes, disclosure rows, and a details panel.

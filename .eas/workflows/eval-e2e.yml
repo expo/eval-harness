@@ -32,14 +32,12 @@ on:
         description: Optional model alias/name; defaults to sonnet for Claude Code and gpt-5-mini for Codex
       prd:
         type: string
-        default: eval_harness/app_evaluator/prds/hot_chocolate/prd/mvp.txt
+        default: dataset/prds/hot_chocolate/prd/mvp.txt
         required: false
-        description: PRD path under eval_harness/
-      test_plan:
-        type: string
-        default: eval_harness/app_evaluator/test_plans/primitives
-        required: false
-        description: Test plan file or directory under eval_harness/
+        description: >-
+          PRD path under dataset/. Also determines which test plans run in
+          eval_ios (auto-resolved from dataset/prd_test_plans.json) and which
+          skills are expected in eval_skill (dataset/prd_skills.json).
       ios_app_mode:
         type: choice
         options:
@@ -58,28 +56,23 @@ on:
         default: true
         required: false
         description: Run the skill-eval analyzer job
-      authoring_mode:
-        type: choice
-        options:
-          - prd
-          - skill_case
-        default: prd
-        required: false
-        description: Author from a direct PRD path or a skill-case scenario PRD
-      skill_case_spec:
-        type: string
-        default: eval_harness/skill_evaluator/skill_cases/core5/native-data-fetching.json
-        required: false
-        description: Skill-eval case spec path
       skill_scenario:
         type: choice
         options:
-          - skills_off_tools_on
+          - skills_unavailable
           - skills_available_unmentioned
           - skills_available_mentioned
         default: skills_available_unmentioned
         required: false
-        description: Skill-eval scenario label and capability mode
+        description: >-
+          Authoring-enforced skill scenario. skills_unavailable disables skill
+          install and Expo MCP entirely (negative control); the other two only
+          differ in whether the prompt explicitly names skill_mention.
+      skill_mention:
+        type: string
+        default: ''
+        required: false
+        description: Skill id to explicitly name in the prompt; only used when skill_scenario=skills_available_mentioned
 
 jobs:
   author_app:
@@ -88,11 +81,9 @@ jobs:
     env:
       AGENT: ${{ inputs.agent || 'claude-code' }}
       AGENT_MODEL: ${{ inputs.agent_model || '' }}
-      AUTHORING_MODE: ${{ inputs.authoring_mode || 'prd' }}
-      PRD: ${{ inputs.prd || 'eval_harness/app_evaluator/prds/hot_chocolate/prd/mvp.txt' }}
-      TEST_PLAN: ${{ inputs.test_plan || 'eval_harness/app_evaluator/test_plans/primitives' }}
-      SKILL_CASE_SPEC: ${{ inputs.skill_case_spec || '' }}
-      SKILL_SCENARIO: ${{ inputs.skill_scenario || 'skills_available_unmentioned' }}
+      PRD: ${{ inputs.prd || 'dataset/prds/hot_chocolate/prd/mvp.txt' }}
+      SCENARIO: ${{ inputs.skill_scenario || 'skills_available_unmentioned' }}
+      SKILL_MENTION: ${{ inputs.skill_mention || '' }}
     steps:
       - uses: eas/checkout
 
@@ -101,7 +92,7 @@ jobs:
           if [ -n "${ANTHROPIC_API_KEY:-}" ]; then echo "ANTHROPIC_API_KEY bound (len ${#ANTHROPIC_API_KEY})"; else echo "MISSING"; exit 1; fi
 
       - name: Author app with coding agent
-        run: bash ./eval_harness/scripts/author-app.sh
+        run: bash ./eval_harness/app_builder/scripts/author-app.sh
 
       # Carries both the authored workspace and author-side diagnostics to macOS.
       - name: Package authored app
@@ -113,6 +104,7 @@ jobs:
             --exclude 'agent-workspace/*/ios/build' \
             --exclude 'agent-workspace/*/android/.gradle' \
             --exclude 'agent-workspace/*/android/build' \
+            --exclude 'agent-workspace/*/.mcp.json' \
             --exclude 'eval-out/*/codex-home/skills' \
             --exclude 'eval-out/*/codex-home/.tmp' \
             --exclude 'eval-out/*/codex-home/tmp' \
@@ -138,9 +130,7 @@ jobs:
     env:
       AGENT: ${{ inputs.agent || 'claude-code' }}
       AGENT_MODEL: ${{ inputs.agent_model || '' }}
-      AUTHORING_MODE: ${{ inputs.authoring_mode || 'prd' }}
       PRD_OVERRIDE: ${{ inputs.prd || '' }}
-      TEST_PLAN_OVERRIDE: ${{ inputs.test_plan || '' }}
       EVAL_IOS_APP_MODE: ${{ inputs.ios_app_mode || 'release' }}
     steps:
       - uses: eas/checkout
@@ -176,7 +166,7 @@ jobs:
           fi
 
       - name: Build, run, and evaluate authored app
-        run: bash ./eval_harness/scripts/eval-ios-app.sh
+        run: bash ./eval_harness/evaluator/ios_agentic/scripts/eval-ios-app.sh
 
       # tar ourselves -> clean `eval-out/` root (upload_artifact bakes in abs paths)
       - name: Package eval output
@@ -210,11 +200,10 @@ jobs:
 
       - name: Analyze authored app for skill eval
         run: |
-          CASE_SPEC='${{ inputs.skill_case_spec }}' \
           AUTHORED_ARTIFACT='${{ steps.download_author.outputs.artifact_path }}' \
           SCENARIO='${{ inputs.skill_scenario }}' \
           OUT_DIR=skill-eval-report \
-          bash ./eval_harness/scripts/eval-skill-use.sh
+          bash ./eval_harness/evaluator/skill_invocation/scripts/eval-skill-use.sh
 
       - name: Package skill-eval report
         if: ${{ always() }}

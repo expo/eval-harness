@@ -1,1 +1,0 @@
-Build an Expo app using expo-dev-client guidance. It should use a native module and be configured for a development build.

@@ -1,1 +1,0 @@
-Build a mobile app screen using native-data-fetching guidance. Load remote cafe data, support pull-to-refresh, and show loading and error states.

@@ -21,14 +21,11 @@ on:
         description: Signed download URL for an authored-app.tar.gz artifact
       prd:
         type: string
-        default: eval_harness/app_evaluator/prds/hot_chocolate/prd/mvp.txt
+        default: dataset/prds/hot_chocolate/prd/mvp.txt
         required: false
-        description: PRD path under eval_harness/
-      test_plan:
-        type: string
-        default: eval_harness/app_evaluator/test_plans/primitives
-        required: false
-        description: Test plan file or directory under eval_harness/
+        description: >-
+          PRD path under dataset/. Also determines which test plans run
+          (auto-resolved from dataset/prd_test_plans.json).
       ios_app_mode:
         type: choice
         options:
@@ -44,7 +41,6 @@ jobs:
     environment: production
     env:
       PRD_OVERRIDE: ${{ inputs.prd || '' }}
-      TEST_PLAN_OVERRIDE: ${{ inputs.test_plan || '' }}
       EVAL_IOS_APP_MODE: ${{ inputs.ios_app_mode || 'dev-client' }}
     steps:
       - uses: eas/checkout
@@ -90,7 +86,7 @@ jobs:
           fi
 
       - name: Build, run, and evaluate authored app
-        run: bash ./eval_harness/scripts/eval-ios-app.sh
+        run: bash ./eval_harness/evaluator/ios_agentic/scripts/eval-ios-app.sh
 
       - name: Package eval output
         if: ${{ always() }}

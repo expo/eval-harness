@@ -1,0 +1,5 @@
+{
+  "notes": ["expo-data-fetching"],
+  "hot_chocolate": ["expo-data-fetching", "expo-ui"],
+  "wiki_reader": ["expo-native-ui", "expo-ui"]
+}

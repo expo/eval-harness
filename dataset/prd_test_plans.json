@@ -1,0 +1,40 @@
+{
+  "notes": [
+    "test_insert.txt",
+    "test_delete.txt",
+    "test_update.txt",
+    "test_select_by_id.txt",
+    "test_text_search_filter.txt",
+    "test_credential_collection.txt",
+    "test_sign_in_outcome.txt",
+    "test_stack_navigation.txt",
+    "test_modal_present.txt",
+    "test_modal_dismiss.txt",
+    "test_keyboard_handling.txt"
+  ],
+  "hot_chocolate": [
+    "test_select_by_id.txt",
+    "test_text_search_filter.txt",
+    "test_multi_filter_composition.txt",
+    "test_stack_navigation.txt",
+    "test_tab_navigation.txt",
+    "test_header_configuration.txt",
+    "test_bottom_sheet.txt",
+    "test_permission_prompt.txt",
+    "test_empty_state.txt",
+    "test_native_sharing.txt",
+    "test_keyboard_handling.txt"
+  ],
+  "wiki_reader": [
+    "test_delete.txt",
+    "test_select_by_id.txt",
+    "test_stack_navigation.txt",
+    "test_header_configuration.txt",
+    "test_modal_present.txt",
+    "test_modal_dismiss.txt",
+    "test_bottom_sheet.txt",
+    "test_empty_state.txt",
+    "test_pull_to_refresh.txt",
+    "test_keyboard_handling.txt"
+  ]
+}

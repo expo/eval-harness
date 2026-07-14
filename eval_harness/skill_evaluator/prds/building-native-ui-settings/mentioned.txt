@@ -1,1 +1,0 @@
-Build a polished Expo settings screen using the building-native-ui skill guidance. It should have grouped Account, Preferences, and About sections, native toggles, a version row, and a sign-out action.

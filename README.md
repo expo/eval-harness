@@ -16,32 +16,38 @@ has a stable primitive test plan.
   author-app.yml              # Linux authoring replay/debug workflow
   eval-ios-app.yml            # macOS iOS evaluator replay/debug workflow
   eval-skill-use.yml          # Linux skill-use report replay/debug workflow
-  smoke-*.yml                 # narrow infrastructure smoke tests
 
 eval_harness/
-  app_evaluator/
-    agent_device/             # agent-device bridge and tools
-    maestro/                  # Maestro bridge and tools
-    core/                     # evaluator scoring, prompts, and tracing internals
-    prds/                     # Notes, Hot Chocolate, and Wiki Reader app PRDs
-    test_plans/primitives/    # app-agnostic primitive plans
-    reference_apps/notes/     # checked-in Notes reference app
-  skill_evaluator/
-    prds/                     # skill-eval PRDs used by authoring_mode=skill_case
-    skill_cases/core5/        # skill case specs
-    main.py                   # analyze-artifacts and resolve-authoring-env CLI
-    analysis.py               # scoring, aggregation, metrics.json, report.html
-    static_checks.py          # source checks and trace skill detection
-    utils.py                  # case loading, artifact unpacking, small helpers
-    tests/                    # skill evaluator unit tests
-  scripts/                    # Workflow entrypoints
-  prompts/                    # coding-agent prompt templates
-  utils/                      # artifacts, iOS, shell, and telemetry helpers
+  app_builder/
+    prompts/                  # coding-agent authoring prompt template
+    scripts/                  # authoring + agent-skill-visibility entrypoints
+  evaluator/
+    ios_agentic/
+      agent_device/           # agent-device bridge and tools
+      maestro/                # Maestro bridge and tools
+      core/                   # evaluator scoring and tracing internals
+      prompts/                # agentic evaluator's system prompt
+      scripts/                # iOS build+eval entrypoints
+    skill_invocation/
+      skill_cases/            # one case spec per skill (id + static checks)
+      main.py                 # analyze-artifacts CLI
+      analysis.py             # scoring, aggregation, metrics.json, report.html
+      static_checks.py        # source checks and trace skill detection
+      utils.py                # case loading, artifact unpacking, small helpers
+      tests/                  # skill evaluator unit tests
+      scripts/                # skill-use analysis entrypoint
+  utils/                      # artifacts, iOS, shell, and telemetry helpers (shared)
+
+dataset/
+  prds/                       # Notes, Hot Chocolate, and Wiki Reader app PRDs (shared)
+  test_plans/primitives/      # app-agnostic primitive plans
+  prd_skills.json             # app -> expected skill ids (skill-eval ground truth)
+  prd_test_plans.json         # app -> relevant test-plan filenames (iOS-eval ground truth)
 ```
 
 ## Setup
 
-Install the EAS CLI, authenticate with Expo, copy `env.default` to `.env`, and
+Install the EAS CLI, authenticate with Expo, copy `.env.default` to `.env`, and
 push secrets to the EAS `production` environment:
 
 ```bash
@@ -52,8 +58,14 @@ Required for Claude Code authoring and evaluator runs: `ANTHROPIC_API_KEY`.
 Required for Codex authoring: `OPENAI_API_KEY`.
 Optional: `EXPO_TOKEN` (an Expo Robot User access token) so the coding agent can
 run its own `eas build` self-verification step during authoring; see
-`env.default` for details. Optional: `BRAINTRUST_API_KEY` plus
+`.env.default` for details. Optional: `BRAINTRUST_API_KEY` plus
 `BRAINTRUST_PROJECT` for trace pushes.
+
+`eval_harness/utils/shell/bootstrap-expo-mcp-token.sh` is a one-command
+alternative to the manual `eas env:push` above: with `EXPO_TOKEN` (and
+optionally `ANTHROPIC_API_KEY`/`OPENAI_API_KEY`) already set in `.env`, it
+completes the Expo MCP OAuth browser login and pushes all of these straight
+to EAS.
 
 Expo project routing is controlled by `app.config.js`. Override these env vars
 when running the same branch under another Expo account:
@@ -71,9 +83,7 @@ Run the full modular E2E workflow for Notes:
 ```bash
 eas workflow:run .eas/workflows/eval-e2e.yml \
   -F agent=claude-code \
-  -F authoring_mode=prd \
-  -F prd=eval_harness/app_evaluator/prds/notes/prd/mvp.txt \
-  -F test_plan=eval_harness/app_evaluator/test_plans/primitives/test_insert.txt \
+  -F prd=dataset/prds/notes/prd/mvp.txt \
   -F run_eval_ios=true \
   -F run_eval_skill=false
 ```
@@ -83,27 +93,27 @@ Use Codex by changing the agent and ensuring `OPENAI_API_KEY` is present:
 ```bash
 eas workflow:run .eas/workflows/eval-e2e.yml \
   -F agent=codex \
-  -F authoring_mode=prd \
-  -F prd=eval_harness/app_evaluator/prds/notes/prd/mvp.txt \
-  -F test_plan=eval_harness/app_evaluator/test_plans/primitives/test_insert.txt \
+  -F prd=dataset/prds/notes/prd/mvp.txt \
   -F run_eval_ios=true \
   -F run_eval_skill=false
 ```
 
-Run a skill-case scenario through the same authoring workflow by switching
-`authoring_mode` to `skill_case`. In this mode `skill_case_spec` and
-`skill_scenario` resolve the PRD passed to the coding agent; the `prd` input is
-ignored for authoring. `test_plan` belongs to the app evaluator only, so it is
-only needed when `run_eval_ios=true`.
+Authoring always uses a direct PRD path. Which test plans run in `eval_ios`,
+and which skill(s) are expected in `eval_skill` (`run_eval_skill=true`), are
+both resolved automatically from that same PRD — via
+`dataset/prd_test_plans.json` and `dataset/prd_skills.json` respectively, no
+manual test-plan or case-spec selection needed. `skill_scenario` feeds both
+the authoring step (it's an enforced config, not just a label — see
+`skill_cases/README.md`) and the analysis step; `skill_mention` only matters
+for the `skills_available_mentioned` scenario:
 
 ```bash
 eas workflow:run .eas/workflows/eval-e2e.yml \
   -F agent=claude-code \
-  -F authoring_mode=skill_case \
-  -F skill_case_spec=eval_harness/skill_evaluator/skill_cases/core5/native-data-fetching.json \
-  -F skill_scenario=skills_available_unmentioned \
+  -F prd=dataset/prds/notes/prd/mvp.txt \
   -F run_eval_ios=false \
-  -F run_eval_skill=true
+  -F run_eval_skill=true \
+  -F skill_scenario=skills_available_unmentioned
 ```
 
 ## Workflow Artifacts
@@ -143,8 +153,7 @@ plan is needed for author-only runs.
 ```bash
 eas workflow:run .eas/workflows/author-app.yml \
   -F agent=claude-code \
-  -F authoring_mode=prd \
-  -F prd=eval_harness/app_evaluator/prds/notes/prd/mvp.txt
+  -F prd=dataset/prds/notes/prd/mvp.txt
 ```
 
 Use `eval-ios-app.yml` to replay the iOS/evaluator half against a previously
@@ -154,14 +163,6 @@ probe logic.
 Use `eval-skill-use.yml` to replay the skill-use analyzer against a prior
 `authored-app` artifact, optionally with an eval output artifact. It uploads the
 same `skill-eval-report` artifact described above.
-
-Use `smoke-eval-standalone.yml` as a preflight for evaluator machinery. It runs
-the checked-in Notes reference app, which separates evaluator/device problems
-from coding-agent/authored-app problems.
-
-Use `smoke-agent-skill.yml` to check whether Claude Code or Codex can see and
-invoke Expo skills in the Workflow environment. Use `smoke-telemetry.yml` to
-check proxy capture and trace reconstruction without authoring an app.
 
 ## Braintrust
 
@@ -177,9 +178,9 @@ debugging driver behavior, but collaborators should start with EAS workflows
 because they match the runner environment.
 
 ```bash
-uv run python -m eval_harness.app_evaluator.main \
-  eval_harness/app_evaluator/test_plans/primitives/test_insert.txt \
-  --prd eval_harness/app_evaluator/prds/notes/prd/mvp.txt \
+uv run python -m eval_harness.evaluator.ios_agentic.main \
+  dataset/test_plans/primitives/test_insert.txt \
+  --prd dataset/prds/notes/prd/mvp.txt \
   -d agent-device \
   --hybrid-restart \
   -o /tmp/notes-result.json \
@@ -189,13 +190,14 @@ uv run python -m eval_harness.app_evaluator.main \
 Run shell parse checks after touching harness scripts:
 
 ```bash
-find eval_harness/scripts eval_harness/utils -name '*.sh' -print0 | xargs -0 bash -n
+find eval_harness -name '*.sh' -print0 | xargs -0 bash -n
 ```
 
-Run skill evaluator tests:
+Run skill evaluator and iOS test-plan-resolution tests:
 
 ```bash
-PYTHONPATH=. uv run python -m unittest eval_harness.skill_evaluator.tests.test_skill_eval_core
+PYTHONPATH=. uv run python -m unittest eval_harness.evaluator.skill_invocation.tests.test_skill_eval_core
+PYTHONPATH=. uv run python -m unittest eval_harness.evaluator.ios_agentic.tests.test_test_plan_resolution
 ```
 
 Validate EAS workflows:

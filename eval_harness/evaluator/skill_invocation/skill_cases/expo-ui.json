@@ -1,0 +1,10 @@
+{
+  "id": "expo-ui",
+  "feature_focus": "native @expo/ui list screens and bottom sheet details",
+  "static_uptake_checks": [
+    {"id": "imports_expo_ui", "kind": "import", "target": "@expo/ui"},
+    {"id": "uses_host", "kind": "text", "target": "Host"},
+    {"id": "uses_list", "kind": "text", "target": "List"},
+    {"id": "uses_list_item", "kind": "text", "target": "ListItem"}
+  ]
+}
