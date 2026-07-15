@@ -147,6 +147,17 @@ eval::run_coding_agent() { # agent root workspace prd_file out_dir [model]
         # exercises what the PR changed rather than what's already released.
         plugin_arg="--plugin-dir $SKILL_PLUGIN_DIR"
         echo "loading plugin from SKILL_PLUGIN_DIR=$SKILL_PLUGIN_DIR (skipping marketplace install)" >"$out/c-plugin.log"
+        # Also disable the *published* Expo plugin at the project level, in case
+        # it's already enabled there (e.g. baked into a template, or carried
+        # over in a reused ~/.claude/settings.json) -- project settings override
+        # user settings, so this is the only reliable lever. Otherwise the model
+        # could trigger the published skill instead of (or alongside) the local
+        # one and we'd silently score the wrong version. Mirrors the same fix in
+        # skills' own expo-skill-eval fixture generator (make-fixture.sh).
+        local published_plugin_id="${SKILL_PLUGIN_PUBLISHED_ID:-expo@claude-plugins-official}"
+        mkdir -p "$workspace/.claude"
+        printf '{\n  "enabledPlugins": {\n    "%s": false\n  }\n}\n' "$published_plugin_id" \
+          >"$workspace/.claude/settings.local.json"
       else
         # Install the official Expo plugin: bundles the Expo skills AND the Expo
         # MCP server, so we don't hand-wire `claude mcp add`. EAS workers start
