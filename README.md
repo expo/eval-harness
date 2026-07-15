@@ -57,15 +57,11 @@ eas env:push production --path .env
 Required for Claude Code authoring and evaluator runs: `ANTHROPIC_API_KEY`.
 Required for Codex authoring: `OPENAI_API_KEY`.
 Optional: `EXPO_TOKEN` (an Expo Robot User access token) so the coding agent can
-run its own `eas build` self-verification step during authoring; see
+run its own `eas build` self-verification step during authoring, and so the
+harness can wire up Expo MCP access for it (mcp.expo.dev accepts this token
+directly as its bearer token now -- no separate OAuth login needed); see
 `.env.default` for details. Optional: `BRAINTRUST_API_KEY` plus
 `BRAINTRUST_PROJECT` for trace pushes.
-
-`eval_harness/utils/shell/bootstrap-expo-mcp-token.sh` is a one-command
-alternative to the manual `eas env:push` above: with `EXPO_TOKEN` (and
-optionally `ANTHROPIC_API_KEY`/`OPENAI_API_KEY`) already set in `.env`, it
-completes the Expo MCP OAuth browser login and pushes all of these straight
-to EAS.
 
 Expo project routing is controlled by `app.config.js`. Override these env vars
 when running the same branch under another Expo account:
