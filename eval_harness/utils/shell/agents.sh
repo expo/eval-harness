@@ -4,80 +4,26 @@ eval::_agent_timeout() {
   else echo "python3 $_EVAL_STAGES_DIR/timeout_exec.py 2400"; fi
 }
 
-# Refreshes the Expo MCP OAuth access token from a stored, rotating refresh
-# token, and persists the newly-rotated refresh_token back to the EAS
-# `production` environment so the next run can refresh again. mcp.expo.dev
-# supports only human browser OAuth (no service-account grant), and its
-# refresh_token rotates on every use -- see get-expo-mcp-token.ts for the
-# one-time bootstrap that seeds EXPO_MCP_CLIENT_ID/EXPO_MCP_REFRESH_TOKEN.
-# On any failure this logs and returns non-zero; callers must treat Expo MCP
-# as optional and continue authoring without it.
+# Configures Expo MCP auth for this run. mcp.expo.dev now accepts an Expo
+# Robot User access token (EXPO_TOKEN) directly as a Bearer token -- verified
+# live (initialize + tools/list both succeed) -- so this is a plain variable
+# assignment, no network call, no separate OAuth login/refresh/rotation dance
+# needed at all. Replaces the old eval::refresh_expo_mcp_token /
+# provision_mcp_token design (see git history), which existed only to work
+# around mcp.expo.dev previously rejecting EXPO_TOKEN and requiring human
+# browser OAuth with a rotating refresh_token.
 #
 # Always exports EXPO_MCP_AUTH_STATUS so collect_artifacts.sh can record the
-# outcome in manifest.json even when this silently degrades (nothing else
-# about a "continue without Expo MCP" run makes that fact visible downstream
-# otherwise): unconfigured | refresh_failed | ok | ok_persist_failed.
-eval::refresh_expo_mcp_token() { # out_dir
-  local out="$1"
-  echo "================= STAGE B.5: refresh Expo MCP OAuth token ================="
-  if [ -z "${EXPO_MCP_CLIENT_ID:-}" ] || [ -z "${EXPO_MCP_REFRESH_TOKEN:-}" ]; then
-    echo "  Expo MCP not configured: set EXPO_MCP_CLIENT_ID + EXPO_MCP_REFRESH_TOKEN to enable it"
+# outcome in manifest.json: unconfigured | ok.
+eval::configure_expo_mcp() {
+  if [ -z "${EXPO_TOKEN:-}" ]; then
+    echo "  Expo MCP not configured: EXPO_TOKEN unset"
     export EXPO_MCP_AUTH_STATUS="unconfigured"
     return 1
   fi
-
-  local resp_file="$out/mcp-refresh-response.json" http_code
-  http_code=$(curl -sS --max-time 20 -o "$resp_file" -w '%{http_code}' https://mcp.expo.dev/oauth/token \
-    -H "Content-Type: application/x-www-form-urlencoded" \
-    --data-urlencode "grant_type=refresh_token" \
-    --data-urlencode "refresh_token=${EXPO_MCP_REFRESH_TOKEN}" \
-    --data-urlencode "client_id=${EXPO_MCP_CLIENT_ID}" 2>"$out/mcp-refresh.err") || http_code="curl-fail"
-  if [ "$http_code" != "200" ]; then
-    echo "  ❌ Expo MCP token refresh failed (HTTP $http_code); continuing without Expo MCP"
-    export EXPO_MCP_AUTH_STATUS="refresh_failed"
-    return 1
-  fi
-
-  local parsed access_token new_refresh_token
-  parsed="$(python3 - "$resp_file" <<'PY'
-import json, sys
-data = json.load(open(sys.argv[1]))
-print(data.get("access_token", ""))
-print(data.get("refresh_token", ""))
-PY
-)"
-  access_token="$(echo "$parsed" | sed -n '1p')"
-  new_refresh_token="$(echo "$parsed" | sed -n '2p')"
-  if [ -z "$access_token" ]; then
-    echo "  ❌ Expo MCP token refresh response missing access_token; continuing without Expo MCP"
-    export EXPO_MCP_AUTH_STATUS="refresh_failed"
-    return 1
-  fi
-  export EXPO_MCP_BEARER_TOKEN="$access_token"
+  export EXPO_MCP_BEARER_TOKEN="$EXPO_TOKEN"
   export EXPO_MCP_AUTH_STATUS="ok"
-  echo "  ✅ Expo MCP access token refreshed (len ${#access_token})"
-
-  if [ -n "$new_refresh_token" ] && [ "$new_refresh_token" != "$EXPO_MCP_REFRESH_TOKEN" ]; then
-    if ! command -v eas >/dev/null 2>&1; then
-      echo "  ⚠️  eas-cli not on PATH; cannot persist rotated refresh_token (next run's refresh will fail)"
-      export EXPO_MCP_AUTH_STATUS="ok_persist_failed"
-      return 0
-    fi
-    if [ -z "${EXPO_TOKEN:-}" ]; then
-      echo "  ⚠️  EXPO_TOKEN unset; cannot persist rotated refresh_token (next run's refresh will fail)"
-      export EXPO_MCP_AUTH_STATUS="ok_persist_failed"
-      return 0
-    fi
-    local rc
-    eas env:update production --variable-name EXPO_MCP_REFRESH_TOKEN --value "$new_refresh_token" --non-interactive \
-      >"$out/mcp-refresh-env-update.log" 2>&1
-    rc=$?
-    eval::gate $rc "persist rotated Expo MCP refresh_token"
-    if [ "$rc" != 0 ]; then
-      tail -20 "$out/mcp-refresh-env-update.log" | sed 's/^/    /'
-      export EXPO_MCP_AUTH_STATUS="ok_persist_failed"
-    fi
-  fi
+  echo "  ✅ Expo MCP bearer token set from EXPO_TOKEN (len ${#EXPO_TOKEN})"
   return 0
 }
 

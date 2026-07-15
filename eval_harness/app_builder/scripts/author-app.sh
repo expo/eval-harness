@@ -94,18 +94,7 @@ fi
 eval::launch_otlp_receiver "$ROOT" "$OTLP_PORT" "$TELEMETRY_DIR/otel"
 eval::wait_for_port "$OTLP_PORT" && echo "  ✅ OTLP receiver on :$OTLP_PORT"
 
-# The Expo MCP access token is refreshed once per workflow run by the
-# provision_mcp_token job (see .eas/workflows/eval-e2e.yml and
-# provision-mcp-token.sh) and handed to this job as EXPO_MCP_BEARER_TOKEN /
-# EXPO_MCP_AUTH_STATUS env vars -- this job no longer refreshes it itself,
-# since concurrent author_app jobs (e.g. one per PRD) each calling
-# eval::refresh_expo_mcp_token independently was a real race on the shared EAS
-# refresh_token secret. "none" is the workflow's non-empty placeholder for "no
-# token" (EAS's set-output rejects an empty VALUE); normalize it back to unset.
-[ "${EXPO_MCP_BEARER_TOKEN:-}" = "none" ] && EXPO_MCP_BEARER_TOKEN=""
-export EXPO_MCP_BEARER_TOKEN
-export EXPO_MCP_AUTH_STATUS="${EXPO_MCP_AUTH_STATUS:-unconfigured}"
-echo "  Expo MCP: auth_status=$EXPO_MCP_AUTH_STATUS bearer_token_len=${#EXPO_MCP_BEARER_TOKEN}"
+eval::configure_expo_mcp || true
 
 echo "================= STAGE C: coding agent authors app ================="
 export ANTHROPIC_BASE_URL="http://127.0.0.1:$ANTHROPIC_PROXY_PORT"
