@@ -8,6 +8,7 @@ import html
 from pathlib import Path
 from typing import Any
 
+from .build_health.syntax_check import check_syntax
 from .uptake_checks.registry import UptakeResults, resolve_checks_for_skills, run_checks
 from .uptake_checks.trigger import detect_triggered_skills, load_trace, score_trigger_quality, TriggerQuality
 from .utils import (
@@ -98,12 +99,16 @@ def analyze_artifacts(
         static_total = len(checks)
         static_rows: list[dict[str, Any]] = []
         tier_breakdown: dict[str, dict[str, int]] = {}
+        build_health: dict[str, Any] = {"syntax": None}
     else:
         uptake_results = UptakeResults(run_checks(checks, author_layout.app_dir))
         static_passed = uptake_results.passed
         static_total = uptake_results.total
         static_rows = [asdict(check) for check in uptake_results.checks]
         tier_breakdown = uptake_results.tier_breakdown()
+        # Deliberately not a per-skill check (no skill_map.json entry): this
+        # is app-wide, independent of which skill(s) were expected.
+        build_health = {"syntax": check_syntax(author_layout.app_dir)}
 
     if author_layout.trace_path is None:
         warnings.append("author trace not found")
@@ -148,6 +153,7 @@ def analyze_artifacts(
         "score": asdict(score),
         "static_checks": static_rows,
         "tier_breakdown": tier_breakdown,
+        "build_health": build_health,
         "runs": [run],
         "skills": aggregate_skill_results([run]),
         "artifacts": {

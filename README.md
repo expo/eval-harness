@@ -30,6 +30,7 @@ eval_harness/
       scripts/                # iOS build+eval entrypoints
     skill_invocation/
       uptake_checks/          # atomic check registry + skill_map.json (skill -> checks)
+      build_health/           # app-wide (not per-skill) syntax/bundle signals
       main.py                 # analyze-artifacts CLI
       analysis.py             # scoring, aggregation, metrics.json, report.html
       utils.py                # artifact unpacking, prd_skills loading, small helpers

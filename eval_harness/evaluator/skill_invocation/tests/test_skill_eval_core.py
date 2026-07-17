@@ -25,6 +25,7 @@ from eval_harness.evaluator.skill_invocation.uptake_checks.checks_ast import (
     check_router_layout_defines_navigator,
 )
 from eval_harness.evaluator.skill_invocation.uptake_checks.registry import AppTree
+from eval_harness.evaluator.skill_invocation.build_health.syntax_check import check_syntax
 from eval_harness.evaluator.skill_invocation.utils import unpack_artifact
 
 TEST_PRD = "dataset/prds/test-app/prd/mvp.txt"
@@ -403,6 +404,47 @@ class SkillEvalCoreTests(unittest.TestCase):
 
         self.assertFalse(result.passed)
         self.assertIn("no _layout file found", result.evidence)
+
+    def test_syntax_check_passes_on_valid_source(self):
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "app").mkdir()
+            (app / "app" / "index.tsx").write_text("export default function App(){ return null; }\n")
+
+            result = check_syntax(app)
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["failed_files"], [])
+        self.assertEqual(result["checked_files"], 1)
+
+    def test_syntax_check_catches_a_real_broken_file(self):
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "app").mkdir()
+            (app / "app" / "index.tsx").write_text("export default function App(){ return null; }\n")
+            (app / "app" / "broken.tsx").write_text("export default function Broken() { return <View")
+
+            result = check_syntax(app)
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(len(result["failed_files"]), 1)
+        self.assertEqual(result["failed_files"][0]["file"], "app/broken.tsx")
+
+    def test_syntax_check_ignores_scripts_dir_boilerplate(self):
+        # Same scripts/ exclusion as the lexical checks -- a broken/unusual
+        # file inside create-expo-app's boilerplate scripts/ shouldn't fail
+        # the whole app's syntax signal.
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "app").mkdir()
+            (app / "app" / "index.tsx").write_text("export default function App(){ return null; }\n")
+            (app / "scripts").mkdir()
+            (app / "scripts" / "reset-project.js").write_text("this is `not even valid at all")
+
+            result = check_syntax(app)
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["checked_files"], 1)
 
     def test_tier_breakdown_groups_by_tier(self):
         from eval_harness.evaluator.skill_invocation.uptake_checks.registry import UptakeResults, CheckResult
