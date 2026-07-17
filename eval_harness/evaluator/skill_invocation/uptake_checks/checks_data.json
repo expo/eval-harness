@@ -1,0 +1,97 @@
+{
+  "_comment": "Lexical (regex, comment-stripped) and structural (path) checks. No syntax-tree or route-graph checks currently exist (tried a syntax-tree check and cut it -- the lexical regex checks already cover the same ground once properly anchored; a route-graph check needs its own research pass on Metro internals, see git history). Future code-driven checks would register via @register instead of being declared here. Every check here is skill-agnostic; skill_map.json is the only file that says which skill(s) currently claim a given check.",
+  "checks": [
+    {
+      "id": "router_import",
+      "category": "lexical",
+      "kind": "import",
+      "target": "expo-router",
+      "description": "Imports from 'expo-router' at all"
+    },
+    {
+      "id": "router_navigation_api_used",
+      "category": "lexical",
+      "kind": "text_any",
+      "target": [
+        "<Link[\\s/>]", "<Redirect[\\s/>]", "useRouter\\(", "useLocalSearchParams\\(",
+        "useSegments\\(", "usePathname\\(", "useNavigation\\("
+      ],
+      "description": "Uses a real expo-router navigation API -- declarative (<Link>, <Redirect>) or imperative (useRouter/useLocalSearchParams/useSegments/usePathname/useNavigation) -- all are valid per the skill, not just the <Link> tag. Verified against a real authored app that legitimately uses only useRouter()."
+    },
+    {
+      "id": "router_navigator_jsx_tag",
+      "category": "lexical",
+      "kind": "text_any",
+      "target": ["<Stack[\\s/>]", "<Tabs[\\s/>]", "<NativeTabs[\\s/>]", "<Drawer[\\s/>]", "<Slot[\\s/>]"],
+      "description": "Uses a real Stack/Tabs/NativeTabs/Drawer/Slot JSX element, not a bare word match. Drawer confirmed necessary against a real wiki_reader app using expo-router/drawer -- a Stack/Tabs/NativeTabs-only list would have false-negatived on legitimate code."
+    },
+    {
+      "id": "router_no_direct_react_navigation_import",
+      "category": "lexical",
+      "kind": "text_absent",
+      "target": "from ['\"]@react-navigation/",
+      "description": "SDK 56+ rule: never import @react-navigation/* directly -- use expo-router/react-navigation instead"
+    },
+    {
+      "id": "router_app_dir_exists",
+      "category": "structural",
+      "kind": "path_exists",
+      "target": ["app", "src/app"],
+      "description": "app/ (or src/app/) directory exists"
+    },
+    {
+      "id": "router_has_index_route",
+      "category": "structural",
+      "kind": "path_exists",
+      "target": ["app/index.*", "app/**/index.*", "src/app/index.*", "src/app/**/index.*"],
+      "description": "At least one index route exists (proxy for 'the app always has a route matching /'). Known limitation: matches any index.* anywhere under app/, not specifically the root -- an app with only a nested index (e.g. app/settings/index.tsx) and no real root route would still pass. Verified correct on 2 real apps using route groups ((tabs)/index.tsx, (drawer)/index.tsx), since groups don't affect the URL path -- but this is a proxy, not a real route-graph check (deferred, see uptake_checks/README.md)."
+    },
+    {
+      "id": "router_has_layout_file",
+      "category": "structural",
+      "kind": "path_exists",
+      "target": ["app/**/_layout.*", "src/app/**/_layout.*"],
+      "description": "At least one _layout file exists -- the skill's rule: ALWAYS use _layout.tsx to define stacks"
+    },
+    {
+      "id": "router_no_colocated_non_route_files_in_app_dir",
+      "category": "structural",
+      "kind": "path_absent",
+      "target": [
+        "app/utils", "app/helpers", "app/constants", "app/hooks", "app/components", "app/context",
+        "app/lib", "app/services", "app/shared", "app/types",
+        "src/app/utils", "src/app/helpers", "src/app/constants", "src/app/hooks", "src/app/components", "src/app/context",
+        "src/app/lib", "src/app/services", "src/app/shared", "src/app/types"
+      ],
+      "description": "Anti-pattern the skill calls out by name: never co-locate components/types/utilities in the app directory. This is a denylist heuristic, not exhaustive -- it can miss the anti-pattern under an unlisted name, and could in principle false-positive if an app has a genuine *route* literally named one of these (not observed in any real app checked so far)."
+    },
+    {
+      "id": "project_structure_uses_stylesheet_create",
+      "category": "lexical",
+      "kind": "text",
+      "target": "StyleSheet\\.create\\(",
+      "description": "Uses StyleSheet.create -- colocated-styles signal (paired with the absence check below)"
+    },
+    {
+      "id": "project_structure_components_dir_exists",
+      "category": "structural",
+      "kind": "path_exists",
+      "target": ["components", "src/components"],
+      "description": "components/ (or src/components/) exists for reusable UI"
+    },
+    {
+      "id": "project_structure_no_separate_styles_files",
+      "category": "structural",
+      "kind": "path_absent",
+      "target": ["**/*.styles.ts", "**/*.styles.tsx", "**/*.styles.js"],
+      "description": "Anti-pattern: the skill says colocate StyleSheet.create in the component file, not a separate *.styles.ts file"
+    },
+    {
+      "id": "project_structure_no_dunder_tests_dir",
+      "category": "structural",
+      "kind": "path_absent",
+      "target": ["**/__tests__/**"],
+      "description": "Anti-pattern: the skill prefers colocated x.test.ts beside x.ts over a __tests__/ folder"
+    }
+  ]
+}

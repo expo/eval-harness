@@ -29,11 +29,11 @@ eval_harness/
       prompts/                # agentic evaluator's system prompt
       scripts/                # iOS build+eval entrypoints
     skill_invocation/
-      skill_cases/            # one case spec per skill (id + static checks)
+      uptake_checks/          # atomic check registry + skill_map.json (skill -> checks)
+      build_health/           # app-wide (not per-skill) syntax/bundle signals
       main.py                 # analyze-artifacts CLI
       analysis.py             # scoring, aggregation, metrics.json, report.html
-      static_checks.py        # source checks and trace skill detection
-      utils.py                # case loading, artifact unpacking, small helpers
+      utils.py                # artifact unpacking, prd_skills loading, small helpers
       tests/                  # skill evaluator unit tests
       scripts/                # skill-use analysis entrypoint
   utils/                      # artifacts, iOS, shell, and telemetry helpers (shared)
@@ -100,7 +100,7 @@ both resolved automatically from that same PRD — via
 `dataset/prd_test_plans.json` and `dataset/prd_skills.json` respectively, no
 manual test-plan or case-spec selection needed. `skill_scenario` feeds both
 the authoring step (it's an enforced config, not just a label — see
-`skill_cases/README.md`) and the analysis step; `skill_mention` only matters
+`uptake_checks/README.md`) and the analysis step; `skill_mention` only matters
 for the `skills_available_mentioned` scenario:
 
 ```bash

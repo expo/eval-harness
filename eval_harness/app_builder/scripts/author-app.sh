@@ -114,4 +114,18 @@ else
   echo "  ✅ authored package.json present"
 fi
 
+echo "================= STAGE D: build-health bundle check ================="
+# Needs the authored app's own node_modules (a real `expo export`), so this
+# can only run now, at authoring time, not later at skill-eval analysis
+# time -- the packaged artifact excludes node_modules before upload. Result
+# is persisted as a small JSON file inside $WORKSPACE itself (which DOES
+# survive into the artifact) for analyze_artifacts to read later. Best-
+# effort only: never blocks or fails this script.
+BH_TO=""
+if command -v gtimeout >/dev/null 2>&1; then BH_TO="gtimeout 240";
+elif command -v timeout >/dev/null 2>&1; then BH_TO="timeout 240";
+else BH_TO="python3 $ROOT/eval_harness/utils/shell/timeout_exec.py 240"; fi
+( cd "$ROOT" && $BH_TO uv run python -m eval_harness.evaluator.skill_invocation.build_health.bundle_check "$WORKSPACE" ) \
+  || echo "  ⚠️  build-health bundle check failed to run (continuing; non-blocking)"
+
 exit 0

@@ -8,12 +8,14 @@ import html
 from pathlib import Path
 from typing import Any
 
-from .static_checks import detect_triggered_skills, load_trace, run_static_checks, score_trigger_quality, TriggerQuality
+from .build_health.bundle_check import read_bundle_result
+from .build_health.syntax_check import check_syntax
+from .uptake_checks.registry import UptakeResults, resolve_checks_for_skills, run_checks
+from .uptake_checks.trigger import detect_triggered_skills, load_trace, score_trigger_quality, TriggerQuality
 from .utils import (
     app_name_from_prd,
     dedupe,
     flatten_strings,
-    load_case_specs_by_skill,
     load_prd_skills,
     read_json,
     write_json,
@@ -72,7 +74,7 @@ def analyze_artifacts(
     out_dir: Path | str,
     *,
     prd_skills_path: Path | str,
-    case_dir: Path | str,
+    checks_dir: Path | str,
 ) -> dict[str, Any]:
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -89,25 +91,31 @@ def analyze_artifacts(
     # nothing can legitimately trigger regardless of the app's ground truth.
     expected_skills = [] if scenario in UNAVAILABLE_SCENARIOS else app_expected_skills
 
-    cases_by_skill = load_case_specs_by_skill(case_dir)
-    static_checks: list[dict[str, Any]] = []
-    for skill_id in expected_skills:
-        case = cases_by_skill.get(skill_id)
-        if case is None:
-            warnings.append(f"no case spec (static uptake checks) for skill {skill_id!r}")
-            continue
-        static_checks.extend(case.static_uptake_checks)
+    checks, check_warnings = resolve_checks_for_skills(expected_skills, checks_dir)
+    warnings.extend(check_warnings)
 
     if author_layout.app_dir is None:
         warnings.append("app tree not found")
         static_passed = 0
-        static_total = len(static_checks)
+        static_total = len(checks)
         static_rows: list[dict[str, Any]] = []
+        check_category_breakdown: dict[str, dict[str, int]] = {}
+        build_health: dict[str, Any] = {"syntax": None, "bundle": None}
     else:
-        static = run_static_checks(author_layout.app_dir, static_checks)
-        static_passed = static.passed
-        static_total = static.total
-        static_rows = [asdict(check) for check in static.checks]
+        uptake_results = UptakeResults(run_checks(checks, author_layout.app_dir))
+        static_passed = uptake_results.passed
+        static_total = uptake_results.total
+        static_rows = [asdict(check) for check in uptake_results.checks]
+        check_category_breakdown = uptake_results.category_breakdown()
+        # Deliberately not a per-skill check (no skill_map.json entry): this
+        # is app-wide, independent of which skill(s) were expected. "bundle"
+        # is None if the authoring-time stage never ran (needs real
+        # node_modules, so it can't be computed here at analysis time) --
+        # distinct from a real {"ok": False, ...}.
+        build_health = {
+            "syntax": check_syntax(author_layout.app_dir),
+            "bundle": read_bundle_result(author_layout.app_dir),
+        }
 
     if author_layout.trace_path is None:
         warnings.append("author trace not found")
@@ -151,6 +159,8 @@ def analyze_artifacts(
         "warnings": warnings,
         "score": asdict(score),
         "static_checks": static_rows,
+        "check_category_breakdown": check_category_breakdown,
+        "build_health": build_health,
         "runs": [run],
         "skills": aggregate_skill_results([run]),
         "artifacts": {

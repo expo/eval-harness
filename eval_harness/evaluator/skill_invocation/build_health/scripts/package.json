@@ -1,0 +1,8 @@
+{
+  "name": "uptake-checks-syntax-parser",
+  "private": true,
+  "description": "Standalone Babel parser backing build_health's syntax_check -- 'is this file valid JS/TS/JSX' has no regex substitute. Not part of any authored app -- installed once (npm install) into this directory on first use.",
+  "dependencies": {
+    "@babel/parser": "^7.26.0"
+  }
+}

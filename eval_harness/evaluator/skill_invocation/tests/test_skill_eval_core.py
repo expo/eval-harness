@@ -10,14 +10,27 @@ from eval_harness.evaluator.skill_invocation.analysis import (
     discover_artifact_layout,
     score_case_run,
 )
-from eval_harness.evaluator.skill_invocation.static_checks import (
+from eval_harness.evaluator.skill_invocation.uptake_checks.registry import (
+    all_checks,
+    load_checks_data,
+    load_skill_map,
+    resolve_checks_for_skills,
+    run_checks,
+)
+from eval_harness.evaluator.skill_invocation.uptake_checks.trigger import (
     detect_triggered_skills,
-    run_static_checks,
     score_trigger_quality,
 )
-from eval_harness.evaluator.skill_invocation.utils import load_case_spec, load_case_specs_by_skill, unpack_artifact
+from eval_harness.evaluator.skill_invocation.build_health.syntax_check import check_syntax
+from eval_harness.evaluator.skill_invocation.build_health.bundle_check import (
+    compute_bundle_result,
+    persist_bundle_result,
+    read_bundle_result,
+)
+from eval_harness.evaluator.skill_invocation.utils import unpack_artifact
 
 TEST_PRD = "dataset/prds/test-app/prd/mvp.txt"
+REAL_CHECKS_DIR = Path(__file__).parents[1] / "uptake_checks"
 
 
 def _trace(agent, tool_calls_by_step):
@@ -27,16 +40,39 @@ def _trace(agent, tool_calls_by_step):
     return {"agent": agent, "sessions": [{"turns": [{"steps": steps}]}]}
 
 
-class SkillEvalCoreTests(unittest.TestCase):
-    def test_case_specs_load(self):
-        case_dir = Path(__file__).parents[1] / "skill_cases"
-        specs = sorted(case_dir.glob("*.json"))
+def _write_checks_dir(root: Path, checks: list[dict], skill_map: dict[str, list[str]]) -> Path:
+    """Write a throwaway uptake_checks-shaped directory (checks_data.json +
+    skill_map.json) for tests that don't want the real, evolving check set."""
+    checks_dir = root / "uptake_checks"
+    checks_dir.mkdir(parents=True, exist_ok=True)
+    (checks_dir / "checks_data.json").write_text(json.dumps({"checks": checks}))
+    (checks_dir / "skill_map.json").write_text(json.dumps(skill_map))
+    return checks_dir
 
-        self.assertEqual(len(specs), 5)
-        for path in specs:
-            spec = load_case_spec(path)
-            self.assertTrue(spec.id, path.name)
-            self.assertTrue(spec.static_uptake_checks, path.name)
+
+class SkillEvalCoreTests(unittest.TestCase):
+    def test_real_checks_data_loads(self):
+        checks = load_checks_data(REAL_CHECKS_DIR)
+        self.assertIn("router_navigation_api_used", checks)
+        self.assertIn("project_structure_components_dir_exists", checks)
+
+    def test_real_skill_map_references_only_known_checks(self):
+        skill_map = load_skill_map(REAL_CHECKS_DIR)
+        checks = all_checks(REAL_CHECKS_DIR)
+
+        self.assertIn("expo-router", skill_map)
+        self.assertIn("expo-project-structure", skill_map)
+        for skill_id, check_ids in skill_map.items():
+            for check_id in check_ids:
+                self.assertIn(check_id, checks, f"{skill_id} references unknown check {check_id!r}")
+
+    def test_real_skill_map_allows_a_check_to_be_shared_across_skills(self):
+        # app_dir_exists is deliberately claimed by both skills -- this is the
+        # many-to-many hooking the registry is designed to support.
+        skill_map = load_skill_map(REAL_CHECKS_DIR)
+
+        self.assertIn("router_app_dir_exists", skill_map["expo-router"])
+        self.assertIn("router_app_dir_exists", skill_map["expo-project-structure"])
 
     def test_app_name_from_prd_extracts_app_segment(self):
         from eval_harness.evaluator.skill_invocation.utils import app_name_from_prd
@@ -44,69 +80,42 @@ class SkillEvalCoreTests(unittest.TestCase):
         self.assertEqual(app_name_from_prd("dataset/prds/notes/prd/mvp.txt"), "notes")
         self.assertIsNone(app_name_from_prd("some/other/path.txt"))
 
-    def test_load_case_specs_by_skill_indexes_by_id(self):
-        case_dir = Path(__file__).parents[1] / "skill_cases"
-
-        by_skill = load_case_specs_by_skill(case_dir)
-
-        self.assertIn("expo-data-fetching", by_skill)
-        self.assertIn("expo-native-ui", by_skill)
-        self.assertTrue(by_skill["expo-data-fetching"].static_uptake_checks)
-
-    def test_case_spec_loads_core_case_without_skill_family(self):
-        with tempfile.TemporaryDirectory() as td:
-            spec_path = Path(td) / "case.json"
-            spec_path.write_text(json.dumps({
-                "id": "expo-native-ui",
-                "feature_focus": "native settings screen",
-                "static_uptake_checks": [
-                    {"id": "uses_expo_ui", "kind": "import", "target": "@expo/ui"}
-                ],
-            }))
-
-            spec = load_case_spec(spec_path)
-
-        self.assertEqual(spec.id, "expo-native-ui")
-        self.assertFalse(hasattr(spec, "expected_skills"))
-        self.assertFalse(hasattr(spec, "skill_family"))
-        self.assertFalse(hasattr(spec, "test_plan"))
-
     def test_detect_triggered_skills_reads_claude_skill_tool_calls(self):
         trace = _trace("claude-code", [
             [{"name": "Bash", "args": {"command": "git status"}}],
-            [{"name": "Skill", "args": {"skill": "expo:expo-dev-client"}}],
+            [{"name": "Skill", "args": {"skill": "expo:expo-router"}}],
         ])
 
-        self.assertEqual(detect_triggered_skills(trace), ["expo-dev-client"])
+        self.assertEqual(detect_triggered_skills(trace), ["expo-router"])
 
     def test_detect_triggered_skills_reads_codex_exec_command_skill_paths(self):
         trace = _trace("codex", [
-            [{"name": "exec_command", "args": {"cmd": "cat .agents/skills/expo-data-fetching/SKILL.md"}}],
+            [{"name": "exec_command", "args": {"cmd": "cat .agents/skills/expo-router/SKILL.md"}}],
         ])
 
-        self.assertEqual(detect_triggered_skills(trace), ["expo-data-fetching"])
+        self.assertEqual(detect_triggered_skills(trace), ["expo-router"])
 
     def test_detect_triggered_skills_ignores_incidental_text_mentions(self):
         # Regression guard: earlier substring-matching flagged skill names
         # appearing in unrelated command output (npm/package.json, git status)
         # as "triggered". Structured detection must not resurrect that.
         trace = _trace("codex", [
-            [{"name": "exec_command", "args": {"cmd": "npm install", "output": "added @expo/ui and expo-data-fetching refs"}}],
+            [{"name": "exec_command", "args": {"cmd": "npm install", "output": "added @expo/ui and expo-router refs"}}],
         ])
 
         self.assertEqual(detect_triggered_skills(trace), [])
 
     def test_trigger_quality_requires_the_right_skills(self):
         trace = _trace("claude-code", [
-            [{"name": "Skill", "args": {"skill": "expo:expo-dev-client"}}],
+            [{"name": "Skill", "args": {"skill": "expo:expo-data-fetching"}}],
         ])
 
         observed = detect_triggered_skills(trace)
-        score = score_trigger_quality(["expo-native-ui", "expo-ui"], observed)
+        score = score_trigger_quality(["expo-router", "expo-project-structure"], observed)
 
-        self.assertEqual(observed, ["expo-dev-client"])
-        self.assertEqual(score.expected_skills, ["expo-native-ui", "expo-ui"])
-        self.assertEqual(score.triggered_skills, ["expo-dev-client"])
+        self.assertEqual(observed, ["expo-data-fetching"])
+        self.assertEqual(score.expected_skills, ["expo-router", "expo-project-structure"])
+        self.assertEqual(score.triggered_skills, ["expo-data-fetching"])
         self.assertEqual(score.recall, 0.0)
         self.assertEqual(score.precision, 0.0)
         self.assertTrue(score.any_expo_skill_triggered)
@@ -129,47 +138,203 @@ class SkillEvalCoreTests(unittest.TestCase):
         self.assertEqual(score.precision, 0.0)
         self.assertEqual(score.extra_skills, ["expo-ui"])
 
-    def test_static_uptake_import_and_text_checks(self):
+    def test_resolve_checks_for_skills_dedupes_shared_checks(self):
+        with tempfile.TemporaryDirectory() as td:
+            checks_dir = _write_checks_dir(
+                Path(td),
+                checks=[
+                    {"id": "shared", "category": "structural", "kind": "path_exists", "target": ["app"]},
+                    {"id": "router_only", "category": "lexical", "kind": "import", "target": "expo-router"},
+                ],
+                skill_map={"skill-a": ["shared", "router_only"], "skill-b": ["shared"]},
+            )
+
+            checks, warnings = resolve_checks_for_skills(["skill-a", "skill-b"], checks_dir)
+
+        self.assertEqual(warnings, [])
+        self.assertEqual([c.id for c in checks], ["shared", "router_only"])
+
+    def test_resolve_checks_for_skills_warns_on_unmapped_skill(self):
+        with tempfile.TemporaryDirectory() as td:
+            checks_dir = _write_checks_dir(Path(td), checks=[], skill_map={})
+
+            checks, warnings = resolve_checks_for_skills(["expo-ui"], checks_dir)
+
+        self.assertEqual(checks, [])
+        self.assertIn("no uptake checks mapped for skill 'expo-ui'", warnings)
+
+    def test_resolve_checks_for_skills_warns_on_unknown_check_id(self):
+        with tempfile.TemporaryDirectory() as td:
+            checks_dir = _write_checks_dir(
+                Path(td), checks=[], skill_map={"expo-ui": ["does_not_exist"]}
+            )
+
+            checks, warnings = resolve_checks_for_skills(["expo-ui"], checks_dir)
+
+        self.assertEqual(checks, [])
+        self.assertIn("skill_map references unknown check id 'does_not_exist'", warnings)
+
+    def test_lexical_check_uses_regex_not_bare_substring(self):
+        # Regression guard for the known false positive: "List" is a
+        # substring of "FlatList", so a bare substring match would wrongly
+        # pass an app using the exact wrong component.
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "index.tsx").write_text("import { FlatList } from 'react-native';\n")
+            checks_dir = _write_checks_dir(
+                Path(td) / "checks",
+                checks=[{"id": "uses_list_tag", "category": "lexical", "kind": "text", "target": "<List[\\s/>]"}],
+                skill_map={"expo-ui": ["uses_list_tag"]},
+            )
+
+            checks, _ = resolve_checks_for_skills(["expo-ui"], checks_dir)
+            results = run_checks(checks, app)
+
+        self.assertFalse(results[0].passed)
+
+    def test_lexical_check_strips_comments_before_matching(self):
+        # Regression guard: a stray comment with no real implementation must
+        # not satisfy a check.
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "index.tsx").write_text("// TODO: add loading state\nexport default function App(){ return null; }\n")
+            checks_dir = _write_checks_dir(
+                Path(td) / "checks",
+                checks=[{"id": "has_loading_state", "category": "lexical", "kind": "text", "target": "loading"}],
+                skill_map={"expo-ui": ["has_loading_state"]},
+            )
+
+            checks, _ = resolve_checks_for_skills(["expo-ui"], checks_dir)
+            results = run_checks(checks, app)
+
+        self.assertFalse(results[0].passed)
+
+    def test_lexical_check_ignores_scripts_dir_boilerplate(self):
+        # Regression guard: found live against a real authored wiki_reader
+        # app. create-expo-app's standard scripts/reset-project.js embeds
+        # example code as string template literals (e.g. a literal
+        # `import { Stack } from "expo-router"` inside a JS template string
+        # it writes out) -- that must not count as real app evidence. Also
+        # matches expo-project-structure's own SKILL.md, which lists
+        # scripts/ as living outside src/ (tooling, not app code).
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "scripts").mkdir()
+            (app / "scripts" / "reset-project.js").write_text(
+                'const layoutContent = `import { Stack } from "expo-router";\\n'
+                'export default function Layout() { return <Stack />; }`;\n'
+            )
+            (app / "app").mkdir()
+            (app / "app" / "index.tsx").write_text("export default function App(){ return null; }\n")
+            checks_dir = _write_checks_dir(
+                Path(td) / "checks",
+                checks=[{"id": "uses_router", "category": "lexical", "kind": "import", "target": "expo-router"}],
+                skill_map={"expo-router": ["uses_router"]},
+            )
+
+            checks, _ = resolve_checks_for_skills(["expo-router"], checks_dir)
+            results = run_checks(checks, app)
+
+        self.assertFalse(results[0].passed)
+        self.assertNotIn("reset-project.js", results[0].evidence)
+
+    def test_path_checks_ignore_scripts_dir(self):
+        # Same regression, for path_exists/path_absent -- scripts/ must be
+        # excluded from structural checks too, not just lexical ones.
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "scripts" / "__tests__").mkdir(parents=True)
+            (app / "scripts" / "__tests__" / "reset.test.js").write_text("test();\n")
+            checks_dir = _write_checks_dir(
+                Path(td) / "checks",
+                checks=[{"id": "no_dunder_tests", "category": "structural", "kind": "path_absent", "target": ["**/__tests__/**"]}],
+                skill_map={"expo-project-structure": ["no_dunder_tests"]},
+            )
+
+            checks, _ = resolve_checks_for_skills(["expo-project-structure"], checks_dir)
+            results = run_checks(checks, app)
+
+        self.assertTrue(results[0].passed)
+
+    def test_import_and_text_any_checks(self):
         with tempfile.TemporaryDirectory() as td:
             app = Path(td)
             (app / "package.json").write_text(json.dumps({"dependencies": {"@expo/ui": "1.0.0"}}))
             src = app / "app"
             src.mkdir()
             (src / "index.tsx").write_text(
-                "import { Host, List, ListItem } from '@expo/ui';\n"
-                "export default function App(){ return <Host><List><ListItem title=\"A\" /></List></Host>; }\n"
+                "import { Host, List } from '@expo/ui';\n"
+                "export default function App(){ return <Host><List /></Host>; }\n"
+            )
+            checks_dir = _write_checks_dir(
+                Path(td) / "checks",
+                checks=[
+                    {"id": "uses_expo_ui", "category": "lexical", "kind": "import", "target": "@expo/ui"},
+                    {"id": "uses_host_or_list", "category": "lexical", "kind": "text_any", "target": ["<Host[\\s/>]", "<List[\\s/>]"]},
+                ],
+                skill_map={"expo-ui": ["uses_expo_ui", "uses_host_or_list"]},
             )
 
-            result = run_static_checks(app, [
-                {"id": "uses_expo_ui", "kind": "import", "target": "@expo/ui"},
-                {"id": "uses_host", "kind": "text", "target": "Host"},
-                {"id": "missing_tailwind", "kind": "file_exists", "target": "tailwind.config.js"},
-            ])
+            checks, _ = resolve_checks_for_skills(["expo-ui"], checks_dir)
+            results = {r.id: r for r in run_checks(checks, app)}
 
-        by_id = {check.id: check for check in result.checks}
-        self.assertTrue(by_id["uses_expo_ui"].passed)
-        self.assertTrue(by_id["uses_host"].passed)
-        self.assertFalse(by_id["missing_tailwind"].passed)
-        self.assertEqual(result.passed, 2)
-        self.assertEqual(result.total, 3)
+        self.assertTrue(results["uses_expo_ui"].passed)
+        self.assertTrue(results["uses_host_or_list"].passed)
 
-    def test_static_uptake_absent_and_any_checks(self):
+    def test_real_navigator_check_accepts_drawer(self):
+        # Regression guard: found live against a real authored wiki_reader
+        # app using expo-router/drawer's <Drawer> -- a Stack/Tabs/NativeTabs-
+        # only accepted-tag list would have false-negatived on this
+        # legitimate code. Exercises the real checks_data.json entry, not a
+        # synthetic copy, so this catches the tag list ever regressing.
         with tempfile.TemporaryDirectory() as td:
             app = Path(td)
-            src = app / "app"
-            src.mkdir()
-            (src / "index.tsx").write_text("const loading = true; const error = null;\n")
+            (app / "app").mkdir()
+            (app / "app" / "_layout.tsx").write_text(
+                "import { Drawer } from 'expo-router/drawer';\n"
+                "export default function Layout() { return <Drawer />; }\n"
+            )
 
-            result = run_static_checks(app, [
-                {"id": "has_loading_or_query", "kind": "text_any", "target": "useQuery|loading"},
-                {"id": "no_vector_icons", "kind": "text_absent", "target": "@expo/vector-icons"},
-                {"id": "missing_refresh", "kind": "text_any", "target": "RefreshControl|useSWR"},
-            ])
+            checks, _ = resolve_checks_for_skills(["expo-router"], REAL_CHECKS_DIR)
+            results = {r.id: r for r in run_checks(checks, app)}
 
-        by_id = {check.id: check for check in result.checks}
-        self.assertTrue(by_id["has_loading_or_query"].passed)
-        self.assertTrue(by_id["no_vector_icons"].passed)
-        self.assertFalse(by_id["missing_refresh"].passed)
+        self.assertTrue(results["router_navigator_jsx_tag"].passed)
+
+    def test_path_exists_and_path_absent_checks(self):
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "app").mkdir()
+            (app / "app" / "index.tsx").write_text("export default function App(){ return null; }\n")
+            checks_dir = _write_checks_dir(
+                Path(td) / "checks",
+                checks=[
+                    {"id": "app_dir_exists", "category": "structural", "kind": "path_exists", "target": ["app", "src/app"]},
+                    {"id": "no_styles_files", "category": "structural", "kind": "path_absent", "target": ["**/*.styles.ts"]},
+                ],
+                skill_map={"expo-router": ["app_dir_exists", "no_styles_files"]},
+            )
+
+            checks, _ = resolve_checks_for_skills(["expo-router"], checks_dir)
+            results = {r.id: r for r in run_checks(checks, app)}
+
+        self.assertTrue(results["app_dir_exists"].passed)
+        self.assertTrue(results["no_styles_files"].passed)
+
+    def test_path_absent_check_fails_when_anti_pattern_present(self):
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "app" / "utils").mkdir(parents=True)
+            (app / "app" / "utils" / "format.ts").write_text("export const x = 1;\n")
+            checks_dir = _write_checks_dir(
+                Path(td) / "checks",
+                checks=[{"id": "no_colocated_utils", "category": "structural", "kind": "path_absent", "target": ["app/utils"]}],
+                skill_map={"expo-router": ["no_colocated_utils"]},
+            )
+
+            checks, _ = resolve_checks_for_skills(["expo-router"], checks_dir)
+            results = run_checks(checks, app)
+
+        self.assertFalse(results[0].passed)
 
     def test_static_text_checks_ignore_package_manifests_and_lockfiles(self):
         with tempfile.TemporaryDirectory() as td:
@@ -179,13 +344,110 @@ class SkillEvalCoreTests(unittest.TestCase):
             src = app / "app"
             src.mkdir()
             (src / "index.tsx").write_text("export default function App(){ return null; }\n")
+            checks_dir = _write_checks_dir(
+                Path(td) / "checks",
+                checks=[{"id": "has_error_state", "category": "lexical", "kind": "text", "target": "error"}],
+                skill_map={"expo-ui": ["has_error_state"]},
+            )
 
-            result = run_static_checks(app, [
-                {"id": "has_error_state", "kind": "text", "target": "error"},
-            ])
+            checks, _ = resolve_checks_for_skills(["expo-ui"], checks_dir)
+            results = run_checks(checks, app)
 
-        self.assertFalse(result.checks[0].passed)
-        self.assertIn("No source file", result.checks[0].evidence)
+        self.assertFalse(results[0].passed)
+        self.assertIn("No source file", results[0].evidence)
+
+    def test_syntax_check_passes_on_valid_source(self):
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "app").mkdir()
+            (app / "app" / "index.tsx").write_text("export default function App(){ return null; }\n")
+
+            result = check_syntax(app)
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["failed_files"], [])
+        self.assertEqual(result["checked_files"], 1)
+
+    def test_syntax_check_catches_a_real_broken_file(self):
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "app").mkdir()
+            (app / "app" / "index.tsx").write_text("export default function App(){ return null; }\n")
+            (app / "app" / "broken.tsx").write_text("export default function Broken() { return <View")
+
+            result = check_syntax(app)
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(len(result["failed_files"]), 1)
+        self.assertEqual(result["failed_files"][0]["file"], "app/broken.tsx")
+
+    def test_syntax_check_ignores_scripts_dir_boilerplate(self):
+        # Same scripts/ exclusion as the lexical checks -- a broken/unusual
+        # file inside create-expo-app's boilerplate scripts/ shouldn't fail
+        # the whole app's syntax signal.
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "app").mkdir()
+            (app / "app" / "index.tsx").write_text("export default function App(){ return null; }\n")
+            (app / "scripts").mkdir()
+            (app / "scripts" / "reset-project.js").write_text("this is `not even valid at all")
+
+            result = check_syntax(app)
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["checked_files"], 1)
+
+    def test_bundle_check_reports_unknown_when_no_node_modules(self):
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "package.json").write_text("{}")
+
+            result = compute_bundle_result(app)
+
+        self.assertIsNone(result["ok"])
+        self.assertIn("no node_modules", result["reason"])
+
+    def test_bundle_check_degrades_gracefully_when_expo_binary_fails(self):
+        # Doesn't need the real Expo CLI -- any failing "expo" binary
+        # exercises the same non-zero-exit handling path.
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            bin_dir = app / "node_modules" / ".bin"
+            bin_dir.mkdir(parents=True)
+            fake_expo = bin_dir / "expo"
+            fake_expo.write_text("#!/bin/sh\necho 'boom' >&2\nexit 1\n")
+            fake_expo.chmod(0o755)
+
+            result = compute_bundle_result(app)
+
+        self.assertFalse(result["ok"])
+        self.assertIn("boom", result["reason"])
+
+    def test_bundle_check_persist_and_read_round_trip(self):
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "package.json").write_text("{}")
+
+            self.assertIsNone(read_bundle_result(app))
+            persisted = persist_bundle_result(app)
+            reread = read_bundle_result(app)
+
+        self.assertEqual(persisted, reread)
+        self.assertIsNone(persisted["ok"])
+
+    def test_category_breakdown_groups_by_category(self):
+        from eval_harness.evaluator.skill_invocation.uptake_checks.registry import UptakeResults, CheckResult
+
+        results = UptakeResults([
+            CheckResult("a", "lexical", "text", "x", True, ""),
+            CheckResult("b", "lexical", "text", "y", False, ""),
+            CheckResult("c", "structural", "path_exists", ["z"], True, ""),
+        ])
+
+        breakdown = results.category_breakdown()
+
+        self.assertEqual(breakdown["lexical"], {"passed": 1, "total": 2})
+        self.assertEqual(breakdown["structural"], {"passed": 1, "total": 1})
 
     def test_case_run_only_scores_uptake_when_relevant_skill_triggered(self):
         run = score_case_run(
@@ -259,7 +521,7 @@ class SkillEvalCoreTests(unittest.TestCase):
     def test_analyze_artifacts_reports_author_only_outcome_pending(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
-            prd_skills_path, case_dir = self._write_ground_truth(root, "expo-ui")
+            prd_skills_path, checks_dir = self._write_ground_truth(root, "expo-ui")
             authored = root / "authored"
             app = authored / "agent-workspace" / "run-1"
             bundle = authored / "eval-out" / "run-1" / "bundle"
@@ -275,13 +537,14 @@ class SkillEvalCoreTests(unittest.TestCase):
 
             payload = analyze_artifacts(
                 authored, None, "skills_available_unmentioned", root / "out",
-                prd_skills_path=prd_skills_path, case_dir=case_dir,
+                prd_skills_path=prd_skills_path, checks_dir=checks_dir,
             )
 
             self.assertEqual(payload["outcome_status"], "pending")
             self.assertEqual(payload["runs"][0]["trigger_recall"], 1.0)
             self.assertTrue(payload["runs"][0]["trigger_exact_match"])
             self.assertEqual(payload["runs"][0]["uptake_rate"], 1.0)
+            self.assertIn("lexical", payload["check_category_breakdown"])
             self.assertIn("https://www.braintrust.dev/app/project/traces/abc", payload["braintrust_refs"])
             self.assertTrue((root / "out" / "metrics.json").exists())
             self.assertTrue((root / "out" / "report.html").exists())
@@ -289,7 +552,7 @@ class SkillEvalCoreTests(unittest.TestCase):
     def test_analyze_artifacts_merges_eval_result(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
-            prd_skills_path, case_dir = self._write_ground_truth(root, "expo-ui")
+            prd_skills_path, checks_dir = self._write_ground_truth(root, "expo-ui")
             authored = root / "authored"
             app = authored / "agent-workspace" / "run-1"
             bundle = authored / "eval-out" / "run-1" / "bundle"
@@ -308,7 +571,7 @@ class SkillEvalCoreTests(unittest.TestCase):
 
             payload = analyze_artifacts(
                 authored, eval_out, "skills_available_mentioned", root / "out",
-                prd_skills_path=prd_skills_path, case_dir=case_dir,
+                prd_skills_path=prd_skills_path, checks_dir=checks_dir,
             )
 
         self.assertEqual(payload["outcome_status"], "complete")
@@ -320,7 +583,7 @@ class SkillEvalCoreTests(unittest.TestCase):
     def test_analyze_artifacts_marks_missing_trace_without_crashing(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
-            prd_skills_path, case_dir = self._write_ground_truth(root, "expo-ui")
+            prd_skills_path, checks_dir = self._write_ground_truth(root, "expo-ui")
             authored = root / "authored"
             app = authored / "agent-workspace" / "run-1"
             bundle = authored / "eval-out" / "run-1" / "bundle"
@@ -332,7 +595,7 @@ class SkillEvalCoreTests(unittest.TestCase):
 
             payload = analyze_artifacts(
                 authored, None, "skills_available_unmentioned", root / "out",
-                prd_skills_path=prd_skills_path, case_dir=case_dir,
+                prd_skills_path=prd_skills_path, checks_dir=checks_dir,
             )
 
         self.assertIn("author trace not found", payload["warnings"])
@@ -342,7 +605,7 @@ class SkillEvalCoreTests(unittest.TestCase):
     def test_analyze_artifacts_marks_missing_app_without_crashing(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
-            prd_skills_path, case_dir = self._write_ground_truth(root, "expo-ui")
+            prd_skills_path, checks_dir = self._write_ground_truth(root, "expo-ui")
             authored = root / "authored"
             bundle = authored / "eval-out" / "run-1" / "bundle"
             traces = bundle / "telemetry" / "traces"
@@ -353,12 +616,35 @@ class SkillEvalCoreTests(unittest.TestCase):
 
             payload = analyze_artifacts(
                 authored, None, "skills_available_unmentioned", root / "out",
-                prd_skills_path=prd_skills_path, case_dir=case_dir,
+                prd_skills_path=prd_skills_path, checks_dir=checks_dir,
             )
 
         self.assertIn("app tree not found", payload["warnings"])
         self.assertEqual(payload["static_checks"], [])
         self.assertEqual(payload["runs"][0]["uptake_rate"], 0.0)
+
+    def test_analyze_artifacts_warns_when_skill_not_in_skill_map(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            prd_skills_path, checks_dir = self._write_ground_truth(root)  # empty skill_map
+            authored = root / "authored"
+            app = authored / "agent-workspace" / "run-1"
+            bundle = authored / "eval-out" / "run-1" / "bundle"
+            traces = bundle / "telemetry" / "traces"
+            app.mkdir(parents=True)
+            traces.mkdir(parents=True)
+            (app / "package.json").write_text(json.dumps({}))
+            (bundle / "manifest.json").write_text(json.dumps({"prd": TEST_PRD}))
+            (traces / "claude-code-authoring.json").write_text(json.dumps(_trace("claude-code", [])))
+            # override the ground truth to expect a skill absent from skill_map.json
+            prd_skills_path.write_text(json.dumps({"test-app": ["expo-ui"]}))
+
+            payload = analyze_artifacts(
+                authored, None, "skills_available_unmentioned", root / "out",
+                prd_skills_path=prd_skills_path, checks_dir=checks_dir,
+            )
+
+        self.assertIn("no uptake checks mapped for skill 'expo-ui'", payload["warnings"])
 
     def test_analyze_artifacts_forces_empty_expectation_for_unavailable_scenario(self):
         # The negative-control scenario: even though the app's ground truth
@@ -366,7 +652,7 @@ class SkillEvalCoreTests(unittest.TestCase):
         # a clean (correctly silent) run scores as a pass, not "missing skill".
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
-            prd_skills_path, case_dir = self._write_ground_truth(root, "expo-ui")
+            prd_skills_path, checks_dir = self._write_ground_truth(root, "expo-ui")
             authored = root / "authored"
             app = authored / "agent-workspace" / "run-1"
             bundle = authored / "eval-out" / "run-1" / "bundle"
@@ -380,7 +666,7 @@ class SkillEvalCoreTests(unittest.TestCase):
 
             payload = analyze_artifacts(
                 authored, None, "skills_unavailable", root / "out",
-                prd_skills_path=prd_skills_path, case_dir=case_dir,
+                prd_skills_path=prd_skills_path, checks_dir=checks_dir,
             )
 
         self.assertEqual(payload["runs"][0]["skill_id"], "")
@@ -394,7 +680,7 @@ class SkillEvalCoreTests(unittest.TestCase):
         # the mismatch rather than silently trusting the wrong one.
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
-            prd_skills_path, case_dir = self._write_ground_truth(root, "expo-ui")
+            prd_skills_path, checks_dir = self._write_ground_truth(root, "expo-ui")
             authored = root / "authored"
             app = authored / "agent-workspace" / "run-1"
             bundle = authored / "eval-out" / "run-1" / "bundle"
@@ -408,7 +694,7 @@ class SkillEvalCoreTests(unittest.TestCase):
 
             payload = analyze_artifacts(
                 authored, None, "skills_available_mentioned", root / "out",
-                prd_skills_path=prd_skills_path, case_dir=case_dir,
+                prd_skills_path=prd_skills_path, checks_dir=checks_dir,
             )
 
         self.assertEqual(payload["scenario"], "skills_unavailable")
@@ -417,7 +703,7 @@ class SkillEvalCoreTests(unittest.TestCase):
     def test_analyze_artifacts_warns_when_app_missing_from_prd_skills_map(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
-            prd_skills_path, case_dir = self._write_ground_truth(root, "expo-ui")
+            prd_skills_path, checks_dir = self._write_ground_truth(root, "expo-ui")
             authored = root / "authored"
             bundle = authored / "eval-out" / "run-1" / "bundle"
             bundle.mkdir(parents=True)
@@ -425,7 +711,7 @@ class SkillEvalCoreTests(unittest.TestCase):
 
             payload = analyze_artifacts(
                 authored, None, "skills_available_unmentioned", root / "out",
-                prd_skills_path=prd_skills_path, case_dir=case_dir,
+                prd_skills_path=prd_skills_path, checks_dir=checks_dir,
             )
 
         self.assertEqual(payload["expected_skills"], [])
@@ -433,22 +719,18 @@ class SkillEvalCoreTests(unittest.TestCase):
 
     def _write_ground_truth(self, root: Path, *skills: str) -> tuple[Path, Path]:
         """Write a minimal dataset/prd_skills.json (app "test-app" -> skills)
-        plus a case-spec directory covering each skill, mirroring the real
-        dataset/prd_skills.json + skill_cases pairing."""
+        plus an uptake_checks-shaped dir (checks_data.json + skill_map.json)
+        covering each skill with one 'import @expo/ui' check, mirroring the
+        real dataset/prd_skills.json + uptake_checks pairing."""
         prd_skills_path = root / "prd_skills.json"
         prd_skills_path.write_text(json.dumps({"test-app": list(skills)}))
 
-        case_dir = root / "cases"
-        case_dir.mkdir(exist_ok=True)
-        for skill in skills:
-            (case_dir / f"{skill}.json").write_text(json.dumps({
-                "id": skill,
-                "feature_focus": "artifact analysis",
-                "static_uptake_checks": [
-                    {"id": "uses_expo_ui", "kind": "import", "target": "@expo/ui"}
-                ],
-            }))
-        return prd_skills_path, case_dir
+        checks_dir = _write_checks_dir(
+            root,
+            checks=[{"id": "uses_expo_ui", "category": "lexical", "kind": "import", "target": "@expo/ui"}],
+            skill_map={skill: ["uses_expo_ui"] for skill in skills},
+        )
+        return prd_skills_path, checks_dir
 
 
 if __name__ == "__main__":

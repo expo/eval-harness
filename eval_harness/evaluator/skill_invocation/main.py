@@ -10,7 +10,7 @@ from .utils import unpack_artifact
 
 _PACKAGE_DIR = Path(__file__).resolve().parent
 _REPO_ROOT = _PACKAGE_DIR.parents[2]
-_DEFAULT_CASE_DIR = _PACKAGE_DIR / "skill_cases"
+_DEFAULT_CHECKS_DIR = _PACKAGE_DIR / "uptake_checks"
 _DEFAULT_PRD_SKILLS = _REPO_ROOT / "dataset" / "prd_skills.json"
 
 
@@ -28,8 +28,8 @@ def main() -> None:
         help="Path to the app -> expected-skills ground-truth map (default: dataset/prd_skills.json)",
     )
     artifacts.add_argument(
-        "--case-dir", type=Path, default=_DEFAULT_CASE_DIR,
-        help="Directory of case specs providing static_uptake_checks per skill (default: skill_cases)",
+        "--checks-dir", type=Path, default=_DEFAULT_CHECKS_DIR,
+        help="Directory of checks_data.json + skill_map.json providing uptake checks per skill (default: uptake_checks)",
     )
 
     args = parser.parse_args()
@@ -49,7 +49,7 @@ def _analyze_artifacts(args) -> None:
         args.scenario,
         args.out_dir,
         prd_skills_path=args.prd_skills,
-        case_dir=args.case_dir,
+        checks_dir=args.checks_dir,
     )
     print_summary(payload)
 
