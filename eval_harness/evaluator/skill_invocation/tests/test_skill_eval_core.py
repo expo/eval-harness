@@ -26,6 +26,11 @@ from eval_harness.evaluator.skill_invocation.uptake_checks.checks_ast import (
 )
 from eval_harness.evaluator.skill_invocation.uptake_checks.registry import AppTree
 from eval_harness.evaluator.skill_invocation.build_health.syntax_check import check_syntax
+from eval_harness.evaluator.skill_invocation.build_health.bundle_check import (
+    compute_bundle_result,
+    persist_bundle_result,
+    read_bundle_result,
+)
 from eval_harness.evaluator.skill_invocation.utils import unpack_artifact
 
 TEST_PRD = "dataset/prds/test-app/prd/mvp.txt"
@@ -445,6 +450,44 @@ class SkillEvalCoreTests(unittest.TestCase):
 
         self.assertTrue(result["ok"])
         self.assertEqual(result["checked_files"], 1)
+
+    def test_bundle_check_reports_unknown_when_no_node_modules(self):
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "package.json").write_text("{}")
+
+            result = compute_bundle_result(app)
+
+        self.assertIsNone(result["ok"])
+        self.assertIn("no node_modules", result["reason"])
+
+    def test_bundle_check_degrades_gracefully_when_expo_binary_fails(self):
+        # Doesn't need the real Expo CLI -- any failing "expo" binary
+        # exercises the same non-zero-exit handling path.
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            bin_dir = app / "node_modules" / ".bin"
+            bin_dir.mkdir(parents=True)
+            fake_expo = bin_dir / "expo"
+            fake_expo.write_text("#!/bin/sh\necho 'boom' >&2\nexit 1\n")
+            fake_expo.chmod(0o755)
+
+            result = compute_bundle_result(app)
+
+        self.assertFalse(result["ok"])
+        self.assertIn("boom", result["reason"])
+
+    def test_bundle_check_persist_and_read_round_trip(self):
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "package.json").write_text("{}")
+
+            self.assertIsNone(read_bundle_result(app))
+            persisted = persist_bundle_result(app)
+            reread = read_bundle_result(app)
+
+        self.assertEqual(persisted, reread)
+        self.assertIsNone(persisted["ok"])
 
     def test_tier_breakdown_groups_by_tier(self):
         from eval_harness.evaluator.skill_invocation.uptake_checks.registry import UptakeResults, CheckResult

@@ -8,6 +8,7 @@ import html
 from pathlib import Path
 from typing import Any
 
+from .build_health.bundle_check import read_bundle_result
 from .build_health.syntax_check import check_syntax
 from .uptake_checks.registry import UptakeResults, resolve_checks_for_skills, run_checks
 from .uptake_checks.trigger import detect_triggered_skills, load_trace, score_trigger_quality, TriggerQuality
@@ -99,7 +100,7 @@ def analyze_artifacts(
         static_total = len(checks)
         static_rows: list[dict[str, Any]] = []
         tier_breakdown: dict[str, dict[str, int]] = {}
-        build_health: dict[str, Any] = {"syntax": None}
+        build_health: dict[str, Any] = {"syntax": None, "bundle": None}
     else:
         uptake_results = UptakeResults(run_checks(checks, author_layout.app_dir))
         static_passed = uptake_results.passed
@@ -107,8 +108,14 @@ def analyze_artifacts(
         static_rows = [asdict(check) for check in uptake_results.checks]
         tier_breakdown = uptake_results.tier_breakdown()
         # Deliberately not a per-skill check (no skill_map.json entry): this
-        # is app-wide, independent of which skill(s) were expected.
-        build_health = {"syntax": check_syntax(author_layout.app_dir)}
+        # is app-wide, independent of which skill(s) were expected. "bundle"
+        # is None if the authoring-time stage never ran (needs real
+        # node_modules, so it can't be computed here at analysis time) --
+        # distinct from a real {"ok": False, ...}.
+        build_health = {
+            "syntax": check_syntax(author_layout.app_dir),
+            "bundle": read_bundle_result(author_layout.app_dir),
+        }
 
     if author_layout.trace_path is None:
         warnings.append("author trace not found")
