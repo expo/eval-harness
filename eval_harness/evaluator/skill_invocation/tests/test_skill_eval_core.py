@@ -202,6 +202,53 @@ class SkillEvalCoreTests(unittest.TestCase):
 
         self.assertFalse(results[0].passed)
 
+    def test_lexical_check_ignores_scripts_dir_boilerplate(self):
+        # Regression guard: found live against a real authored wiki_reader
+        # app. create-expo-app's standard scripts/reset-project.js embeds
+        # example code as string template literals (e.g. a literal
+        # `import { Stack } from "expo-router"` inside a JS template string
+        # it writes out) -- that must not count as real app evidence. Also
+        # matches expo-project-structure's own SKILL.md, which lists
+        # scripts/ as living outside src/ (tooling, not app code).
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "scripts").mkdir()
+            (app / "scripts" / "reset-project.js").write_text(
+                'const layoutContent = `import { Stack } from "expo-router";\\n'
+                'export default function Layout() { return <Stack />; }`;\n'
+            )
+            (app / "app").mkdir()
+            (app / "app" / "index.tsx").write_text("export default function App(){ return null; }\n")
+            checks_dir = _write_checks_dir(
+                Path(td) / "checks",
+                checks=[{"id": "uses_router", "tier": "T1", "kind": "import", "target": "expo-router"}],
+                skill_map={"expo-router": ["uses_router"]},
+            )
+
+            checks, _ = resolve_checks_for_skills(["expo-router"], checks_dir)
+            results = run_checks(checks, app)
+
+        self.assertFalse(results[0].passed)
+        self.assertNotIn("reset-project.js", results[0].evidence)
+
+    def test_path_checks_ignore_scripts_dir(self):
+        # Same regression, for path_exists/path_absent -- scripts/ must be
+        # excluded from structural checks too, not just lexical ones.
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "scripts" / "__tests__").mkdir(parents=True)
+            (app / "scripts" / "__tests__" / "reset.test.js").write_text("test();\n")
+            checks_dir = _write_checks_dir(
+                Path(td) / "checks",
+                checks=[{"id": "no_dunder_tests", "tier": "T2", "kind": "path_absent", "target": ["**/__tests__/**"]}],
+                skill_map={"expo-project-structure": ["no_dunder_tests"]},
+            )
+
+            checks, _ = resolve_checks_for_skills(["expo-project-structure"], checks_dir)
+            results = run_checks(checks, app)
+
+        self.assertTrue(results[0].passed)
+
     def test_import_and_text_any_checks(self):
         with tempfile.TemporaryDirectory() as td:
             app = Path(td)

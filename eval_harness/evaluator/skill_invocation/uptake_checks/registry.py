@@ -30,7 +30,14 @@ from ..utils import read_json
 
 
 SOURCE_SUFFIXES = {".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"}
-SKIP_DIR_PARTS = {"node_modules", ".git", ".expo", "ios", "android", "build", "dist"}
+# "scripts" is tooling, not app code (expo-project-structure's own SKILL.md
+# lists it as living outside src/, alongside app.json/eas.json/package.json).
+# Verified against a real authored app: create-expo-app's standard
+# scripts/reset-project.js embeds example code as string template literals
+# (e.g. a literal `import { Stack } from "expo-router"` inside a JS template
+# string it writes out) that would otherwise satisfy lexical checks with zero
+# real implementation anywhere in the actual app.
+SKIP_DIR_PARTS = {"node_modules", ".git", ".expo", "ios", "android", "build", "dist", "scripts"}
 SKIP_FILENAMES = {
     "package.json",
     "package-lock.json",

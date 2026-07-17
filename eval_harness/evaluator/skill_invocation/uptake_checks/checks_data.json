@@ -12,8 +12,11 @@
       "id": "router_navigation_api_used",
       "tier": "T1",
       "kind": "text_any",
-      "target": ["<Link[\\s/>]", "useRouter\\(", "useLocalSearchParams\\("],
-      "description": "Uses a real expo-router navigation API -- either declarative (<Link>) or imperative (useRouter/useLocalSearchParams) -- both are valid per the skill, not just the <Link> tag. Verified against a real authored app that legitimately uses only useRouter()."
+      "target": [
+        "<Link[\\s/>]", "<Redirect[\\s/>]", "useRouter\\(", "useLocalSearchParams\\(",
+        "useSegments\\(", "usePathname\\(", "useNavigation\\("
+      ],
+      "description": "Uses a real expo-router navigation API -- declarative (<Link>, <Redirect>) or imperative (useRouter/useLocalSearchParams/useSegments/usePathname/useNavigation) -- all are valid per the skill, not just the <Link> tag. Verified against a real authored app that legitimately uses only useRouter()."
     },
     {
       "id": "router_navigator_jsx_tag",
@@ -41,7 +44,7 @@
       "tier": "T2",
       "kind": "path_exists",
       "target": ["app/index.*", "app/**/index.*", "src/app/index.*", "src/app/**/index.*"],
-      "description": "At least one index route exists (proxy for 'the app always has a route matching /')"
+      "description": "At least one index route exists (proxy for 'the app always has a route matching /'). Known limitation: matches any index.* anywhere under app/, not specifically the root -- an app with only a nested index (e.g. app/settings/index.tsx) and no real root route would still pass. Verified correct on 2 real apps using route groups ((tabs)/index.tsx, (drawer)/index.tsx), since groups don't affect the URL path -- but this is a proxy, not a real route-graph check (that's tier 4, see router_typed_routes_generate_cleanly in the README)."
     },
     {
       "id": "router_has_layout_file",
@@ -56,9 +59,11 @@
       "kind": "path_absent",
       "target": [
         "app/utils", "app/helpers", "app/constants", "app/hooks", "app/components", "app/context",
-        "src/app/utils", "src/app/helpers", "src/app/constants", "src/app/hooks", "src/app/components", "src/app/context"
+        "app/lib", "app/services", "app/shared", "app/types",
+        "src/app/utils", "src/app/helpers", "src/app/constants", "src/app/hooks", "src/app/components", "src/app/context",
+        "src/app/lib", "src/app/services", "src/app/shared", "src/app/types"
       ],
-      "description": "Anti-pattern the skill calls out by name: never co-locate components/types/utilities in the app directory"
+      "description": "Anti-pattern the skill calls out by name: never co-locate components/types/utilities in the app directory. This is a denylist heuristic, not exhaustive -- it can miss the anti-pattern under an unlisted name, and could in principle false-positive if an app has a genuine *route* literally named one of these (not observed in any real app checked so far)."
     },
     {
       "id": "project_structure_uses_stylesheet_create",
