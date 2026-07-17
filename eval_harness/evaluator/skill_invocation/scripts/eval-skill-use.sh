@@ -8,11 +8,11 @@ SCENARIO="${SCENARIO:-skills_available_unmentioned}"
 OUT_DIR="${OUT_DIR:-skill-eval-report}"
 AUTHORED_ARTIFACT="${AUTHORED_ARTIFACT:-}"
 EVAL_ARTIFACT="${EVAL_ARTIFACT:-}"
-# Which skill(s) are expected, and their static_uptake_checks, are now
-# resolved automatically from the artifact's authored PRD -- no more manual
-# case-spec selection. Override only for local debugging against a custom map.
+# Which skill(s) are expected is resolved automatically from the artifact's
+# authored PRD; each expected skill's uptake checks are resolved from
+# uptake_checks/skill_map.json. Override only for local debugging.
 PRD_SKILLS="${PRD_SKILLS:-}"
-CASE_DIR="${CASE_DIR:-}"
+CHECKS_DIR="${CHECKS_DIR:-}"
 
 if [ -z "$AUTHORED_ARTIFACT" ]; then
   echo "AUTHORED_ARTIFACT is required"
@@ -33,8 +33,8 @@ fi
 if [ -n "$PRD_SKILLS" ]; then
   args+=(--prd-skills "$PRD_SKILLS")
 fi
-if [ -n "$CASE_DIR" ]; then
-  args+=(--case-dir "$CASE_DIR")
+if [ -n "$CHECKS_DIR" ]; then
+  args+=(--checks-dir "$CHECKS_DIR")
 fi
 
 PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}" \

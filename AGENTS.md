@@ -55,13 +55,19 @@ runner plus uploaded artifacts.
   enforced config*, not just an analysis label: it controls whether
   `eval::run_coding_agent` installs skills/wires Expo MCP at all, and
   `skill_mention` names a skill explicitly in the prompt for the
-  `skills_available_mentioned` scenario. See `skill_cases/README.md`.
+  `skills_available_mentioned` scenario.
 - Which skill(s) are expected for a given authored app, and how to verify
   their uptake, is resolved automatically: `analyze_artifacts` reads the `prd`
   recorded in the artifact's `manifest.json`, looks up the app's expected
-  skill set in `dataset/prd_skills.json`, and loads each skill's
-  `static_uptake_checks` from whichever `skill_cases/*.json` declares
-  it. There is no manual case-spec selection anymore.
+  skill set in `dataset/prd_skills.json`, and resolves each expected skill's
+  uptake checks via `uptake_checks/skill_map.json` (skill id -> check ids)
+  against the check registry in `uptake_checks/` (`checks_data.json` for
+  declarative tier 1-2 checks, `checks_ast.py`/`checks_routegraph.py` for
+  code-driven tier 3-4 checks once built). Checks are deliberately
+  skill-agnostic atomic facts about the code; `skill_map.json` is the only
+  file coupled to the current skill taxonomy, so a skill rename/merge/split
+  only touches that one mapping. See `uptake_checks/README.md`. There is no
+  manual case-spec selection anymore.
 - Which test plans run for a given authored app is resolved automatically the
   same way: the `ios_agentic` CLI reads the `prd` recorded in `author.env`,
   looks up the app's relevant test-plan filenames in

@@ -1,0 +1,20 @@
+{
+  "_comment": "skill id -> [check id, ...]. This is the ONLY file coupled to the current skill taxonomy -- if Expo renames/merges/splits skills later, only this mapping changes, not the checks themselves (see registry.py's module docstring). Only expo-router and expo-project-structure are mapped so far (phase 1); skills without an entry here simply get a 'no uptake checks mapped' warning, same as an unmapped skill did under the old skill_cases/ format.",
+  "expo-router": [
+    "router_import",
+    "router_navigation_api_used",
+    "router_navigator_jsx_tag",
+    "router_no_direct_react_navigation_import",
+    "router_app_dir_exists",
+    "router_has_index_route",
+    "router_has_layout_file",
+    "router_no_colocated_non_route_files_in_app_dir"
+  ],
+  "expo-project-structure": [
+    "router_app_dir_exists",
+    "project_structure_uses_stylesheet_create",
+    "project_structure_components_dir_exists",
+    "project_structure_no_separate_styles_files",
+    "project_structure_no_dunder_tests_dir"
+  ]
+}

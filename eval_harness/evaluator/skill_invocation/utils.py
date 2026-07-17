@@ -2,50 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import json
 from pathlib import Path
 import tarfile
 from typing import Any
-
-
-@dataclass
-class SkillEvalCase:
-    id: str
-    feature_focus: str
-    static_uptake_checks: list[dict[str, Any]]
-
-
-def load_case_spec(path: Path | str) -> SkillEvalCase:
-    path = Path(path)
-    data = load_structured(path)
-    required = [
-        "id",
-        "feature_focus",
-        "static_uptake_checks",
-    ]
-    missing = [key for key in required if key not in data]
-    if missing:
-        raise ValueError(f"{path} missing required fields: {', '.join(missing)}")
-    return SkillEvalCase(
-        id=str(data["id"]),
-        feature_focus=str(data["feature_focus"]),
-        static_uptake_checks=list(data["static_uptake_checks"]),
-    )
-
-
-def load_case_specs_by_skill(case_dir: Path | str) -> dict[str, SkillEvalCase]:
-    """Index every case spec under `case_dir` by its `id` -- one case per
-    skill, `id` *is* the skill id it covers. Lets analysis auto-resolve
-    "which case file covers this skill" instead of a human picking one file
-    by hand. If two case files somehow share an `id`, the first one found
-    (sorted by filename) wins.
-    """
-    by_skill: dict[str, SkillEvalCase] = {}
-    for path in sorted(Path(case_dir).glob("*.json")):
-        case = load_case_spec(path)
-        by_skill.setdefault(case.id, case)
-    return by_skill
 
 
 def load_prd_skills(path: Path | str) -> dict[str, list[str]]:
@@ -61,19 +21,6 @@ def app_name_from_prd(prd_path: str) -> str | None:
         if idx + 1 < len(parts):
             return parts[idx + 1]
     return None
-
-
-def load_structured(path: Path) -> dict[str, Any]:
-    text = path.read_text(encoding="utf-8")
-    if path.suffix.lower() == ".json":
-        return json.loads(text)
-    if path.suffix.lower() in (".yaml", ".yml"):
-        try:
-            import yaml  # type: ignore
-        except Exception as exc:
-            raise RuntimeError("YAML case specs require PyYAML; use JSON or install yaml") from exc
-        return yaml.safe_load(text)
-    raise ValueError(f"Unsupported case spec extension: {path.suffix}")
 
 
 def read_json(path: Path | str) -> dict[str, Any]:
