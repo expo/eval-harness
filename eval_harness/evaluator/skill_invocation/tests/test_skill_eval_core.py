@@ -21,10 +21,6 @@ from eval_harness.evaluator.skill_invocation.uptake_checks.trigger import (
     detect_triggered_skills,
     score_trigger_quality,
 )
-from eval_harness.evaluator.skill_invocation.uptake_checks.checks_ast import (
-    check_router_layout_defines_navigator,
-)
-from eval_harness.evaluator.skill_invocation.uptake_checks.registry import AppTree
 from eval_harness.evaluator.skill_invocation.build_health.syntax_check import check_syntax
 from eval_harness.evaluator.skill_invocation.build_health.bundle_check import (
     compute_bundle_result,
@@ -285,6 +281,25 @@ class SkillEvalCoreTests(unittest.TestCase):
         self.assertTrue(results["uses_expo_ui"].passed)
         self.assertTrue(results["uses_host_or_list"].passed)
 
+    def test_real_navigator_check_accepts_drawer(self):
+        # Regression guard: found live against a real authored wiki_reader
+        # app using expo-router/drawer's <Drawer> -- a Stack/Tabs/NativeTabs-
+        # only accepted-tag list would have false-negatived on this
+        # legitimate code. Exercises the real checks_data.json entry, not a
+        # synthetic copy, so this catches the tag list ever regressing.
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "app").mkdir()
+            (app / "app" / "_layout.tsx").write_text(
+                "import { Drawer } from 'expo-router/drawer';\n"
+                "export default function Layout() { return <Drawer />; }\n"
+            )
+
+            checks, _ = resolve_checks_for_skills(["expo-router"], REAL_CHECKS_DIR)
+            results = {r.id: r for r in run_checks(checks, app)}
+
+        self.assertTrue(results["router_navigator_jsx_tag"].passed)
+
     def test_path_exists_and_path_absent_checks(self):
         with tempfile.TemporaryDirectory() as td:
             app = Path(td)
@@ -340,75 +355,6 @@ class SkillEvalCoreTests(unittest.TestCase):
 
         self.assertFalse(results[0].passed)
         self.assertIn("No source file", results[0].evidence)
-
-    def test_ast_check_passes_when_layout_actually_renders_a_navigator(self):
-        with tempfile.TemporaryDirectory() as td:
-            app = Path(td)
-            (app / "app").mkdir()
-            (app / "app" / "_layout.tsx").write_text(
-                "import { Stack } from 'expo-router';\n"
-                "export default function Layout() { return <Stack />; }\n"
-            )
-
-            result = check_router_layout_defines_navigator(AppTree(app))
-
-        self.assertTrue(result.passed, result.evidence)
-        self.assertEqual(result.tier, "T3")
-
-    def test_ast_check_fails_on_unused_navigator_import(self):
-        # This is the whole point of tier 3 over tier 1: a tier-1 text_any
-        # check on "Stack" would pass here (the word appears), but the JSX
-        # tree never actually renders it -- only an AST-aware check can tell
-        # the difference between "imported" and "used".
-        with tempfile.TemporaryDirectory() as td:
-            app = Path(td)
-            (app / "app").mkdir()
-            (app / "app" / "_layout.tsx").write_text(
-                "import { Stack } from 'expo-router';\n"
-                "export default function Layout() { return <View />; }\n"
-            )
-
-            result = check_router_layout_defines_navigator(AppTree(app))
-
-        self.assertFalse(result.passed)
-
-    def test_ast_check_accepts_drawer_navigator(self):
-        # Regression guard: found live against a real authored wiki_reader
-        # app using expo-router/drawer -- a Stack/Tabs/NativeTabs-only
-        # accepted-tag list would have false-negatived on legitimate code.
-        with tempfile.TemporaryDirectory() as td:
-            app = Path(td)
-            (app / "app").mkdir()
-            (app / "app" / "_layout.tsx").write_text(
-                "import { Drawer } from 'expo-router/drawer';\n"
-                "export default function Layout() { return <Drawer />; }\n"
-            )
-
-            result = check_router_layout_defines_navigator(AppTree(app))
-
-        self.assertTrue(result.passed, result.evidence)
-
-    def test_ast_check_degrades_gracefully_on_broken_syntax(self):
-        with tempfile.TemporaryDirectory() as td:
-            app = Path(td)
-            (app / "app").mkdir()
-            (app / "app" / "_layout.tsx").write_text("export default function Layout() { return <Stack")
-
-            result = check_router_layout_defines_navigator(AppTree(app))
-
-        self.assertFalse(result.passed)
-        self.assertIn("syntax error", result.evidence)
-
-    def test_ast_check_fails_clearly_when_no_layout_file_exists(self):
-        with tempfile.TemporaryDirectory() as td:
-            app = Path(td)
-            (app / "app").mkdir()
-            (app / "app" / "index.tsx").write_text("export default function App(){ return null; }\n")
-
-            result = check_router_layout_defines_navigator(AppTree(app))
-
-        self.assertFalse(result.passed)
-        self.assertIn("no _layout file found", result.evidence)
 
     def test_syntax_check_passes_on_valid_source(self):
         with tempfile.TemporaryDirectory() as td:

@@ -7,16 +7,17 @@ through the uptake_checks registry) -- this is app-wide, independent of
 which skill(s) were expected, so it surfaces as its own top-level
 "build_health" key in metrics.json rather than a tier under some skill.
 
-Reuses uptake_checks' Node/Babel parser (node_parser.py) and its source-file
-scanning (AppTree, same node_modules/scripts/lockfile exclusions as the
-lexical checks) rather than duplicating either.
+Reuses uptake_checks.registry's source-file scanning (AppTree, same
+node_modules/scripts/lockfile exclusions as the lexical checks) rather than
+duplicating it -- that part is still genuinely shared, general-purpose
+infrastructure, unlike the parser (which only this module uses now).
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from ..uptake_checks.node_parser import parse_file_facts
+from .node_parser import check_file_syntax
 from ..uptake_checks.registry import AppTree
 
 
@@ -25,7 +26,7 @@ def check_syntax(app_dir: Path) -> dict:
     failed: list[dict] = []
     skipped_unavailable = 0
     for rel_path in app_tree.files:
-        facts = parse_file_facts(app_dir / rel_path)
+        facts = check_file_syntax(app_dir / rel_path)
         if facts is None:
             skipped_unavailable += 1
             continue

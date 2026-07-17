@@ -1,11 +1,11 @@
-"""Shared Node/Babel subprocess helpers, used by tier 3 (checks_ast.py) and
-by the syntax half of build_health/ -- both need "parse this file for real,"
-just for different purposes (JSX-tag inspection vs. plain pass/fail).
+"""Node/Babel subprocess helper backing build_health's syntax_check.
 
-Shells out to scripts/parse-file-facts.js (its own package.json, npm-
-installed lazily on first use). Not part of any authored app's own
-dependencies -- this is the evaluator's own tooling, same category as `uv`
-for the Python side.
+"Is this file syntactically valid JS/TS/JSX" has no regex substitute --
+that's the entire reason this shells out to a real parser instead of being
+another pattern-matched check. Shells out to scripts/check-syntax.js (its
+own package.json, npm-installed lazily on first use). Not part of any
+authored app's own dependencies -- this is the evaluator's own tooling,
+same category as `uv` for the Python side.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ import subprocess
 
 
 SCRIPTS_DIR = Path(__file__).parent / "scripts"
-PARSE_SCRIPT = SCRIPTS_DIR / "parse-file-facts.js"
+CHECK_SCRIPT = SCRIPTS_DIR / "check-syntax.js"
 
 _npm_install_done = False
 
@@ -47,17 +47,17 @@ def ensure_node_deps_installed() -> bool:
     return True
 
 
-def parse_file_facts(path: Path) -> dict | None:
-    """Returns the parsed facts dict, or None if the parser itself couldn't
-    run (missing node/npm, timeout, etc.) -- callers decide what "can't
-    tell" means for their specific use rather than this raising. A genuine
-    parse error is NOT None -- it's {"error": "parse_error", "message": ...},
-    a real, informative result the caller can act on."""
+def check_file_syntax(path: Path) -> dict | None:
+    """Returns {"ok": true} or {"error": "parse_error", "message": ...} --
+    the latter is a real, informative result, not a failure to run. Returns
+    None only if the parser itself couldn't run at all (missing node/npm,
+    timeout, etc.) -- callers decide what "can't tell" means for their
+    specific use rather than this raising."""
     if not ensure_node_deps_installed():
         return None
     try:
         result = subprocess.run(
-            ["node", str(PARSE_SCRIPT), str(path)],
+            ["node", str(CHECK_SCRIPT), str(path)],
             capture_output=True,
             text=True,
             timeout=30,

@@ -1,9 +1,0 @@
-{
-  "name": "uptake-checks-ast-scripts",
-  "private": true,
-  "description": "Standalone Node/Babel parser used by tier 3 (AST) uptake checks. Not part of any authored app -- installed once (npm install) into this directory on first use.",
-  "dependencies": {
-    "@babel/parser": "^7.26.0",
-    "@babel/traverse": "^7.26.0"
-  }
-}
