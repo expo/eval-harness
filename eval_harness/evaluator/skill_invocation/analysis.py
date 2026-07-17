@@ -10,7 +10,13 @@ from typing import Any
 
 from .build_health.bundle_check import read_bundle_result
 from .build_health.syntax_check import check_syntax
-from .uptake_checks.registry import UptakeResults, resolve_checks_for_skills, run_checks
+from .uptake_checks.registry import (
+    CheckResult,
+    UptakeResults,
+    resolve_checks_by_skill,
+    resolve_checks_for_skills,
+    run_checks,
+)
 from .uptake_checks.trigger import detect_triggered_skills, load_trace, score_trigger_quality, TriggerQuality
 from .utils import (
     app_name_from_prd,
@@ -93,6 +99,8 @@ def analyze_artifacts(
 
     checks, check_warnings = resolve_checks_for_skills(expected_skills, checks_dir)
     warnings.extend(check_warnings)
+    checks_by_skill, skill_attribution_warnings = resolve_checks_by_skill(expected_skills, checks_dir)
+    warnings.extend(skill_attribution_warnings)
 
     if author_layout.app_dir is None:
         warnings.append("app tree not found")
@@ -101,12 +109,18 @@ def analyze_artifacts(
         static_rows: list[dict[str, Any]] = []
         check_category_breakdown: dict[str, dict[str, int]] = {}
         build_health: dict[str, Any] = {"syntax": None, "bundle": None}
+        results_by_id: dict[str, CheckResult] = {}
     else:
         uptake_results = UptakeResults(run_checks(checks, author_layout.app_dir))
         static_passed = uptake_results.passed
         static_total = uptake_results.total
         static_rows = [asdict(check) for check in uptake_results.checks]
         check_category_breakdown = uptake_results.category_breakdown()
+        # Every check needed by any expected skill was just run once above
+        # (execution dedup); index by id so compute_skill_results can project
+        # each already-computed result into every skill that maps to it,
+        # without re-running anything.
+        results_by_id = {r.id: r for r in uptake_results.checks}
         # Deliberately not a per-skill check (no skill_map.json entry): this
         # is app-wide, independent of which skill(s) were expected. "bundle"
         # is None if the authoring-time stage never ran (needs real
@@ -123,6 +137,17 @@ def analyze_artifacts(
     else:
         trace = load_trace(author_layout.trace_path)
     triggered = detect_triggered_skills(trace)
+
+    # The source of truth for per-skill results (see compute_skill_results'
+    # docstring): each expected skill gets its own independent trigger status
+    # and uptake, never the same pooled number every expected skill shares.
+    skill_results = compute_skill_results(
+        expected_skills=expected_skills,
+        triggered_skills=triggered,
+        checks_by_skill=checks_by_skill,
+        results_by_id=results_by_id,
+        app_dir_missing=author_layout.app_dir is None,
+    )
 
     result_path = eval_layout.result_path if eval_layout else None
     evaluator_pct = _read_evaluator_pct(result_path) if result_path else None
@@ -142,6 +167,10 @@ def analyze_artifacts(
         "app": app_name,
         "scenario": scenario,
         "skill_id": ",".join(expected_skills),
+        # Legacy pooled fields -- kept temporarily for backward compatibility
+        # (console summary, aggregate_skill_results' own standalone cross-run
+        # use). Not the source of payload["skills"] below -- these mix all
+        # expected skills together, which is exactly the bug this fixes.
         "trigger_recall": score.trigger_quality.recall,
         "trigger_precision": score.trigger_quality.precision,
         "trigger_exact_match": set(score.trigger_quality.triggered_skills) == set(expected_skills),
@@ -149,6 +178,7 @@ def analyze_artifacts(
         "uptake_rate": uptake,
         "evaluator_pct": evaluator_pct,
         "build_success": build_success,
+        "skills": skill_results,
     }
     payload = {
         "summary": f"Skill eval artifact analysis for {app_name or 'unknown app'}",
@@ -162,7 +192,7 @@ def analyze_artifacts(
         "check_category_breakdown": check_category_breakdown,
         "build_health": build_health,
         "runs": [run],
-        "skills": aggregate_skill_results([run]),
+        "skills": skill_results,
         "artifacts": {
             "authored_root": str(author_layout.root),
             "app_dir": str(author_layout.app_dir) if author_layout.app_dir else None,
@@ -261,6 +291,65 @@ def score_case_run(
     )
 
 
+def compute_skill_results(
+    expected_skills: list[str],
+    triggered_skills: list[str],
+    checks_by_skill: dict[str, list[Any] | None],
+    results_by_id: dict[str, CheckResult],
+    app_dir_missing: bool,
+) -> dict[str, dict[str, Any]]:
+    """The source of truth for per-skill trigger + uptake results -- each
+    expected skill gets its own independent result, never the same pooled
+    number every expected skill shares (the bug this function replaces:
+    triggering only one of two expected skills used to unlock a combined
+    uptake score attributed to both).
+
+    Static uptake is measured independently of trigger detection -- correct
+    code can follow a skill's guidance without an explicit invocation in the
+    trace, so a skill's own uptake is never gated on whether it (or any
+    other expected skill) triggered.
+
+    `results_by_id` holds already-executed CheckResults (see
+    analyze_artifacts: every check needed by any expected skill is run
+    exactly once via the pooled resolve_checks_for_skills/run_checks path);
+    this function only projects those results into each skill that maps to
+    them. Execution dedup is an optimization, never an attribution rule -- a
+    check shared by two skills still contributes its full result to both.
+    """
+    triggered_set = set(triggered_skills)
+    skills: dict[str, dict[str, Any]] = {}
+    for skill_id in expected_skills:
+        is_triggered = skill_id in triggered_set
+        entry: dict[str, Any] = {
+            "expected": True,
+            "triggered": is_triggered,
+            "trigger_status": "observed" if is_triggered else "not_observed",
+        }
+        checks = checks_by_skill.get(skill_id)
+        if checks is None:
+            # No skill_map.json entry at all -- unsupported, not "zero
+            # checks needed, trivially satisfied".
+            entry.update(uptake_status="unsupported", passed=None, total=None, uptake_rate=None, checks=[])
+        elif app_dir_missing:
+            # Real checks exist for this skill, but there's no app tree to
+            # run them against -- an invalid artifact for static uptake, not
+            # a measured zero.
+            entry.update(uptake_status="missing_app", passed=None, total=len(checks), uptake_rate=None, checks=[])
+        else:
+            skill_check_results = [results_by_id[c.id] for c in checks if c.id in results_by_id]
+            passed = sum(1 for r in skill_check_results if r.passed)
+            total = len(skill_check_results)
+            entry.update(
+                uptake_status="measured",
+                passed=passed,
+                total=total,
+                uptake_rate=round(passed / total, 4) if total else None,
+                checks=[asdict(r) for r in skill_check_results],
+            )
+        skills[skill_id] = entry
+    return skills
+
+
 def aggregate_skill_results(runs: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for run in runs:
@@ -327,6 +416,19 @@ def write_html_report(payload: dict[str, Any], path: Path | str) -> None:
             f"<td>{_e(_pct(run.get('evaluator_pct')))}</td>"
             "</tr>"
         )
+    skill_rows = []
+    for skill_id, result in (payload.get("skills") or {}).items():
+        passed = result.get("passed")
+        total = result.get("total")
+        skill_rows.append(
+            "<tr>"
+            f"<td>{_e(skill_id)}</td>"
+            f"<td>{_e(result.get('trigger_status'))}</td>"
+            f"<td>{_e(result.get('uptake_status'))}</td>"
+            f"<td>{_e('n/a' if passed is None else f'{passed}/{total}')}</td>"
+            f"<td>{_e(_pct(result.get('uptake_rate')))}</td>"
+            "</tr>"
+        )
     doc = f"""<!doctype html>
 <html>
 <head>
@@ -334,7 +436,7 @@ def write_html_report(payload: dict[str, Any], path: Path | str) -> None:
   <title>Expo Skill Eval</title>
   <style>
     body {{ font-family: -apple-system, BlinkMacSystemFont, sans-serif; margin: 24px; }}
-    table {{ border-collapse: collapse; width: 100%; }}
+    table {{ border-collapse: collapse; width: 100%; margin-bottom: 32px; }}
     th, td {{ border-bottom: 1px solid #ddd; padding: 8px; text-align: left; }}
     .note {{ color: #555; max-width: 760px; }}
   </style>
@@ -344,8 +446,14 @@ def write_html_report(payload: dict[str, Any], path: Path | str) -> None:
   <p>{_e(payload.get('summary', ''))}</p>
   <p class="note">Initial v0 signal: trace trigger detection, static code uptake checks, and optional evaluator score. No LLM judge or screenshot evidence is used.</p>
   <table>
-    <thead><tr><th>App</th><th>Scenario</th><th>Expected</th><th>Detected</th><th>Exact match</th><th>Recall</th><th>Precision</th><th>Uptake</th><th>Evaluator</th></tr></thead>
+    <thead><tr><th>App</th><th>Scenario</th><th>Expected</th><th>Detected</th><th>Exact match</th><th>Recall</th><th>Precision</th><th>Uptake (pooled, legacy)</th><th>Evaluator</th></tr></thead>
     <tbody>{''.join(rows)}</tbody>
+  </table>
+  <h2>Per-skill results</h2>
+  <p class="note">Each expected skill's own trigger status and uptake, measured independently -- not the pooled number above.</p>
+  <table>
+    <thead><tr><th>Skill</th><th>Trigger</th><th>Uptake status</th><th>Passed/Total</th><th>Uptake rate</th></tr></thead>
+    <tbody>{''.join(skill_rows)}</tbody>
   </table>
 </body>
 </html>

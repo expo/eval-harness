@@ -68,7 +68,13 @@ runner plus uploaded artifacts.
   skill-agnostic atomic facts about the code; `skill_map.json` is the only
   file coupled to the current skill taxonomy, so a skill rename/merge/split
   only touches that one mapping. See `uptake_checks/README.md`. There is no
-  manual case-spec selection anymore.
+  manual case-spec selection anymore. Trigger and uptake are scored per
+  expected skill independently (`analysis.compute_skill_results`,
+  `metrics.json`'s `skills` key) -- a shared check contributes its result to
+  every skill it's mapped to without being re-run, but one skill triggering
+  never affects another skill's own trigger/uptake numbers, and an expected
+  skill absent from `skill_map.json` is marked `unsupported`, not scored as
+  a trivial zero-check pass.
 - Which test plans run for a given authored app is resolved automatically the
   same way: the `ios_agentic` CLI reads the `prd` recorded in `author.env`,
   looks up the app's relevant test-plan filenames in

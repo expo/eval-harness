@@ -231,6 +231,39 @@ def resolve_checks_for_skills(expected_skills: list[str], checks_dir: Path | str
     return checks, warnings
 
 
+def resolve_checks_by_skill(
+    expected_skills: list[str], checks_dir: Path | str
+) -> tuple[dict[str, list[Check] | None], list[str]]:
+    """Per-skill check attribution -- unlike resolve_checks_for_skills (which
+    flattens every expected skill's checks into one deduped list for
+    pooled/app-wide reporting), this keeps each skill's own check list
+    separate, so uptake can be measured independently per skill rather than
+    the same pooled number being attributed to every expected skill.
+
+    A skill mapped to `None` (not an empty list) has no skill_map.json entry
+    at all -- unsupported, which callers must not treat as "zero checks
+    needed, trivially satisfied"."""
+    skill_map = load_skill_map(checks_dir)
+    registry = all_checks(checks_dir)
+    warnings: list[str] = []
+    out: dict[str, list[Check] | None] = {}
+    for skill_id in expected_skills:
+        check_ids = skill_map.get(skill_id)
+        if check_ids is None:
+            warnings.append(f"no uptake checks mapped for skill {skill_id!r}")
+            out[skill_id] = None
+            continue
+        skill_checks: list[Check] = []
+        for check_id in check_ids:
+            check = registry.get(check_id)
+            if check is None:
+                warnings.append(f"skill_map references unknown check id {check_id!r}")
+                continue
+            skill_checks.append(check)
+        out[skill_id] = skill_checks
+    return out, warnings
+
+
 # --- running --------------------------------------------------------------
 
 def run_checks(checks: list[Check], app_dir: Path | str) -> list[CheckResult]:
