@@ -143,8 +143,8 @@ class SkillEvalCoreTests(unittest.TestCase):
             checks_dir = _write_checks_dir(
                 Path(td),
                 checks=[
-                    {"id": "shared", "tier": "T2", "kind": "path_exists", "target": ["app"]},
-                    {"id": "router_only", "tier": "T1", "kind": "import", "target": "expo-router"},
+                    {"id": "shared", "category": "structural", "kind": "path_exists", "target": ["app"]},
+                    {"id": "router_only", "category": "lexical", "kind": "import", "target": "expo-router"},
                 ],
                 skill_map={"skill-a": ["shared", "router_only"], "skill-b": ["shared"]},
             )
@@ -183,7 +183,7 @@ class SkillEvalCoreTests(unittest.TestCase):
             (app / "index.tsx").write_text("import { FlatList } from 'react-native';\n")
             checks_dir = _write_checks_dir(
                 Path(td) / "checks",
-                checks=[{"id": "uses_list_tag", "tier": "T1", "kind": "text", "target": "<List[\\s/>]"}],
+                checks=[{"id": "uses_list_tag", "category": "lexical", "kind": "text", "target": "<List[\\s/>]"}],
                 skill_map={"expo-ui": ["uses_list_tag"]},
             )
 
@@ -200,7 +200,7 @@ class SkillEvalCoreTests(unittest.TestCase):
             (app / "index.tsx").write_text("// TODO: add loading state\nexport default function App(){ return null; }\n")
             checks_dir = _write_checks_dir(
                 Path(td) / "checks",
-                checks=[{"id": "has_loading_state", "tier": "T1", "kind": "text", "target": "loading"}],
+                checks=[{"id": "has_loading_state", "category": "lexical", "kind": "text", "target": "loading"}],
                 skill_map={"expo-ui": ["has_loading_state"]},
             )
 
@@ -228,7 +228,7 @@ class SkillEvalCoreTests(unittest.TestCase):
             (app / "app" / "index.tsx").write_text("export default function App(){ return null; }\n")
             checks_dir = _write_checks_dir(
                 Path(td) / "checks",
-                checks=[{"id": "uses_router", "tier": "T1", "kind": "import", "target": "expo-router"}],
+                checks=[{"id": "uses_router", "category": "lexical", "kind": "import", "target": "expo-router"}],
                 skill_map={"expo-router": ["uses_router"]},
             )
 
@@ -247,7 +247,7 @@ class SkillEvalCoreTests(unittest.TestCase):
             (app / "scripts" / "__tests__" / "reset.test.js").write_text("test();\n")
             checks_dir = _write_checks_dir(
                 Path(td) / "checks",
-                checks=[{"id": "no_dunder_tests", "tier": "T2", "kind": "path_absent", "target": ["**/__tests__/**"]}],
+                checks=[{"id": "no_dunder_tests", "category": "structural", "kind": "path_absent", "target": ["**/__tests__/**"]}],
                 skill_map={"expo-project-structure": ["no_dunder_tests"]},
             )
 
@@ -269,8 +269,8 @@ class SkillEvalCoreTests(unittest.TestCase):
             checks_dir = _write_checks_dir(
                 Path(td) / "checks",
                 checks=[
-                    {"id": "uses_expo_ui", "tier": "T1", "kind": "import", "target": "@expo/ui"},
-                    {"id": "uses_host_or_list", "tier": "T1", "kind": "text_any", "target": ["<Host[\\s/>]", "<List[\\s/>]"]},
+                    {"id": "uses_expo_ui", "category": "lexical", "kind": "import", "target": "@expo/ui"},
+                    {"id": "uses_host_or_list", "category": "lexical", "kind": "text_any", "target": ["<Host[\\s/>]", "<List[\\s/>]"]},
                 ],
                 skill_map={"expo-ui": ["uses_expo_ui", "uses_host_or_list"]},
             )
@@ -308,8 +308,8 @@ class SkillEvalCoreTests(unittest.TestCase):
             checks_dir = _write_checks_dir(
                 Path(td) / "checks",
                 checks=[
-                    {"id": "app_dir_exists", "tier": "T2", "kind": "path_exists", "target": ["app", "src/app"]},
-                    {"id": "no_styles_files", "tier": "T2", "kind": "path_absent", "target": ["**/*.styles.ts"]},
+                    {"id": "app_dir_exists", "category": "structural", "kind": "path_exists", "target": ["app", "src/app"]},
+                    {"id": "no_styles_files", "category": "structural", "kind": "path_absent", "target": ["**/*.styles.ts"]},
                 ],
                 skill_map={"expo-router": ["app_dir_exists", "no_styles_files"]},
             )
@@ -327,7 +327,7 @@ class SkillEvalCoreTests(unittest.TestCase):
             (app / "app" / "utils" / "format.ts").write_text("export const x = 1;\n")
             checks_dir = _write_checks_dir(
                 Path(td) / "checks",
-                checks=[{"id": "no_colocated_utils", "tier": "T2", "kind": "path_absent", "target": ["app/utils"]}],
+                checks=[{"id": "no_colocated_utils", "category": "structural", "kind": "path_absent", "target": ["app/utils"]}],
                 skill_map={"expo-router": ["no_colocated_utils"]},
             )
 
@@ -346,7 +346,7 @@ class SkillEvalCoreTests(unittest.TestCase):
             (src / "index.tsx").write_text("export default function App(){ return null; }\n")
             checks_dir = _write_checks_dir(
                 Path(td) / "checks",
-                checks=[{"id": "has_error_state", "tier": "T1", "kind": "text", "target": "error"}],
+                checks=[{"id": "has_error_state", "category": "lexical", "kind": "text", "target": "error"}],
                 skill_map={"expo-ui": ["has_error_state"]},
             )
 
@@ -435,19 +435,19 @@ class SkillEvalCoreTests(unittest.TestCase):
         self.assertEqual(persisted, reread)
         self.assertIsNone(persisted["ok"])
 
-    def test_tier_breakdown_groups_by_tier(self):
+    def test_category_breakdown_groups_by_category(self):
         from eval_harness.evaluator.skill_invocation.uptake_checks.registry import UptakeResults, CheckResult
 
         results = UptakeResults([
-            CheckResult("a", "T1", "text", "x", True, ""),
-            CheckResult("b", "T1", "text", "y", False, ""),
-            CheckResult("c", "T2", "path_exists", ["z"], True, ""),
+            CheckResult("a", "lexical", "text", "x", True, ""),
+            CheckResult("b", "lexical", "text", "y", False, ""),
+            CheckResult("c", "structural", "path_exists", ["z"], True, ""),
         ])
 
-        breakdown = results.tier_breakdown()
+        breakdown = results.category_breakdown()
 
-        self.assertEqual(breakdown["T1"], {"passed": 1, "total": 2})
-        self.assertEqual(breakdown["T2"], {"passed": 1, "total": 1})
+        self.assertEqual(breakdown["lexical"], {"passed": 1, "total": 2})
+        self.assertEqual(breakdown["structural"], {"passed": 1, "total": 1})
 
     def test_case_run_only_scores_uptake_when_relevant_skill_triggered(self):
         run = score_case_run(
@@ -544,7 +544,7 @@ class SkillEvalCoreTests(unittest.TestCase):
             self.assertEqual(payload["runs"][0]["trigger_recall"], 1.0)
             self.assertTrue(payload["runs"][0]["trigger_exact_match"])
             self.assertEqual(payload["runs"][0]["uptake_rate"], 1.0)
-            self.assertIn("T1", payload["tier_breakdown"])
+            self.assertIn("lexical", payload["check_category_breakdown"])
             self.assertIn("https://www.braintrust.dev/app/project/traces/abc", payload["braintrust_refs"])
             self.assertTrue((root / "out" / "metrics.json").exists())
             self.assertTrue((root / "out" / "report.html").exists())
@@ -727,7 +727,7 @@ class SkillEvalCoreTests(unittest.TestCase):
 
         checks_dir = _write_checks_dir(
             root,
-            checks=[{"id": "uses_expo_ui", "tier": "T1", "kind": "import", "target": "@expo/ui"}],
+            checks=[{"id": "uses_expo_ui", "category": "lexical", "kind": "import", "target": "@expo/ui"}],
             skill_map={skill: ["uses_expo_ui"] for skill in skills},
         )
         return prd_skills_path, checks_dir

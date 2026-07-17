@@ -61,9 +61,10 @@ runner plus uploaded artifacts.
   recorded in the artifact's `manifest.json`, looks up the app's expected
   skill set in `dataset/prd_skills.json`, and resolves each expected skill's
   uptake checks via `uptake_checks/skill_map.json` (skill id -> check ids)
-  against the declarative tier 1-2 checks in `checks_data.json` (no tier
-  3-4 checks currently exist -- an AST-based tier 3 check was tried and cut
-  as not worth its complexity; see `uptake_checks/README.md`). Checks are deliberately
+  against the declarative lexical + structural checks in `checks_data.json`
+  (no syntax-tree or route-graph checks currently exist -- a syntax-tree
+  check was tried and cut as not worth its complexity; see
+  `uptake_checks/README.md`). Checks are deliberately
   skill-agnostic atomic facts about the code; `skill_map.json` is the only
   file coupled to the current skill taxonomy, so a skill rename/merge/split
   only touches that one mapping. See `uptake_checks/README.md`. There is no

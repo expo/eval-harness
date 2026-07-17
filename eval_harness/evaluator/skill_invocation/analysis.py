@@ -99,14 +99,14 @@ def analyze_artifacts(
         static_passed = 0
         static_total = len(checks)
         static_rows: list[dict[str, Any]] = []
-        tier_breakdown: dict[str, dict[str, int]] = {}
+        check_category_breakdown: dict[str, dict[str, int]] = {}
         build_health: dict[str, Any] = {"syntax": None, "bundle": None}
     else:
         uptake_results = UptakeResults(run_checks(checks, author_layout.app_dir))
         static_passed = uptake_results.passed
         static_total = uptake_results.total
         static_rows = [asdict(check) for check in uptake_results.checks]
-        tier_breakdown = uptake_results.tier_breakdown()
+        check_category_breakdown = uptake_results.category_breakdown()
         # Deliberately not a per-skill check (no skill_map.json entry): this
         # is app-wide, independent of which skill(s) were expected. "bundle"
         # is None if the authoring-time stage never ran (needs real
@@ -159,7 +159,7 @@ def analyze_artifacts(
         "warnings": warnings,
         "score": asdict(score),
         "static_checks": static_rows,
-        "tier_breakdown": tier_breakdown,
+        "check_category_breakdown": check_category_breakdown,
         "build_health": build_health,
         "runs": [run],
         "skills": aggregate_skill_results([run]),

@@ -5,7 +5,7 @@ catches broken code before spending anything on a real bundle/build.
 Deliberately NOT a per-skill check (no skill_map.json entry, doesn't go
 through the uptake_checks registry) -- this is app-wide, independent of
 which skill(s) were expected, so it surfaces as its own top-level
-"build_health" key in metrics.json rather than a tier under some skill.
+"build_health" key in metrics.json rather than a category under some skill.
 
 Reuses uptake_checks.registry's source-file scanning (AppTree, same
 node_modules/scripts/lockfile exclusions as the lexical checks) rather than

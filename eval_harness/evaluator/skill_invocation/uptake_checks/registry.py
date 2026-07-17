@@ -1,21 +1,24 @@
-"""Atomic uptake-check registry (tiers 1+).
+"""Atomic uptake-check registry.
 
 Design: checks are deliberately NOT owned by a skill. Each check verifies one
-durable, skill-agnostic fact about the authored source (or, for T3/T4, about
-running a real tool against it). `skill_map.json` is the only place that says
-"skill X currently cares about checks [A, B, C]" -- when skills get renamed,
-merged, or split later, only that mapping needs to change; the checks
-themselves don't move. See dataset/prd_skills.json for the separate,
-PRD-level question of which skills an app should trigger at all.
+durable, skill-agnostic fact about the authored source (or, for a future
+code-driven category, about running a real tool against it). `skill_map.json`
+is the only place that says "skill X currently cares about checks [A, B, C]"
+-- when skills get renamed, merged, or split later, only that mapping needs
+to change; the checks themselves don't move. See dataset/prd_skills.json for
+the separate, PRD-level question of which skills an app should trigger at
+all.
 
 Two kinds of checks share one `Check` shape so `skill_map.json` never needs to
 know which backs a given id:
-  - data-driven (tiers 1-2): declared in checks_data.json, interpreted by the
-    generic `run_check` dispatch below (kinds: import, text, text_any,
-    text_absent, path_exists, path_absent, package_dependency).
-  - code-driven (tiers 3+): registered via the `@register` decorator with a
-    real `run(app_tree)` function -- not built yet (see checks_data.json's
-    header comment), but the dispatch already treats them identically.
+  - data-driven (category: lexical/structural): declared in checks_data.json,
+    interpreted by the generic `run_check` dispatch below (kinds: import,
+    text, text_any, text_absent, path_exists, path_absent,
+    package_dependency).
+  - code-driven (e.g. a future syntax-tree/route-graph category): registered
+    via the `@register` decorator with a real `run(app_tree)` function --
+    none currently exist (see checks_data.json's header comment), but the
+    dispatch already treats them identically.
 """
 
 from __future__ import annotations
@@ -62,7 +65,7 @@ def _strip_comments(text: str) -> str:
 @dataclass
 class CheckResult:
     id: str
-    tier: str
+    category: str
     kind: str
     target: Any
     passed: bool
@@ -72,11 +75,11 @@ class CheckResult:
 @dataclass
 class Check:
     id: str
-    tier: str
+    category: str
     kind: str
     target: Any = None
     description: str = ""
-    run: Callable[["AppTree"], CheckResult] | None = None  # set only for code-driven (T3+) checks
+    run: Callable[["AppTree"], CheckResult] | None = None  # set only for code-driven checks
 
 
 class AppTree:
@@ -136,26 +139,26 @@ class UptakeResults:
             return None
         return round(self.passed / self.total, 4)
 
-    def tier_breakdown(self) -> dict[str, dict[str, int]]:
+    def category_breakdown(self) -> dict[str, dict[str, int]]:
         out: dict[str, dict[str, int]] = {}
         for c in self.checks:
-            bucket = out.setdefault(c.tier, {"passed": 0, "total": 0})
+            bucket = out.setdefault(c.category, {"passed": 0, "total": 0})
             bucket["total"] += 1
             if c.passed:
                 bucket["passed"] += 1
         return out
 
 
-# --- code-driven (T3+) check registration -----------------------------------
+# --- code-driven check registration -----------------------------------
 
 _CODE_REGISTRY: dict[str, Check] = {}
 
 
-def register(check_id: str, tier: str, description: str = ""):
+def register(check_id: str, category: str, description: str = ""):
     """Decorator for code-driven checks: fn(app_tree: AppTree) -> CheckResult."""
 
     def decorator(fn: Callable[[AppTree], CheckResult]):
-        _CODE_REGISTRY[check_id] = Check(id=check_id, tier=tier, kind="code", description=description, run=fn)
+        _CODE_REGISTRY[check_id] = Check(id=check_id, category=category, kind="code", description=description, run=fn)
         return fn
 
     return decorator
@@ -164,7 +167,8 @@ def register(check_id: str, tier: str, description: str = ""):
 # --- loading ------------------------------------------------------------
 
 def load_checks_data(checks_dir: Path | str) -> dict[str, Check]:
-    """Load tier 1-2 declarative checks from checks_data.json, indexed by id."""
+    """Load the declarative (lexical/structural) checks from checks_data.json,
+    indexed by id."""
     path = Path(checks_dir) / "checks_data.json"
     if not path.exists():
         return {}
@@ -173,7 +177,7 @@ def load_checks_data(checks_dir: Path | str) -> dict[str, Check]:
     for entry in data.get("checks", []):
         check = Check(
             id=str(entry["id"]),
-            tier=str(entry["tier"]),
+            category=str(entry["category"]),
             kind=str(entry["kind"]),
             target=entry["target"],
             description=str(entry.get("description", "")),
@@ -256,7 +260,7 @@ def run_check(check: Check, app_tree: AppTree) -> CheckResult:
 
 
 def _result(check: Check, passed: bool, evidence: str) -> CheckResult:
-    return CheckResult(check.id, check.tier, check.kind, check.target, passed, evidence)
+    return CheckResult(check.id, check.category, check.kind, check.target, passed, evidence)
 
 
 def _check_import(check: Check, app_tree: AppTree) -> CheckResult:
