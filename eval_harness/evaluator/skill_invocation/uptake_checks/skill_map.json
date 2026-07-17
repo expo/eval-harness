@@ -8,7 +8,8 @@
     "router_app_dir_exists",
     "router_has_index_route",
     "router_has_layout_file",
-    "router_no_colocated_non_route_files_in_app_dir"
+    "router_no_colocated_non_route_files_in_app_dir",
+    "router_layout_defines_navigator"
   ],
   "expo-project-structure": [
     "router_app_dir_exists",

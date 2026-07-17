@@ -11,10 +11,19 @@ cascade of increasingly strong (and increasingly expensive) signals:
   `text_any`, `text_absent`, `import`).
 - **Tier 2 (structural)**: filesystem shape (`path_exists`, `path_absent`,
   `package_dependency`).
-- **Tier 3 (AST)** and **tier 4 (typegen/routegraph)**: code-driven, not
-  built yet. Will be registered via `registry.register(...)` in
-  `checks_ast.py` / `checks_routegraph.py` rather than declared in JSON,
-  since they need real parsing/tooling, not a pattern match.
+- **Tier 3 (AST)**: code-driven (`checks_ast.py`), registered via
+  `registry.register(...)` rather than declared in JSON, since it needs real
+  JS/JSX parsing. Shells out to a standalone Node/Babel script
+  (`scripts/parse-file-facts.js`, its own `package.json`, `npm install`-ed
+  lazily on first use -- not part of any authored app's own dependencies).
+  Stronger than tier 1's text match on the same tags: it parses the actual
+  JSX tree, so an unused import or a broken file can't accidentally satisfy
+  it. Currently one check: `router_layout_defines_navigator`.
+- **Tier 4 (typegen/routegraph)**: not built yet. Needs the authored app's
+  real `node_modules` (Expo's typed-routes generator), so unlike tier 3 it
+  can't run at analysis time -- it has to run at authoring time (a new
+  `author-app.sh` stage, right after `npm install`), with the result
+  persisted into the artifact for analysis to read later.
 
 Deliberately does not attempt the final tier (native build + simulator +
 test-plan e2e) -- that's the existing `eval_ios` pipeline, not duplicated
@@ -41,8 +50,10 @@ expected."
 
 - `checks_data.json`: tier 1-2 checks (declarative).
 - `skill_map.json`: skill id -> [check id, ...].
-- `registry.py`: loads both, runs checks, and is where tier 3-4 code-driven
+- `registry.py`: loads both, runs checks, and is where tier 3+ code-driven
   checks register via `@register(...)`.
+- `checks_ast.py`: tier 3 checks + the Node/Babel subprocess helpers.
+- `scripts/`: the standalone Node/Babel parser tier 3 shells out to.
 - `trigger.py`: tier 0, trace-based trigger detection + recall/precision
   scoring against `dataset/prd_skills.json`.
 

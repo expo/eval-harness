@@ -1,5 +1,5 @@
 {
-  "_comment": "Tier 1 (lexical, regex, comment-stripped) and tier 2 (structural/path) checks only. Tier 3 (AST) and tier 4 (typegen) are code-driven and registered separately via @register -- not built yet. Every check here is skill-agnostic; dataset/skill_invocation/uptake_checks/skill_map.json is the only file that says which skill(s) currently claim a given check.",
+  "_comment": "Tier 1 (lexical, regex, comment-stripped) and tier 2 (structural/path) checks only. Tier 3 (AST, see checks_ast.py) and tier 4 (typegen, not yet built) are code-driven and registered separately via @register, not declared here. Every check here is skill-agnostic; dataset/skill_invocation/uptake_checks/skill_map.json is the only file that says which skill(s) currently claim a given check.",
   "checks": [
     {
       "id": "router_import",
