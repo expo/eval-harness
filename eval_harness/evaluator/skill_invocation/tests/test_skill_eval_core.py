@@ -1148,21 +1148,30 @@ class SkillEvalCoreTests(unittest.TestCase):
 
         self.assertTrue(results["native_ui_no_safe_area_view_from_react_native"].passed)
 
-    def test_real_native_ui_shares_router_react_navigation_check(self):
-        # Execution dedup: expo-native-ui claims the same
-        # router_no_direct_react_navigation_import check as expo-router
-        # rather than duplicating it under a new id.
+    def test_real_native_ui_no_longer_shares_router_react_navigation_check(self):
+        # Fourth review round: router_no_direct_react_navigation_import was
+        # dropped from expo-native-ui's mapping. As a shared check with its
+        # own engagement precondition gated on an expo-router import (not a
+        # native-ui-specific signal), it was the last source of a vacuous
+        # pass for a native-ui app with none of the skill's three checkable
+        # features -- e.g. a bare expo-router app with no media/dimensions/
+        # safe-area usage would otherwise read 1/1 (100%) from this one
+        # shared check alone. It still applies to expo-router, where it
+        # belongs (see test_real_router_no_direct_react_navigation_import_gating).
         skill_map = load_skill_map(REAL_CHECKS_DIR)
 
-        self.assertIn("router_no_direct_react_navigation_import", skill_map["expo-native-ui"])
+        self.assertNotIn("router_no_direct_react_navigation_import", skill_map["expo-native-ui"])
+        self.assertIn("router_no_direct_react_navigation_import", skill_map["expo-router"])
 
     def test_real_native_ui_checks_not_applicable_without_engagement(self):
-        # Third review round (P1): expo-native-ui had no positive check at
-        # all, so an app that never touches audio/video, window sizing, or
-        # safe-area layout vacuously passed all 3 of its anti-pattern checks
-        # -- 100% uptake for a skill the app never engaged with. A new
-        # positive check (native_ui_uses_recommended_apis) now gates them:
-        # unengaged, only that one check (failed) scores.
+        # Third review round (P1) established engagement gating; fourth
+        # review round removed the shared router check and the shared
+        # skill-wide positive check from expo-native-ui's mapping (see
+        # test_real_native_ui_no_longer_shares_router_react_navigation_check
+        # and test_real_native_ui_checks_are_feature_specific below). An app
+        # that touches none of the skill's three checkable features now
+        # reads not_applicable across the board -- nothing scores, so
+        # uptake_rate is None rather than a vacuous 100%.
         with tempfile.TemporaryDirectory() as td:
             app = Path(td)
             (app / "app").mkdir()
@@ -1172,7 +1181,6 @@ class SkillEvalCoreTests(unittest.TestCase):
             checks, _ = resolve_checks_for_skills(["expo-native-ui"], REAL_CHECKS_DIR)
             results_by_id = {r.id: r for r in run_checks(checks, app)}
 
-        self.assertEqual(results_by_id["native_ui_uses_recommended_apis"].status, "failed")
         self.assertEqual(results_by_id["native_ui_no_expo_av"].status, "not_applicable")
         self.assertEqual(results_by_id["native_ui_no_dimensions_get"].status, "not_applicable")
         self.assertEqual(results_by_id["native_ui_no_safe_area_view_from_react_native"].status, "not_applicable")
@@ -1184,39 +1192,91 @@ class SkillEvalCoreTests(unittest.TestCase):
             results_by_id=results_by_id,
             app_dir_missing=False,
         )
-        # router_no_direct_react_navigation_import is also not_applicable
-        # here (no expo-router import either), so only the positive check
-        # scores, and it's a failure.
-        self.assertEqual(skills["expo-native-ui"]["total"], 1)
-        self.assertEqual(skills["expo-native-ui"]["passed"], 0)
+        self.assertEqual(skills["expo-native-ui"]["uptake_status"], "not_applicable")
+        self.assertEqual(skills["expo-native-ui"]["total"], 0)
+        self.assertIsNone(skills["expo-native-ui"]["uptake_rate"])
 
-    def test_real_native_ui_checks_score_when_genuinely_engaged(self):
-        # Required regression: a genuinely engaged implementation that
-        # correctly avoids every anti-pattern must still get full credit,
-        # not just get gated to not_applicable.
-        with tempfile.TemporaryDirectory() as td:
-            app = Path(td)
-            (app / "app").mkdir()
-            (app / "app" / "index.tsx").write_text(
-                "import { useWindowDimensions } from 'react-native';\n"
-                "export default function App(){ const { width } = useWindowDimensions(); return null; }\n"
-            )
+    def test_real_native_ui_checks_are_feature_specific(self):
+        # Fourth review round (P1): an earlier version gated all three
+        # anti-pattern checks on ANY of the four modern-API signals appearing
+        # anywhere -- so a safe-area import alone activated the media and
+        # dimensions checks too, even though it's not evidence the app made
+        # a correct media or dimensions choice. Each check must now gate
+        # only on its own feature's replacement.
+        def run(index_body):
+            with tempfile.TemporaryDirectory() as td:
+                app = Path(td)
+                (app / "app").mkdir()
+                (app / "app" / "index.tsx").write_text(index_body)
+                checks, _ = resolve_checks_for_skills(["expo-native-ui"], REAL_CHECKS_DIR)
+                return {r.id: r for r in run_checks(checks, app)}
 
-            checks, _ = resolve_checks_for_skills(["expo-native-ui"], REAL_CHECKS_DIR)
-            results = {r.id: r for r in run_checks(checks, app)}
-
-        self.assertEqual(results["native_ui_uses_recommended_apis"].status, "passed")
-        self.assertEqual(results["native_ui_no_expo_av"].status, "passed")
-        self.assertEqual(results["native_ui_no_dimensions_get"].status, "passed")
+        # Only react-native-safe-area-context: safe-area passes, the other
+        # two are not_applicable.
+        results = run(
+            "import { SafeAreaView } from 'react-native-safe-area-context';\n"
+            "export default function App(){ return <SafeAreaView />; }\n"
+        )
         self.assertEqual(results["native_ui_no_safe_area_view_from_react_native"].status, "passed")
+        self.assertEqual(results["native_ui_no_expo_av"].status, "not_applicable")
+        self.assertEqual(results["native_ui_no_dimensions_get"].status, "not_applicable")
+
+        # Only useWindowDimensions(): dimensions passes, the other two are
+        # not_applicable.
+        results = run(
+            "import { useWindowDimensions } from 'react-native';\n"
+            "export default function App(){ const { width } = useWindowDimensions(); return null; }\n"
+        )
+        self.assertEqual(results["native_ui_no_dimensions_get"].status, "passed")
+        self.assertEqual(results["native_ui_no_expo_av"].status, "not_applicable")
+        self.assertEqual(results["native_ui_no_safe_area_view_from_react_native"].status, "not_applicable")
+
+        # Only expo-video: media passes, the other two are not_applicable.
+        results = run(
+            "import { VideoView } from 'expo-video';\n"
+            "export default function App(){ return <VideoView />; }\n"
+        )
+        self.assertEqual(results["native_ui_no_expo_av"].status, "passed")
+        self.assertEqual(results["native_ui_no_dimensions_get"].status, "not_applicable")
+        self.assertEqual(results["native_ui_no_safe_area_view_from_react_native"].status, "not_applicable")
+
+    def test_real_native_ui_anti_patterns_fail_without_needing_another_signal(self):
+        # Required regression: a failing anti-pattern check never needs a
+        # positive precondition -- finding the prohibited API is itself
+        # evidence that feature area was engaged. Each is tested alone (no
+        # other native-ui signal present).
+        def run(index_body):
+            with tempfile.TemporaryDirectory() as td:
+                app = Path(td)
+                (app / "app").mkdir()
+                (app / "app" / "index.tsx").write_text(index_body)
+                checks, _ = resolve_checks_for_skills(["expo-native-ui"], REAL_CHECKS_DIR)
+                return {r.id: r for r in run_checks(checks, app)}
+
+        results = run("import { Video } from 'expo-av';\nexport default function App(){ return null; }\n")
+        self.assertEqual(results["native_ui_no_expo_av"].status, "failed")
+
+        results = run(
+            "import { Dimensions } from 'react-native';\n"
+            "const { width } = Dimensions.get('window');\n"
+            "export default function App(){ return null; }\n"
+        )
+        self.assertEqual(results["native_ui_no_dimensions_get"].status, "failed")
+
+        results = run(
+            "import { SafeAreaView } from 'react-native';\n"
+            "export default function App(){ return <SafeAreaView />; }\n"
+        )
+        self.assertEqual(results["native_ui_no_safe_area_view_from_react_native"].status, "failed")
 
     def test_real_router_no_direct_react_navigation_import_gating(self):
-        # router_no_direct_react_navigation_import is shared by expo-router
-        # and expo-native-ui; a real @react-navigation import is always
-        # scored (finding it is itself proof of engagement), a clean
-        # expo-router app gets credit for avoiding it, and an app with no
-        # routing engagement at all reads not_applicable rather than a
-        # vacuous pass.
+        # router_no_direct_react_navigation_import belongs only to
+        # expo-router now (see
+        # test_real_native_ui_no_longer_shares_router_react_navigation_check).
+        # A real @react-navigation import is always scored (finding it is
+        # itself proof of engagement), a clean expo-router app gets credit
+        # for avoiding it, and an app with no routing engagement at all reads
+        # not_applicable rather than a vacuous pass.
         with tempfile.TemporaryDirectory() as td:
             app = Path(td)
             (app / "app").mkdir()
@@ -1242,7 +1302,7 @@ class SkillEvalCoreTests(unittest.TestCase):
             app = Path(td)
             (app / "app").mkdir()
             (app / "app" / "index.tsx").write_text("export default function App(){ return null; }\n")
-            checks, _ = resolve_checks_for_skills(["expo-native-ui"], REAL_CHECKS_DIR)
+            checks, _ = resolve_checks_for_skills(["expo-router"], REAL_CHECKS_DIR)
             results = {r.id: r for r in run_checks(checks, app)}
         self.assertEqual(results["router_no_direct_react_navigation_import"].status, "not_applicable")
 

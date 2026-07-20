@@ -124,23 +124,24 @@ _FETCH_OR_QUERY_LIB_RES = [
 ]
 _AXIOS_IMPORT_RE = re.compile(r"""from\s*['"]axios['"]""")
 
-# expo-native-ui's own recommended replacements for the three legacy APIs its
-# anti-pattern checks ban -- also the skill's only positive engagement signal
-# (see native_ui_uses_recommended_apis below).
-_NATIVE_UI_MODERN_API_RES = [
-    re.compile(r"useWindowDimensions\("),
+# expo-native-ui's three anti-pattern checks each cover an independent
+# feature area (media, window measurement, safe-area layout) -- fourth
+# review round: a single shared "any of these four APIs" engagement signal
+# let one unrelated signal (e.g. a safe-area import) activate the other two
+# checks' applicability, even though using a safe-area library says nothing
+# about whether the app made a correct audio/video or dimensions choice.
+# Each check below now gates on only its own feature's positive replacement.
+_EXPO_AV_IMPORT_RE = re.compile(r"""from\s*['"]expo-av['"]""")
+_EXPO_AUDIO_OR_VIDEO_IMPORT_RES = [
     re.compile(r"""from\s*['"]expo-audio['"]"""),
     re.compile(r"""from\s*['"]expo-video['"]"""),
-    re.compile(r"""from\s*['"]react-native-safe-area-context['"]"""),
 ]
-
-
-def _native_ui_engaged(app_tree: AppTree) -> bool:
-    return any(
-        pattern.search(strip_comments(text))
-        for text in app_tree.files.values()
-        for pattern in _NATIVE_UI_MODERN_API_RES
-    )
+_DIMENSIONS_GET_RE = re.compile(r"Dimensions\.get\(")
+_USE_WINDOW_DIMENSIONS_RE = re.compile(r"useWindowDimensions\(")
+_SAFE_AREA_VIEW_FROM_REACT_NATIVE_RE = re.compile(
+    r"""import\s*\{[^}]*\bSafeAreaView\b[^}]*\}\s*from\s*['"]react-native['"]"""
+)
+_SAFE_AREA_CONTEXT_IMPORT_RE = re.compile(r"""from\s*['"]react-native-safe-area-context['"]""")
 
 
 _EXPO_ROUTER_IMPORT_RE = re.compile(r"""from\s*['"]expo-router['"]|require\(['"]expo-router['"]\)""")
@@ -488,97 +489,82 @@ def _data_fetching_no_axios(app_tree: AppTree) -> CheckResult:
 
 
 @register(
-    "native_ui_uses_recommended_apis",
-    category="lexical",
-    description="expo-native-ui's only positive engagement signal (third review round): the skill's "
-    "three anti-pattern checks below (no_expo_av, no_dimensions_get, no_safe_area_view_from_"
-    "react_native) were all absence-only, so a fully-conformant-but-unengaged app -- one that "
-    "never touches audio/video, window sizing, or safe-area layout at all -- vacuously passed "
-    "every one of them. This check looks for the skill's own recommended modern replacements "
-    "(useWindowDimensions, expo-audio/expo-video, react-native-safe-area-context) and also gates "
-    "the three anti-pattern checks below: their passes only count once this establishes real "
-    "engagement.",
-)
-def _native_ui_uses_recommended_apis(app_tree: AppTree) -> CheckResult:
-    for path, text in app_tree.files.items():
-        for pattern in _NATIVE_UI_MODERN_API_RES:
-            if pattern.search(strip_comments(text)):
-                return _passed(
-                    "native_ui_uses_recommended_apis", "lexical",
-                    f"{path}: matches {pattern.pattern!r}",
-                )
-    return _failed(
-        "native_ui_uses_recommended_apis", "lexical",
-        "no file uses useWindowDimensions, expo-audio/expo-video, or react-native-safe-area-context",
-    )
-
-
-@register(
     "native_ui_no_expo_av",
     category="lexical",
     description="expo-native-ui rule: expo-av is removed -- use expo-audio/expo-video instead. "
-    "Converted from a declarative text_absent check (third review round): gated on "
-    "native_ui_uses_recommended_apis' own engagement signal, since this skill has no other "
-    "positive check to fall back on.",
+    "Fourth review round: gated on this feature's OWN positive replacement (expo-audio/expo-video "
+    "usage), not a shared skill-wide signal -- using react-native-safe-area-context or "
+    "useWindowDimensions says nothing about whether the app made a correct media choice. Finding "
+    "expo-av itself is always scored regardless of gating, since importing it is proof this "
+    "feature area was engaged.",
 )
 def _native_ui_no_expo_av(app_tree: AppTree) -> CheckResult:
     for path, text in app_tree.files.items():
-        if re.search(r"""from\s*['"]expo-av['"]""", strip_comments(text)):
+        if _EXPO_AV_IMPORT_RE.search(strip_comments(text)):
             return _failed("native_ui_no_expo_av", "lexical", f"{path}: imports expo-av")
-    if not _native_ui_engaged(app_tree):
+    engaged = any(
+        pattern.search(strip_comments(text))
+        for text in app_tree.files.values()
+        for pattern in _EXPO_AUDIO_OR_VIDEO_IMPORT_RES
+    )
+    if not engaged:
         return _not_applicable(
             "native_ui_no_expo_av", "lexical",
-            "no observable native-ui engagement (no useWindowDimensions/expo-audio/expo-video/"
-            "react-native-safe-area-context usage)",
+            "no observable audio/video implementation (no expo-audio/expo-video usage)",
         )
-    return _passed("native_ui_no_expo_av", "lexical", "no file imports expo-av")
+    return _passed("native_ui_no_expo_av", "lexical", "uses expo-audio/expo-video and does not import expo-av")
 
 
 @register(
     "native_ui_no_dimensions_get",
     category="lexical",
-    description="expo-native-ui rule: use useWindowDimensions, not Dimensions.get(). Converted "
-    "from a declarative text_absent check (third review round): same engagement gating as "
-    "native_ui_no_expo_av above.",
+    description="expo-native-ui rule: use useWindowDimensions, not Dimensions.get(). Fourth review "
+    "round: gated on this feature's OWN positive replacement (useWindowDimensions usage), not a "
+    "shared skill-wide signal -- see native_ui_no_expo_av above for why. Finding Dimensions.get() "
+    "itself is always scored regardless of gating.",
 )
 def _native_ui_no_dimensions_get(app_tree: AppTree) -> CheckResult:
     for path, text in app_tree.files.items():
-        if re.search(r"Dimensions\.get\(", strip_comments(text)):
+        if _DIMENSIONS_GET_RE.search(strip_comments(text)):
             return _failed("native_ui_no_dimensions_get", "lexical", f"{path}: calls Dimensions.get()")
-    if not _native_ui_engaged(app_tree):
+    engaged = any(_USE_WINDOW_DIMENSIONS_RE.search(strip_comments(text)) for text in app_tree.files.values())
+    if not engaged:
         return _not_applicable(
             "native_ui_no_dimensions_get", "lexical",
-            "no observable native-ui engagement (no useWindowDimensions/expo-audio/expo-video/"
-            "react-native-safe-area-context usage)",
+            "no observable window measurement (no useWindowDimensions() usage)",
         )
-    return _passed("native_ui_no_dimensions_get", "lexical", "no file calls Dimensions.get()")
+    return _passed(
+        "native_ui_no_dimensions_get", "lexical",
+        "uses useWindowDimensions() and does not call Dimensions.get()",
+    )
 
 
 @register(
     "native_ui_no_safe_area_view_from_react_native",
     category="lexical",
     description="expo-native-ui rule: use react-native-safe-area-context, not react-native's own "
-    "SafeAreaView. Converted from a declarative text_absent check (third review round): same "
-    "engagement gating as native_ui_no_expo_av above. Anchored to the import statement (not a "
-    "bare word match) to avoid flagging the correct import from react-native-safe-area-context.",
+    "SafeAreaView. Fourth review round: gated on this feature's OWN positive replacement "
+    "(react-native-safe-area-context usage), not a shared skill-wide signal -- see "
+    "native_ui_no_expo_av above for why. Anchored to the import statement (not a bare word match) "
+    "to avoid flagging the correct import from react-native-safe-area-context. Finding SafeAreaView "
+    "imported from react-native itself is always scored regardless of gating.",
 )
 def _native_ui_no_safe_area_view_from_react_native(app_tree: AppTree) -> CheckResult:
-    pattern = re.compile(r"""import\s*\{[^}]*\bSafeAreaView\b[^}]*\}\s*from\s*['"]react-native['"]""")
     for path, text in app_tree.files.items():
-        if pattern.search(strip_comments(text)):
+        if _SAFE_AREA_VIEW_FROM_REACT_NATIVE_RE.search(strip_comments(text)):
             return _failed(
                 "native_ui_no_safe_area_view_from_react_native", "lexical",
                 f"{path}: imports SafeAreaView from react-native",
             )
-    if not _native_ui_engaged(app_tree):
+    engaged = any(_SAFE_AREA_CONTEXT_IMPORT_RE.search(strip_comments(text)) for text in app_tree.files.values())
+    if not engaged:
         return _not_applicable(
             "native_ui_no_safe_area_view_from_react_native", "lexical",
-            "no observable native-ui engagement (no useWindowDimensions/expo-audio/expo-video/"
-            "react-native-safe-area-context usage)",
+            "no observable safe-area handling (no react-native-safe-area-context usage)",
         )
     return _passed(
         "native_ui_no_safe_area_view_from_react_native", "lexical",
-        "no file imports SafeAreaView from react-native",
+        "uses react-native-safe-area-context and does not import SafeAreaView from react-native",
     )
 
 

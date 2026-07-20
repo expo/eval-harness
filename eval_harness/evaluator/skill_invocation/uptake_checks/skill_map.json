@@ -22,11 +22,9 @@
     "tsconfig_path_alias_configured"
   ],
   "expo-native-ui": [
-    "native_ui_uses_recommended_apis",
     "native_ui_no_expo_av",
     "native_ui_no_dimensions_get",
-    "native_ui_no_safe_area_view_from_react_native",
-    "router_no_direct_react_navigation_import"
+    "native_ui_no_safe_area_view_from_react_native"
   ],
   "expo-ui": [
     "expo_ui_import_used",

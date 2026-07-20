@@ -107,13 +107,25 @@ exists" (almost always true, so it was providing no gating at all). A
 *failing* negative check never needs gating: finding the forbidden pattern
 is itself proof the app touched that area.
 
-expo-native-ui had no positive check at all before this, so a fully
-conformant-but-unengaged app (one that never touches audio/video, window
-sizing, or safe-area layout) vacuously passed every one of its checks.
-`native_ui_uses_recommended_apis` is a new positive check -- looks for the
-skill's own recommended replacements (`useWindowDimensions`,
-expo-audio/expo-video, `react-native-safe-area-context`) -- and doubles as
-the engagement precondition for the other three.
+expo-native-ui's three anti-pattern checks (media, window measurement,
+safe-area layout) each gate on their OWN feature-specific replacement
+(expo-audio/expo-video, `useWindowDimensions`, `react-native-safe-area-context`
+respectively) rather than a single shared skill-wide signal (fourth review
+round). An earlier version gated all three on any one of those four APIs
+appearing anywhere -- but using a safe-area library is not evidence the app
+made a correct media or dimensions choice, so one unrelated signal was
+activating unrelated checks. expo-native-ui also has no single skill-wide
+positive check: the skill is far broader than these three anti-patterns
+(semantic colors, scroll-view insets, SF Symbols, haptics, animations, and
+more -- see `SKILL_UPTAKE_COVERAGE_ANALYSIS.md`), and an app can follow it well
+while never touching any of these three specific features, so there's no
+honest single "did this app use expo-native-ui" signal today -- only
+per-feature ones. `router_no_direct_react_navigation_import` was also
+dropped from expo-native-ui's mapping for the same reason: as a shared check
+that passes vacuously without its own engagement precondition, it was the
+last source of a vacuous pass for an app with zero native-ui-relevant
+content (it still applies to `expo-router`, gated on an expo-router import,
+where it belongs).
 
 ## Design: checks are not owned by skills
 
@@ -125,9 +137,13 @@ is the *only* file that says "skill X currently claims checks [A, B, C]."
 This means a skill can be renamed, merged, or split later by editing
 `skill_map.json` alone -- the checks themselves don't move, and a check can
 be shared across multiple skills (e.g. `router_app_dir_exists` is claimed by
-both `expo-router` and `expo-project-structure`, and
-`router_no_direct_react_navigation_import` by both `expo-router` and
-`expo-native-ui`, today).
+both `expo-router` and `expo-project-structure`, today). Sharing isn't
+automatic, though: `router_no_direct_react_navigation_import` used to also be
+claimed by `expo-native-ui`, but was dropped from that mapping (fourth review
+round, see the engagement-gating section above) once removing it became the
+only way to close expo-native-ui's last vacuous-pass source -- a shared check
+should only be claimed by a skill if it can't otherwise read as a false
+positive for that specific skill's engagement.
 
 ## Which skills have checks
 
