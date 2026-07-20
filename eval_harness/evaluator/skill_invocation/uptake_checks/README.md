@@ -41,6 +41,47 @@ here. The build-health cascade (syntax parse + bundle export, see
 above -- it answers "does the whole app work at all," not "did it follow
 this skill," so it isn't part of this per-skill list.
 
+## Check result status: passed / failed / not_applicable / unavailable
+
+A `CheckResult` carries a `status`, not just a `passed` boolean:
+
+- `passed` / `failed`: the check ran and has an opinion.
+- `not_applicable`: the check's precondition doesn't hold for this app (e.g.
+  a rule about API routes when the app has none at all, or a rule about
+  client env var naming when the app reads no env var at all) -- distinct
+  from a scored failure. `passed` is `None`.
+- `unavailable`: evidence genuinely couldn't be collected (e.g. the AST
+  parser couldn't run, or a candidate file failed to parse) -- a missing
+  tool is not evidence of a violation, so this must never read as a pass.
+  `passed` is also `None`.
+
+Only `passed`/`failed` count toward `passed`/`total`/`uptake_rate` and
+`category_breakdown()` (see `UptakeResults`, `analysis.compute_skill_results`)
+-- a `not_applicable` or `unavailable` result can't move a skill's uptake
+rate in either direction. Nothing is dropped, though: every result (all four
+statuses) stays in the per-skill `checks` list the HTML report reads, so a
+reader can still see e.g. "3 of 5 checks scored, 2 not_applicable" rather
+than the 2 silently vanishing.
+
+Only code-driven checks (`code_checks.py`) can return `not_applicable` or
+`unavailable` -- the generic declarative dispatch (`checks_data.json`'s
+`import`/`text`/`text_any`/`text_absent`/`path_exists`/`path_absent`/
+`package_dependency`/`tsconfig_path_alias` kinds) always answers a global
+"does any file match" question with no conditional precondition, so it only
+ever produces `passed`/`failed`. A rule that's genuinely conditional (only
+applies given some precondition detectable from the file tree) has to be
+code-driven for exactly this reason -- see `hosting_api_routes_use_typescript`
+and `data_fetching_expo_public_env_prefix` for two rules that moved from
+declarative to code-driven specifically to gain a `not_applicable` path.
+
+This status model exists because an earlier version of several checks
+either vacuously passed when their precondition didn't hold (inflating
+uptake for a rule the app never had reason to engage with) or, worse, a
+syntax-tree check silently reported "passed" when the Node/Babel parser
+couldn't run at all (an infra failure reading as compliance). Both were
+found in code review before merging -- see the checks' own descriptions and
+`code_checks.py`'s module docstring for the specific cases.
+
 ## Design: checks are not owned by skills
 
 Every check in `checks_data.json` verifies one durable, skill-agnostic fact
@@ -78,10 +119,14 @@ expected."
 ## Files
 
 - `checks_data.json`: lexical + structural checks (declarative), each
-  tagged with a `"category"` field.
+  tagged with a `"category"` field. Only ever produces `passed`/`failed` --
+  see the status-model section above for why.
 - `skill_map.json`: skill id -> [check id, ...].
-- `registry.py`: loads both, runs checks, and is where any future
-  code-driven check category would register via `@register(...)`.
+- `registry.py`: loads both, runs checks, defines `CheckResult`'s status
+  model, and is where a code-driven check registers via `@register(...)`.
+- `code_checks.py`: code-driven checks -- per-file-subset filtering, real
+  AST parsing, or conditional (`not_applicable`-capable) rules that the
+  generic declarative dispatch can't express.
 - `trigger.py`: trigger detection, trace-based + recall/precision scoring
   against `dataset/prd_skills.json`.
 

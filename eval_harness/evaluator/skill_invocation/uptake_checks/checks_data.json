@@ -128,13 +128,6 @@
       "description": "expo-native-ui rule: expo-av is removed -- use expo-audio/expo-video instead."
     },
     {
-      "id": "native_ui_no_platform_os",
-      "category": "lexical",
-      "kind": "text_absent",
-      "target": "Platform\\.OS",
-      "description": "expo-native-ui rule: use process.env.EXPO_OS, not Platform.OS."
-    },
-    {
       "id": "native_ui_no_dimensions_get",
       "category": "lexical",
       "kind": "text_absent",
@@ -150,10 +143,13 @@
     },
     {
       "id": "expo_ui_import_used",
-      "category": "structural",
-      "kind": "package_dependency",
-      "target": "@expo/ui",
-      "description": "@expo/ui is a declared dependency. Checked via package.json rather than an import-statement regex, since a correct app may import only from a subpackage (@expo/ui/swift-ui, @expo/ui/jetpack-compose) and never the bare '@expo/ui' root -- coupling this signal to a specific import path would wrongly fail that case."
+      "category": "lexical",
+      "kind": "text_any",
+      "target": [
+        "from ['\"]@expo/ui['\"]", "from ['\"]@expo/ui/swift-ui['\"]",
+        "from ['\"]@expo/ui/jetpack-compose['\"]", "from ['\"]@expo/ui/community/"
+      ],
+      "description": "Actually imports from @expo/ui (root, a platform-specific subpackage, or a community drop-in), not just declares it as a package.json dependency. A dependency-only check (an earlier version of this check) has a real loophole: an app can declare @expo/ui and never import or render anything from it, and still pass every expo-ui check, since the other two are absence checks -- confirmed live against both real hot_chocolate/wiki_reader apps, which declare the dependency but never import it anywhere in src/."
     },
     {
       "id": "expo_ui_no_host_from_subpackage",
@@ -184,18 +180,11 @@
       "description": "expo-data-fetching rule: real network requests use fetch directly, or a proper data-fetching library (React Query, SWR) for anything non-trivial."
     },
     {
-      "id": "data_fetching_expo_public_env_prefix",
-      "category": "lexical",
-      "kind": "text",
-      "target": "EXPO_PUBLIC_[A-Z0-9_]+",
-      "description": "expo-data-fetching rule: only EXPO_PUBLIC_-prefixed env vars are exposed client-side. A proxy signal that the app engaged with this naming convention at all, not a guarantee no secret was misnamed into one."
-    },
-    {
       "id": "dom_use_dom_directive_present",
       "category": "lexical",
       "kind": "text",
-      "target": "['\"]use dom['\"]",
-      "description": "expo-dom rule: a DOM component file must start with the 'use dom' directive."
+      "target": "(?m)^[ \\t]*['\"]use dom['\"];?[ \\t]*$",
+      "description": "expo-dom rule: a DOM component file must start with the 'use dom' directive. Anchored to its own line (not a bare substring match) so an unrelated string like `const label = \"use dom\"` isn't mistaken for the directive."
     },
     {
       "id": "tailwind_nativewind_package_dependency",
@@ -231,20 +220,6 @@
       "kind": "path_exists",
       "target": ["src/global.css", "global.css"],
       "description": "expo-tailwind-setup rule: a global.css importing the tailwind theme/preflight/utilities exists. Existence-only -- CSS file content isn't part of the source corpus any lexical check reads, so this can't confirm the actual @import lines."
-    },
-    {
-      "id": "hosting_api_route_exists",
-      "category": "structural",
-      "kind": "path_exists",
-      "target": ["app/**/*+api.ts", "app/**/*+api.js", "src/app/**/*+api.ts", "src/app/**/*+api.js"],
-      "description": "eas-hosting rule: server-only logic lives in +api.ts route files under app/."
-    },
-    {
-      "id": "hosting_api_routes_use_typescript",
-      "category": "structural",
-      "kind": "path_absent",
-      "target": ["app/**/*+api.js", "src/app/**/*+api.js"],
-      "description": "eas-hosting rule: use TypeScript for API routes -- a plain-JS +api.js file is the anti-pattern. Vacuously passes if the app has no API routes at all."
     },
     {
       "id": "app_clip_target_dir_exists",

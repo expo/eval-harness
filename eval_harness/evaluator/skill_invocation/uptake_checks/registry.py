@@ -65,14 +65,34 @@ def _strip_comments(text: str) -> str:
     return _LINE_COMMENT_RE.sub("", _BLOCK_COMMENT_RE.sub("", text))
 
 
+STATUS_PASSED = "passed"
+STATUS_FAILED = "failed"
+STATUS_NOT_APPLICABLE = "not_applicable"
+STATUS_UNAVAILABLE = "unavailable"
+SCORED_STATUSES = (STATUS_PASSED, STATUS_FAILED)
+
+
 @dataclass
 class CheckResult:
+    """`status` is `passed`/`failed` for an ordinary evaluated check.
+    `not_applicable` means this check's precondition doesn't hold for this
+    app (e.g. a rule about API routes when the app has none) -- distinct
+    from a scored failure, and excluded from the uptake denominator so an
+    irrelevant rule can't drag a skill's uptake rate down (or, formerly,
+    a vacuous pass could inflate it). `unavailable` means evidence
+    genuinely couldn't be collected (e.g. the AST parser couldn't run) --
+    also excluded from the denominator, since a missing tool is not
+    evidence of a violation. `passed` is `None` for both non-scored
+    statuses; callers must check `status`, not treat `passed=None` as
+    falsy/failing."""
+
     id: str
     category: str
     kind: str
     target: Any
-    passed: bool
+    passed: bool | None
     evidence: str
+    status: str
 
 
 @dataclass
@@ -126,25 +146,36 @@ class AppTree:
 
 @dataclass
 class UptakeResults:
+    """`checks` retains every result, including not_applicable/unavailable
+    ones -- nothing is silently dropped, so a report can still show them.
+    But passed/total/uptake_rate/category_breakdown only count `scored`
+    (passed or failed) results: a not_applicable or unavailable check has
+    no opinion on uptake and must not move the rate in either direction."""
+
     checks: list[CheckResult] = field(default_factory=list)
 
     @property
+    def scored(self) -> list[CheckResult]:
+        return [c for c in self.checks if c.status in SCORED_STATUSES]
+
+    @property
     def passed(self) -> int:
-        return sum(1 for c in self.checks if c.passed)
+        return sum(1 for c in self.scored if c.passed)
 
     @property
     def total(self) -> int:
-        return len(self.checks)
+        return len(self.scored)
 
     @property
     def uptake_rate(self) -> float | None:
-        if not self.checks:
+        scored = self.scored
+        if not scored:
             return None
-        return round(self.passed / self.total, 4)
+        return round(sum(1 for c in scored if c.passed) / len(scored), 4)
 
     def category_breakdown(self) -> dict[str, dict[str, int]]:
         out: dict[str, dict[str, int]] = {}
-        for c in self.checks:
+        for c in self.scored:
             bucket = out.setdefault(c.category, {"passed": 0, "total": 0})
             bucket["total"] += 1
             if c.passed:
@@ -298,7 +329,10 @@ def run_check(check: Check, app_tree: AppTree) -> CheckResult:
 
 
 def _result(check: Check, passed: bool, evidence: str) -> CheckResult:
-    return CheckResult(check.id, check.category, check.kind, check.target, passed, evidence)
+    return CheckResult(
+        check.id, check.category, check.kind, check.target, passed, evidence,
+        STATUS_PASSED if passed else STATUS_FAILED,
+    )
 
 
 def _check_import(check: Check, app_tree: AppTree) -> CheckResult:
