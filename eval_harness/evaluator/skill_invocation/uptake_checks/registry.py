@@ -14,11 +14,14 @@ know which backs a given id:
   - data-driven (category: lexical/structural): declared in checks_data.json,
     interpreted by the generic `run_check` dispatch below (kinds: import,
     text, text_any, text_absent, path_exists, path_absent,
-    package_dependency).
-  - code-driven (e.g. a future syntax-tree/route-graph category): registered
-    via the `@register` decorator with a real `run(app_tree)` function --
-    none currently exist (see checks_data.json's header comment), but the
-    dispatch already treats them identically.
+    package_dependency, tsconfig_path_alias).
+  - code-driven (category: lexical/structural/syntax-tree/route-graph, see
+    code_checks.py): registered via the `@register` decorator with a real
+    `run(app_tree)` function -- used when a check needs either per-file-subset
+    filtering (e.g. "no _layout file may have this directive", which isn't
+    expressible as the generic dispatch's "any file matches X") or real AST
+    parsing (e.g. counting default exports), not just a global text/path
+    pattern. The dispatch treats data- and code-driven checks identically.
 """
 
 from __future__ import annotations
@@ -54,22 +57,46 @@ _LINE_COMMENT_RE = re.compile(r"//.*")
 _BLOCK_COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
 
 
-def _strip_comments(text: str) -> str:
+def strip_comments(text: str) -> str:
     """Best-effort JS/TS comment stripping. Not a real parser (doesn't
     understand `//`/`/*` inside strings or template literals), but closes the
     common false-positive case: a stray `// TODO: add loading state` comment
-    with no real implementation satisfying a check."""
+    with no real implementation satisfying a check. Public (not `_`-prefixed)
+    because code_checks.py's code-driven checks need the same false-positive
+    protection as every declarative check below -- a regex scan over raw,
+    un-stripped text is the same class of bug regardless of which dispatch
+    path runs it."""
     return _LINE_COMMENT_RE.sub("", _BLOCK_COMMENT_RE.sub("", text))
+
+
+STATUS_PASSED = "passed"
+STATUS_FAILED = "failed"
+STATUS_NOT_APPLICABLE = "not_applicable"
+STATUS_UNAVAILABLE = "unavailable"
+SCORED_STATUSES = (STATUS_PASSED, STATUS_FAILED)
 
 
 @dataclass
 class CheckResult:
+    """`status` is `passed`/`failed` for an ordinary evaluated check.
+    `not_applicable` means this check's precondition doesn't hold for this
+    app (e.g. a rule about API routes when the app has none) -- distinct
+    from a scored failure, and excluded from the uptake denominator so an
+    irrelevant rule can't drag a skill's uptake rate down (or, formerly,
+    a vacuous pass could inflate it). `unavailable` means evidence
+    genuinely couldn't be collected (e.g. the AST parser couldn't run) --
+    also excluded from the denominator, since a missing tool is not
+    evidence of a violation. `passed` is `None` for both non-scored
+    statuses; callers must check `status`, not treat `passed=None` as
+    falsy/failing."""
+
     id: str
     category: str
     kind: str
     target: Any
-    passed: bool
+    passed: bool | None
     evidence: str
+    status: str
 
 
 @dataclass
@@ -123,25 +150,36 @@ class AppTree:
 
 @dataclass
 class UptakeResults:
+    """`checks` retains every result, including not_applicable/unavailable
+    ones -- nothing is silently dropped, so a report can still show them.
+    But passed/total/uptake_rate/category_breakdown only count `scored`
+    (passed or failed) results: a not_applicable or unavailable check has
+    no opinion on uptake and must not move the rate in either direction."""
+
     checks: list[CheckResult] = field(default_factory=list)
 
     @property
+    def scored(self) -> list[CheckResult]:
+        return [c for c in self.checks if c.status in SCORED_STATUSES]
+
+    @property
     def passed(self) -> int:
-        return sum(1 for c in self.checks if c.passed)
+        return sum(1 for c in self.scored if c.passed)
 
     @property
     def total(self) -> int:
-        return len(self.checks)
+        return len(self.scored)
 
     @property
     def uptake_rate(self) -> float | None:
-        if not self.checks:
+        scored = self.scored
+        if not scored:
             return None
-        return round(self.passed / self.total, 4)
+        return round(sum(1 for c in scored if c.passed) / len(scored), 4)
 
     def category_breakdown(self) -> dict[str, dict[str, int]]:
         out: dict[str, dict[str, int]] = {}
-        for c in self.checks:
+        for c in self.scored:
             bucket = out.setdefault(c.category, {"passed": 0, "total": 0})
             bucket["total"] += 1
             if c.passed:
@@ -289,18 +327,23 @@ def run_check(check: Check, app_tree: AppTree) -> CheckResult:
         return _check_path_absent(check, app_tree)
     if kind == "package_dependency":
         return _check_package_dependency(check, app_tree)
+    if kind == "tsconfig_path_alias":
+        return _check_tsconfig_path_alias(check, app_tree)
     raise ValueError(f"Unknown check kind {kind!r} for check {check.id!r}")
 
 
 def _result(check: Check, passed: bool, evidence: str) -> CheckResult:
-    return CheckResult(check.id, check.category, check.kind, check.target, passed, evidence)
+    return CheckResult(
+        check.id, check.category, check.kind, check.target, passed, evidence,
+        STATUS_PASSED if passed else STATUS_FAILED,
+    )
 
 
 def _check_import(check: Check, app_tree: AppTree) -> CheckResult:
     target = str(check.target)
     needles = [f"from '{target}'", f'from "{target}"', f"require('{target}')", f'require("{target}")']
     for path, text in app_tree.files.items():
-        if any(n in _strip_comments(text) for n in needles):
+        if any(n in strip_comments(text) for n in needles):
             return _result(check, True, f"{path}: imports {target}")
     return _result(check, False, f"No source file imports {target}")
 
@@ -308,7 +351,7 @@ def _check_import(check: Check, app_tree: AppTree) -> CheckResult:
 def _check_text(check: Check, app_tree: AppTree) -> CheckResult:
     pattern = re.compile(str(check.target))
     for path, text in app_tree.files.items():
-        if pattern.search(_strip_comments(text)):
+        if pattern.search(strip_comments(text)):
             return _result(check, True, f"{path}: matches {check.target!r}")
     return _result(check, False, f"No source file matches {check.target!r}")
 
@@ -318,7 +361,7 @@ def _check_text_any(check: Check, app_tree: AppTree) -> CheckResult:
     for option in options:
         pattern = re.compile(str(option))
         for path, text in app_tree.files.items():
-            if pattern.search(_strip_comments(text)):
+            if pattern.search(strip_comments(text)):
                 return _result(check, True, f"{path}: matches {option!r}")
     return _result(check, False, f"No source file matches any of {options!r}")
 
@@ -326,7 +369,7 @@ def _check_text_any(check: Check, app_tree: AppTree) -> CheckResult:
 def _check_text_absent(check: Check, app_tree: AppTree) -> CheckResult:
     pattern = re.compile(str(check.target))
     for path, text in app_tree.files.items():
-        if pattern.search(_strip_comments(text)):
+        if pattern.search(strip_comments(text)):
             return _result(check, False, f"{path}: contains forbidden {check.target!r}")
     return _result(check, True, f"No source file contains forbidden {check.target!r}")
 
@@ -358,3 +401,22 @@ def _check_package_dependency(check: Check, app_tree: AppTree) -> CheckResult:
     deps.update(data.get("devDependencies") or {})
     passed = target in deps
     return _result(check, passed, f"package.json {'contains' if passed else 'does not contain'} {target}")
+
+
+def _check_tsconfig_path_alias(check: Check, app_tree: AppTree) -> CheckResult:
+    """tsconfig.json/jsconfig.json aren't in SOURCE_SUFFIXES (not JS/TS source),
+    so this reads them directly, the same way _check_package_dependency reads
+    package.json rather than relying on the generic file corpus."""
+    target = str(check.target)
+    for name in ("tsconfig.json", "jsconfig.json"):
+        cfg = app_tree.root / name
+        if not cfg.exists():
+            continue
+        try:
+            data = json.loads(strip_comments(cfg.read_text(encoding="utf-8")))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        paths = ((data.get("compilerOptions") or {}).get("paths")) or {}
+        if target in paths:
+            return _result(check, True, f"{name}: compilerOptions.paths has {target!r}")
+    return _result(check, False, f"no tsconfig.json/jsconfig.json compilerOptions.paths entry for {target!r}")

@@ -406,6 +406,123 @@ class SkillEvalCoreTests(unittest.TestCase):
         self.assertIsNone(skills["expo-ui"]["uptake_rate"])
         self.assertEqual(skills["expo-ui"]["total"], 1)
 
+    def test_compute_skill_results_marks_not_applicable_when_every_check_is_not_applicable(self):
+        # Follow-up review regression guard: a skill whose every mapped
+        # check comes back not_applicable (its precondition never held for
+        # this app -- e.g. a static site with no API routes for eas-hosting)
+        # must not read "measured" with passed=0/total=0, which would
+        # contradict uptake_rate=None sitting right next to it.
+        from eval_harness.evaluator.skill_invocation.uptake_checks.registry import CheckResult
+
+        checks_by_skill = {"eas-hosting": [Check(id="c1", category="structural", kind="code", target=None)]}
+        results_by_id = {"c1": CheckResult("c1", "structural", "code", None, None, "no +api routes found", "not_applicable")}
+
+        skills = compute_skill_results(
+            expected_skills=["eas-hosting"],
+            triggered_skills=[],
+            checks_by_skill=checks_by_skill,
+            results_by_id=results_by_id,
+            app_dir_missing=False,
+        )
+
+        self.assertEqual(skills["eas-hosting"]["uptake_status"], "not_applicable")
+        self.assertIsNone(skills["eas-hosting"]["uptake_rate"])
+        self.assertEqual(skills["eas-hosting"]["total"], 0)
+
+    def test_compute_skill_results_marks_unavailable_when_nothing_scored_and_something_unavailable(self):
+        # Missing evidence outranks "doesn't apply": a mix of not_applicable
+        # and unavailable with nothing scored must read unavailable, not
+        # not_applicable -- at least one check couldn't even determine its
+        # own applicability.
+        from eval_harness.evaluator.skill_invocation.uptake_checks.registry import CheckResult
+
+        checks_by_skill = {
+            "expo-dom": [
+                Check(id="c1", category="syntax-tree", kind="code", target=None),
+                Check(id="c2", category="syntax-tree", kind="code", target=None),
+            ]
+        }
+        results_by_id = {
+            "c1": CheckResult("c1", "syntax-tree", "code", None, None, "no _layout files found", "not_applicable"),
+            "c2": CheckResult("c2", "syntax-tree", "code", None, None, "parser could not run", "unavailable"),
+        }
+
+        skills = compute_skill_results(
+            expected_skills=["expo-dom"],
+            triggered_skills=[],
+            checks_by_skill=checks_by_skill,
+            results_by_id=results_by_id,
+            app_dir_missing=False,
+        )
+
+        self.assertEqual(skills["expo-dom"]["uptake_status"], "unavailable")
+        self.assertIsNone(skills["expo-dom"]["uptake_rate"])
+
+    def test_compute_skill_results_still_measured_when_at_least_one_check_scored(self):
+        # Regression guard against over-correcting: a mix of a scored check
+        # and a not_applicable one must still read "measured", using only
+        # the scored one for passed/total.
+        from eval_harness.evaluator.skill_invocation.uptake_checks.registry import CheckResult
+
+        checks_by_skill = {
+            "expo-dom": [
+                Check(id="c1", category="syntax-tree", kind="code", target=None),
+                Check(id="c2", category="syntax-tree", kind="code", target=None),
+            ]
+        }
+        results_by_id = {
+            "c1": CheckResult("c1", "syntax-tree", "code", None, True, "has a directive", "passed"),
+            "c2": CheckResult("c2", "syntax-tree", "code", None, None, "no _layout files found", "not_applicable"),
+        }
+
+        skills = compute_skill_results(
+            expected_skills=["expo-dom"],
+            triggered_skills=[],
+            checks_by_skill=checks_by_skill,
+            results_by_id=results_by_id,
+            app_dir_missing=False,
+        )
+
+        self.assertEqual(skills["expo-dom"]["uptake_status"], "measured")
+        self.assertEqual(skills["expo-dom"]["total"], 1)
+        self.assertEqual(skills["expo-dom"]["uptake_rate"], 1.0)
+
+    def test_compute_skill_results_unavailable_outranks_measured_when_mixed_with_scored(self):
+        # Third review round (P2): a skill with one passing check and one
+        # unavailable check used to read "measured" with uptake_rate=1.0 --
+        # an unqualified 100% that overstates confidence when most of the
+        # skill's mapped checks couldn't even be evaluated. Missing evidence
+        # must outrank "measured" here, same as it already outranks
+        # "not_applicable" when nothing scored at all.
+        from eval_harness.evaluator.skill_invocation.uptake_checks.registry import CheckResult
+
+        checks_by_skill = {
+            "expo-dom": [
+                Check(id="c1", category="syntax-tree", kind="code", target=None),
+                Check(id="c2", category="syntax-tree", kind="code", target=None),
+                Check(id="c3", category="syntax-tree", kind="code", target=None),
+            ]
+        }
+        results_by_id = {
+            "c1": CheckResult("c1", "syntax-tree", "code", None, True, "has a directive", "passed"),
+            "c2": CheckResult("c2", "syntax-tree", "code", None, None, "parser could not run", "unavailable"),
+            "c3": CheckResult("c3", "syntax-tree", "code", None, None, "parser could not run", "unavailable"),
+        }
+
+        skills = compute_skill_results(
+            expected_skills=["expo-dom"],
+            triggered_skills=[],
+            checks_by_skill=checks_by_skill,
+            results_by_id=results_by_id,
+            app_dir_missing=False,
+        )
+
+        self.assertEqual(skills["expo-dom"]["uptake_status"], "unavailable")
+        # The partial numeric result is still preserved for anyone reading
+        # past the status label.
+        self.assertEqual(skills["expo-dom"]["total"], 1)
+        self.assertEqual(skills["expo-dom"]["uptake_rate"], 1.0)
+
     def test_path_exists_and_path_absent_checks(self):
         with tempfile.TemporaryDirectory() as td:
             app = Path(td)
@@ -545,15 +662,34 @@ class SkillEvalCoreTests(unittest.TestCase):
         from eval_harness.evaluator.skill_invocation.uptake_checks.registry import UptakeResults, CheckResult
 
         results = UptakeResults([
-            CheckResult("a", "lexical", "text", "x", True, ""),
-            CheckResult("b", "lexical", "text", "y", False, ""),
-            CheckResult("c", "structural", "path_exists", ["z"], True, ""),
+            CheckResult("a", "lexical", "text", "x", True, "", "passed"),
+            CheckResult("b", "lexical", "text", "y", False, "", "failed"),
+            CheckResult("c", "structural", "path_exists", ["z"], True, "", "passed"),
         ])
 
         breakdown = results.category_breakdown()
 
         self.assertEqual(breakdown["lexical"], {"passed": 1, "total": 2})
         self.assertEqual(breakdown["structural"], {"passed": 1, "total": 1})
+
+    def test_category_breakdown_excludes_not_applicable_and_unavailable(self):
+        # A not_applicable or unavailable check must not appear in the
+        # denominator at all -- neither as a pass nor a fail.
+        from eval_harness.evaluator.skill_invocation.uptake_checks.registry import UptakeResults, CheckResult
+
+        results = UptakeResults([
+            CheckResult("a", "lexical", "text", "x", True, "", "passed"),
+            CheckResult("b", "lexical", "code", None, None, "no precondition", "not_applicable"),
+            CheckResult("c", "syntax-tree", "code", None, None, "parser unavailable", "unavailable"),
+        ])
+
+        breakdown = results.category_breakdown()
+
+        self.assertEqual(breakdown["lexical"], {"passed": 1, "total": 1})
+        self.assertNotIn("syntax-tree", breakdown)
+        self.assertEqual(results.passed, 1)
+        self.assertEqual(results.total, 1)
+        self.assertEqual(results.uptake_rate, 1.0)
 
     def test_case_run_only_scores_uptake_when_relevant_skill_triggered(self):
         run = score_case_run(
@@ -825,6 +961,1061 @@ class SkillEvalCoreTests(unittest.TestCase):
 
         self.assertEqual(payload["expected_skills"], [])
         self.assertTrue(any("no ground-truth skill set" in w for w in payload["warnings"]))
+
+    def test_project_structure_no_longer_mandates_stylesheet_create(self):
+        # SKILL_UPTAKE_COVERAGE_ANALYSIS.md bug fix: expo-native-ui explicitly
+        # prefers inline styles ("Inline styles not StyleSheet.create unless
+        # reusing styles is faster"), so an affirmative "must use
+        # StyleSheet.create" check false-negatives an app that correctly
+        # followed expo-native-ui instead. The check (and its id) must be
+        # gone entirely -- the real, uncontested rule (don't split styles
+        # into a separate file) is still covered by
+        # project_structure_no_separate_styles_files.
+        checks = all_checks(REAL_CHECKS_DIR)
+        skill_map = load_skill_map(REAL_CHECKS_DIR)
+
+        self.assertNotIn("project_structure_uses_stylesheet_create", checks)
+        self.assertNotIn(
+            "project_structure_uses_stylesheet_create",
+            skill_map["expo-project-structure"],
+        )
+        self.assertIn(
+            "project_structure_no_separate_styles_files",
+            skill_map["expo-project-structure"],
+        )
+
+    def test_no_shipped_check_bans_an_api_another_simultaneously_expected_skill_endorses(self):
+        # Combined regression guard for both conflicts found this session:
+        # (1) project_structure_uses_stylesheet_create vs expo-native-ui's
+        # "inline styles... unless reusing styles is faster", and
+        # (2) native_ui_no_platform_os vs expo-project-structure's "use
+        # Platform.select/Platform.OS for small differences" and expo-ui's
+        # own Platform.OS-guard examples. Both pairs of skills are expected
+        # simultaneously for hot_chocolate/wiki_reader (dataset/prd_skills.json),
+        # so a check that bans one skill's endorsed API can false-negative an
+        # agent that correctly followed a *different* expected skill instead.
+        checks = all_checks(REAL_CHECKS_DIR)
+
+        self.assertNotIn("project_structure_uses_stylesheet_create", checks)
+        self.assertNotIn("native_ui_no_platform_os", checks)
+
+    def test_real_tsconfig_path_alias_check_shared_by_router_and_project_structure(self):
+        skill_map = load_skill_map(REAL_CHECKS_DIR)
+
+        self.assertIn("tsconfig_path_alias_configured", skill_map["expo-router"])
+        self.assertIn("tsconfig_path_alias_configured", skill_map["expo-project-structure"])
+
+    def test_tsconfig_path_alias_check_reads_compiler_options_paths(self):
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "tsconfig.json").write_text(
+                json.dumps({"compilerOptions": {"paths": {"@/*": ["./src/*"]}}})
+            )
+            checks_dir = _write_checks_dir(
+                Path(td) / "checks",
+                checks=[{"id": "alias", "category": "structural", "kind": "tsconfig_path_alias", "target": "@/*"}],
+                skill_map={"expo-router": ["alias"]},
+            )
+
+            checks, _ = resolve_checks_for_skills(["expo-router"], checks_dir)
+            result = run_checks(checks, app)[0]
+
+        self.assertTrue(result.passed)
+
+    def test_tsconfig_path_alias_check_fails_when_alias_absent(self):
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "tsconfig.json").write_text(json.dumps({"compilerOptions": {}}))
+            checks_dir = _write_checks_dir(
+                Path(td) / "checks",
+                checks=[{"id": "alias", "category": "structural", "kind": "tsconfig_path_alias", "target": "@/*"}],
+                skill_map={"expo-router": ["alias"]},
+            )
+
+            checks, _ = resolve_checks_for_skills(["expo-router"], checks_dir)
+            result = run_checks(checks, app)[0]
+
+        self.assertFalse(result.passed)
+
+    def test_real_router_not_found_route_check(self):
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "app").mkdir()
+            (app / "app" / "+not-found.tsx").write_text("export default function NotFound(){ return null; }\n")
+
+            checks, _ = resolve_checks_for_skills(["expo-router"], REAL_CHECKS_DIR)
+            results = {r.id: r for r in run_checks(checks, app)}
+
+        self.assertTrue(results["router_not_found_route_exists"].passed)
+
+    def test_real_router_kebab_case_check_flags_pascal_case_route_file(self):
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "app").mkdir()
+            (app / "app" / "SettingsScreen.tsx").write_text("export default function SettingsScreen(){ return null; }\n")
+
+            checks, _ = resolve_checks_for_skills(["expo-router"], REAL_CHECKS_DIR)
+            results = {r.id: r for r in run_checks(checks, app)}
+
+        self.assertFalse(results["router_kebab_case_filenames_in_app_dir"].passed)
+
+    def test_real_router_kebab_case_check_passes_for_dynamic_and_group_routes(self):
+        # Regression guard: dynamic segments ([id].tsx) and route groups
+        # ((tabs)/index.tsx) must not be mistaken for the PascalCase
+        # anti-pattern -- neither contains an uppercase letter.
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "app" / "(tabs)").mkdir(parents=True)
+            (app / "app" / "(tabs)" / "index.tsx").write_text("export default function Index(){ return null; }\n")
+            (app / "app" / "[id].tsx").write_text("export default function Detail(){ return null; }\n")
+            (app / "app" / "_layout.tsx").write_text("export default function Layout(){ return null; }\n")
+
+            checks, _ = resolve_checks_for_skills(["expo-router"], REAL_CHECKS_DIR)
+            results = {r.id: r for r in run_checks(checks, app)}
+
+        self.assertTrue(results["router_kebab_case_filenames_in_app_dir"].passed)
+
+    def test_real_router_illegal_group_only_file_check(self):
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "app").mkdir()
+            (app / "app" / "(tabs).tsx").write_text("export default function Tabs(){ return null; }\n")
+
+            checks, _ = resolve_checks_for_skills(["expo-router"], REAL_CHECKS_DIR)
+            results = {r.id: r for r in run_checks(checks, app)}
+
+        self.assertFalse(results["router_no_illegal_group_only_file"].passed)
+
+    def test_real_router_illegal_group_only_file_check_allows_group_directory(self):
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "app" / "(tabs)").mkdir(parents=True)
+            (app / "app" / "(tabs)" / "index.tsx").write_text("export default function Index(){ return null; }\n")
+
+            checks, _ = resolve_checks_for_skills(["expo-router"], REAL_CHECKS_DIR)
+            results = {r.id: r for r in run_checks(checks, app)}
+
+        self.assertTrue(results["router_no_illegal_group_only_file"].passed)
+
+    def test_real_native_ui_checks_flag_banned_apis(self):
+        # Regression guard: an earlier draft also banned @expo/vector-icons
+        # outright, but the real skill only discourages it for SF-Symbol
+        # icon lookups specifically ("expo-image source='sf:name'... not
+        # @expo/vector-icons") -- it's a general-purpose cross-platform icon
+        # library otherwise (the only option on Android, where SF Symbols
+        # don't exist), and both real hot_chocolate/wiki_reader apps use it
+        # legitimately. That check was dropped rather than shipped imprecise.
+        # Also dropped: native_ui_no_platform_os -- expo-project-structure
+        # ("use Platform.select/Platform.OS for small differences") and
+        # expo-ui (its own reference docs demonstrate Platform.OS guards)
+        # both explicitly endorse Platform.OS, and both are expected
+        # alongside expo-native-ui for hot_chocolate/wiki_reader. Same shape
+        # as the StyleSheet conflict.
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "app").mkdir()
+            (app / "app" / "index.tsx").write_text(
+                "import { Video } from 'expo-av';\n"
+                "import { View, SafeAreaView, Dimensions } from 'react-native';\n"
+                "const { width } = Dimensions.get('window');\n"
+                "if (Platform.OS === 'ios') {}\n"
+                "export default function App(){ return <SafeAreaView />; }\n"
+            )
+
+            checks, _ = resolve_checks_for_skills(["expo-native-ui"], REAL_CHECKS_DIR)
+            results = {r.id: r for r in run_checks(checks, app)}
+
+        self.assertFalse(results["native_ui_no_expo_av"].passed)
+        self.assertFalse(results["native_ui_no_dimensions_get"].passed)
+        self.assertFalse(results["native_ui_no_safe_area_view_from_react_native"].passed)
+        self.assertNotIn("native_ui_no_legacy_vector_icons", results)
+        self.assertNotIn("native_ui_no_platform_os", results)
+
+    def test_real_native_ui_safe_area_view_check_ignores_correct_import(self):
+        # The check must be anchored to the import statement, not a bare
+        # word match -- importing SafeAreaView from the correct package must
+        # not be flagged.
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "app").mkdir()
+            (app / "app" / "index.tsx").write_text(
+                "import { SafeAreaView } from 'react-native-safe-area-context';\n"
+                "export default function App(){ return <SafeAreaView />; }\n"
+            )
+
+            checks, _ = resolve_checks_for_skills(["expo-native-ui"], REAL_CHECKS_DIR)
+            results = {r.id: r for r in run_checks(checks, app)}
+
+        self.assertTrue(results["native_ui_no_safe_area_view_from_react_native"].passed)
+
+    def test_real_native_ui_no_longer_shares_router_react_navigation_check(self):
+        # Fourth review round: router_no_direct_react_navigation_import was
+        # dropped from expo-native-ui's mapping. As a shared check with its
+        # own engagement precondition gated on an expo-router import (not a
+        # native-ui-specific signal), it was the last source of a vacuous
+        # pass for a native-ui app with none of the skill's three checkable
+        # features -- e.g. a bare expo-router app with no media/dimensions/
+        # safe-area usage would otherwise read 1/1 (100%) from this one
+        # shared check alone. It still applies to expo-router, where it
+        # belongs (see test_real_router_no_direct_react_navigation_import_gating).
+        skill_map = load_skill_map(REAL_CHECKS_DIR)
+
+        self.assertNotIn("router_no_direct_react_navigation_import", skill_map["expo-native-ui"])
+        self.assertIn("router_no_direct_react_navigation_import", skill_map["expo-router"])
+
+    def test_real_native_ui_checks_not_applicable_without_engagement(self):
+        # Third review round (P1) established engagement gating; fourth
+        # review round removed the shared router check and the shared
+        # skill-wide positive check from expo-native-ui's mapping (see
+        # test_real_native_ui_no_longer_shares_router_react_navigation_check
+        # and test_real_native_ui_checks_are_feature_specific below). An app
+        # that touches none of the skill's three checkable features now
+        # reads not_applicable across the board -- nothing scores, so
+        # uptake_rate is None rather than a vacuous 100%.
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "app").mkdir()
+            (app / "app" / "index.tsx").write_text("export default function App(){ return null; }\n")
+
+            checks_by_skill, _ = resolve_checks_by_skill(["expo-native-ui"], REAL_CHECKS_DIR)
+            checks, _ = resolve_checks_for_skills(["expo-native-ui"], REAL_CHECKS_DIR)
+            results_by_id = {r.id: r for r in run_checks(checks, app)}
+
+        self.assertEqual(results_by_id["native_ui_no_expo_av"].status, "not_applicable")
+        self.assertEqual(results_by_id["native_ui_no_dimensions_get"].status, "not_applicable")
+        self.assertEqual(results_by_id["native_ui_no_safe_area_view_from_react_native"].status, "not_applicable")
+
+        skills = compute_skill_results(
+            expected_skills=["expo-native-ui"],
+            triggered_skills=[],
+            checks_by_skill=checks_by_skill,
+            results_by_id=results_by_id,
+            app_dir_missing=False,
+        )
+        self.assertEqual(skills["expo-native-ui"]["uptake_status"], "not_applicable")
+        self.assertEqual(skills["expo-native-ui"]["total"], 0)
+        self.assertIsNone(skills["expo-native-ui"]["uptake_rate"])
+
+    def test_real_native_ui_checks_are_feature_specific(self):
+        # Fourth review round (P1): an earlier version gated all three
+        # anti-pattern checks on ANY of the four modern-API signals appearing
+        # anywhere -- so a safe-area import alone activated the media and
+        # dimensions checks too, even though it's not evidence the app made
+        # a correct media or dimensions choice. Each check must now gate
+        # only on its own feature's replacement.
+        def run(index_body):
+            with tempfile.TemporaryDirectory() as td:
+                app = Path(td)
+                (app / "app").mkdir()
+                (app / "app" / "index.tsx").write_text(index_body)
+                checks, _ = resolve_checks_for_skills(["expo-native-ui"], REAL_CHECKS_DIR)
+                return {r.id: r for r in run_checks(checks, app)}
+
+        # Only react-native-safe-area-context: safe-area passes, the other
+        # two are not_applicable.
+        results = run(
+            "import { SafeAreaView } from 'react-native-safe-area-context';\n"
+            "export default function App(){ return <SafeAreaView />; }\n"
+        )
+        self.assertEqual(results["native_ui_no_safe_area_view_from_react_native"].status, "passed")
+        self.assertEqual(results["native_ui_no_expo_av"].status, "not_applicable")
+        self.assertEqual(results["native_ui_no_dimensions_get"].status, "not_applicable")
+
+        # Only useWindowDimensions(): dimensions passes, the other two are
+        # not_applicable.
+        results = run(
+            "import { useWindowDimensions } from 'react-native';\n"
+            "export default function App(){ const { width } = useWindowDimensions(); return null; }\n"
+        )
+        self.assertEqual(results["native_ui_no_dimensions_get"].status, "passed")
+        self.assertEqual(results["native_ui_no_expo_av"].status, "not_applicable")
+        self.assertEqual(results["native_ui_no_safe_area_view_from_react_native"].status, "not_applicable")
+
+        # Only expo-video: media passes, the other two are not_applicable.
+        results = run(
+            "import { VideoView } from 'expo-video';\n"
+            "export default function App(){ return <VideoView />; }\n"
+        )
+        self.assertEqual(results["native_ui_no_expo_av"].status, "passed")
+        self.assertEqual(results["native_ui_no_dimensions_get"].status, "not_applicable")
+        self.assertEqual(results["native_ui_no_safe_area_view_from_react_native"].status, "not_applicable")
+
+    def test_real_native_ui_anti_patterns_fail_without_needing_another_signal(self):
+        # Required regression: a failing anti-pattern check never needs a
+        # positive precondition -- finding the prohibited API is itself
+        # evidence that feature area was engaged. Each is tested alone (no
+        # other native-ui signal present).
+        def run(index_body):
+            with tempfile.TemporaryDirectory() as td:
+                app = Path(td)
+                (app / "app").mkdir()
+                (app / "app" / "index.tsx").write_text(index_body)
+                checks, _ = resolve_checks_for_skills(["expo-native-ui"], REAL_CHECKS_DIR)
+                return {r.id: r for r in run_checks(checks, app)}
+
+        results = run("import { Video } from 'expo-av';\nexport default function App(){ return null; }\n")
+        self.assertEqual(results["native_ui_no_expo_av"].status, "failed")
+
+        results = run(
+            "import { Dimensions } from 'react-native';\n"
+            "const { width } = Dimensions.get('window');\n"
+            "export default function App(){ return null; }\n"
+        )
+        self.assertEqual(results["native_ui_no_dimensions_get"].status, "failed")
+
+        results = run(
+            "import { SafeAreaView } from 'react-native';\n"
+            "export default function App(){ return <SafeAreaView />; }\n"
+        )
+        self.assertEqual(results["native_ui_no_safe_area_view_from_react_native"].status, "failed")
+
+    def test_real_router_no_direct_react_navigation_import_gating(self):
+        # router_no_direct_react_navigation_import belongs only to
+        # expo-router now (see
+        # test_real_native_ui_no_longer_shares_router_react_navigation_check).
+        # A real @react-navigation import is always scored (finding it is
+        # itself proof of engagement), a clean expo-router app gets credit
+        # for avoiding it, and an app with no routing engagement at all reads
+        # not_applicable rather than a vacuous pass.
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "app").mkdir()
+            (app / "app" / "index.tsx").write_text(
+                "import { NavigationContainer } from '@react-navigation/native';\n"
+                "export default function App(){ return <NavigationContainer />; }\n"
+            )
+            checks, _ = resolve_checks_for_skills(["expo-router"], REAL_CHECKS_DIR)
+            results = {r.id: r for r in run_checks(checks, app)}
+        self.assertEqual(results["router_no_direct_react_navigation_import"].status, "failed")
+
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "app").mkdir()
+            (app / "app" / "index.tsx").write_text(
+                "import { Stack } from 'expo-router';\nexport default function Layout(){ return <Stack />; }\n"
+            )
+            checks, _ = resolve_checks_for_skills(["expo-router"], REAL_CHECKS_DIR)
+            results = {r.id: r for r in run_checks(checks, app)}
+        self.assertEqual(results["router_no_direct_react_navigation_import"].status, "passed")
+
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "app").mkdir()
+            (app / "app" / "index.tsx").write_text("export default function App(){ return null; }\n")
+            checks, _ = resolve_checks_for_skills(["expo-router"], REAL_CHECKS_DIR)
+            results = {r.id: r for r in run_checks(checks, app)}
+        self.assertEqual(results["router_no_direct_react_navigation_import"].status, "not_applicable")
+
+    def test_real_expo_ui_checks(self):
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "package.json").write_text(json.dumps({"dependencies": {"@expo/ui": "1.0.0"}}))
+            (app / "app").mkdir()
+            (app / "app" / "index.tsx").write_text(
+                "import { Host } from '@expo/ui/swift-ui';\n"
+                "export default function App(){ return <Host />; }\n"
+            )
+            (app / "components" / "widget.ios.tsx").parent.mkdir(parents=True)
+            (app / "components" / "widget.ios.tsx").write_text("export default function Widget(){ return null; }\n")
+
+            checks, _ = resolve_checks_for_skills(["expo-ui"], REAL_CHECKS_DIR)
+            results = {r.id: r for r in run_checks(checks, app)}
+
+        self.assertTrue(results["expo_ui_import_used"].passed)
+        self.assertFalse(results["expo_ui_no_host_from_subpackage"].passed)
+        self.assertTrue(results["expo_ui_platform_specific_trees_not_in_app_dir"].passed)
+
+    def test_real_expo_ui_import_used_fails_when_dependency_declared_but_unused(self):
+        # Code-review regression guard: an earlier version of this check
+        # only checked package.json, so declaring @expo/ui as a dependency
+        # and never importing it anywhere still passed all 3 expo-ui checks
+        # (the other two are absence checks, which pass vacuously with no
+        # usage at all). Confirmed live against both real hot_chocolate and
+        # wiki_reader apps, which declare the dependency but never import it.
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "package.json").write_text(json.dumps({"dependencies": {"@expo/ui": "1.0.0"}}))
+            (app / "app").mkdir()
+            (app / "app" / "index.tsx").write_text("export default function App(){ return null; }\n")
+
+            checks, _ = resolve_checks_for_skills(["expo-ui"], REAL_CHECKS_DIR)
+            results = {r.id: r for r in run_checks(checks, app)}
+
+        self.assertFalse(results["expo_ui_import_used"].passed)
+
+    def test_real_expo_ui_anti_pattern_checks_not_applicable_without_engagement(self):
+        # Third review round (P1): a declared-but-unused @expo/ui dependency
+        # used to make expo_ui_no_host_from_subpackage and
+        # expo_ui_platform_specific_trees_not_in_app_dir vacuously pass,
+        # reporting 2/3 (66.67%) uptake for a skill the app never touched.
+        # Both are now not_applicable without an actual @expo/ui import, so
+        # only expo_ui_import_used (failed) scores -- 0/1.
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "package.json").write_text(json.dumps({"dependencies": {"@expo/ui": "1.0.0"}}))
+            (app / "app").mkdir()
+            (app / "app" / "index.tsx").write_text("export default function App(){ return null; }\n")
+
+            checks_by_skill, _ = resolve_checks_by_skill(["expo-ui"], REAL_CHECKS_DIR)
+            checks, _ = resolve_checks_for_skills(["expo-ui"], REAL_CHECKS_DIR)
+            results_by_id = {r.id: r for r in run_checks(checks, app)}
+
+        self.assertEqual(results_by_id["expo_ui_no_host_from_subpackage"].status, "not_applicable")
+        self.assertEqual(results_by_id["expo_ui_platform_specific_trees_not_in_app_dir"].status, "not_applicable")
+
+        skills = compute_skill_results(
+            expected_skills=["expo-ui"],
+            triggered_skills=[],
+            checks_by_skill=checks_by_skill,
+            results_by_id=results_by_id,
+            app_dir_missing=False,
+        )
+        self.assertEqual(skills["expo-ui"]["total"], 1)
+        self.assertEqual(skills["expo-ui"]["passed"], 0)
+
+    def test_real_expo_ui_anti_pattern_checks_still_score_when_genuinely_engaged(self):
+        # Required regression: a genuinely engaged implementation must still
+        # get credit for correctly avoiding the anti-patterns, not just for
+        # importing @expo/ui at all.
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "package.json").write_text(json.dumps({"dependencies": {"@expo/ui": "1.0.0"}}))
+            (app / "app").mkdir()
+            (app / "app" / "index.tsx").write_text(
+                "import { Host } from '@expo/ui';\n"
+                "export default function App(){ return <Host />; }\n"
+            )
+
+            checks, _ = resolve_checks_for_skills(["expo-ui"], REAL_CHECKS_DIR)
+            results = {r.id: r for r in run_checks(checks, app)}
+
+        self.assertTrue(results["expo_ui_import_used"].passed)
+        self.assertEqual(results["expo_ui_no_host_from_subpackage"].status, "passed")
+        self.assertEqual(results["expo_ui_platform_specific_trees_not_in_app_dir"].status, "passed")
+
+    def test_real_expo_ui_flags_platform_tree_under_app_dir(self):
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "app").mkdir()
+            (app / "app" / "widget.ios.tsx").write_text("export default function Widget(){ return null; }\n")
+
+            checks, _ = resolve_checks_for_skills(["expo-ui"], REAL_CHECKS_DIR)
+            results = {r.id: r for r in run_checks(checks, app)}
+
+        self.assertFalse(results["expo_ui_platform_specific_trees_not_in_app_dir"].passed)
+
+    def test_real_data_fetching_checks(self):
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "app").mkdir()
+            (app / "app" / "index.tsx").write_text(
+                "import axios from 'axios';\n"
+                "const url = process.env.EXPO_PUBLIC_API_URL;\n"
+                "export default function App(){ return null; }\n"
+            )
+
+            checks, _ = resolve_checks_for_skills(["expo-data-fetching"], REAL_CHECKS_DIR)
+            results = {r.id: r for r in run_checks(checks, app)}
+
+        self.assertFalse(results["data_fetching_no_axios"].passed)
+        self.assertFalse(results["data_fetching_uses_fetch_or_query_lib"].passed)
+        self.assertTrue(results["data_fetching_expo_public_env_prefix"].passed)
+
+    def test_real_data_fetching_no_axios_not_applicable_without_engagement(self):
+        # Third review round (P1): an app with no fetch/query-lib usage and
+        # no axios import used to get a vacuous pass from data_fetching_no_axios
+        # merely for never touching data fetching at all, reporting 1/2 (50%)
+        # uptake. Now not_applicable without observable data-fetching behavior
+        # -- only data_fetching_uses_fetch_or_query_lib (failed) scores.
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "app").mkdir()
+            (app / "app" / "index.tsx").write_text("export default function App(){ return null; }\n")
+
+            checks_by_skill, _ = resolve_checks_by_skill(["expo-data-fetching"], REAL_CHECKS_DIR)
+            checks, _ = resolve_checks_for_skills(["expo-data-fetching"], REAL_CHECKS_DIR)
+            results_by_id = {r.id: r for r in run_checks(checks, app)}
+
+        self.assertEqual(results_by_id["data_fetching_no_axios"].status, "not_applicable")
+
+        skills = compute_skill_results(
+            expected_skills=["expo-data-fetching"],
+            triggered_skills=[],
+            checks_by_skill=checks_by_skill,
+            results_by_id=results_by_id,
+            app_dir_missing=False,
+        )
+        self.assertEqual(skills["expo-data-fetching"]["total"], 1)
+        self.assertEqual(skills["expo-data-fetching"]["passed"], 0)
+
+    def test_real_data_fetching_no_axios_scores_when_genuinely_engaged(self):
+        # Required regression: a genuinely engaged implementation (real
+        # fetch usage) that correctly avoids axios must still get credit
+        # for it, not just get gated to not_applicable.
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "app").mkdir()
+            (app / "app" / "index.tsx").write_text(
+                "async function load(){ return fetch('https://example.com'); }\n"
+                "export default function App(){ return null; }\n"
+            )
+
+            checks, _ = resolve_checks_for_skills(["expo-data-fetching"], REAL_CHECKS_DIR)
+            results = {r.id: r for r in run_checks(checks, app)}
+
+        self.assertEqual(results["data_fetching_no_axios"].status, "passed")
+        self.assertTrue(results["data_fetching_uses_fetch_or_query_lib"].passed)
+
+    def test_real_data_fetching_env_prefix_not_applicable_when_no_env_vars_read(self):
+        # Code-review fix: a bare "does EXPO_PUBLIC_ appear anywhere" regex
+        # unconditionally failed apps that read no client env var at all --
+        # confirmed live: both real hot_chocolate (self-contained, no
+        # external API) and wiki_reader (WebView wrapper) read zero env
+        # vars, so the old check always failed them regardless of true
+        # skill uptake. Precondition doesn't hold -> not_applicable.
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "app").mkdir()
+            (app / "app" / "index.tsx").write_text("export default function App(){ return null; }\n")
+
+            checks, _ = resolve_checks_for_skills(["expo-data-fetching"], REAL_CHECKS_DIR)
+            results = {r.id: r for r in run_checks(checks, app)}
+
+        result = results["data_fetching_expo_public_env_prefix"]
+        self.assertEqual(result.status, "not_applicable")
+        self.assertIsNone(result.passed)
+
+    def test_real_data_fetching_env_prefix_flags_non_prefixed_client_env_var(self):
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "app").mkdir()
+            (app / "app" / "index.tsx").write_text(
+                "const url = process.env.API_URL;\nexport default function App(){ return null; }\n"
+            )
+
+            checks, _ = resolve_checks_for_skills(["expo-data-fetching"], REAL_CHECKS_DIR)
+            results = {r.id: r for r in run_checks(checks, app)}
+
+        result = results["data_fetching_expo_public_env_prefix"]
+        self.assertEqual(result.status, "failed")
+        self.assertFalse(result.passed)
+
+    def test_real_data_fetching_env_prefix_exempts_expo_os(self):
+        # Regression guard found live re-validating against wiki_reader:
+        # process.env.EXPO_OS is a framework-provided platform-detection
+        # var (the same one expo-native-ui's own rule recommends over
+        # Platform.OS) -- it will never be EXPO_PUBLIC_-prefixed and isn't
+        # user client config, so it must not count as a violation.
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "app").mkdir()
+            (app / "app" / "index.tsx").write_text(
+                "if (process.env.EXPO_OS === 'ios') {}\nexport default function App(){ return null; }\n"
+            )
+
+            checks, _ = resolve_checks_for_skills(["expo-data-fetching"], REAL_CHECKS_DIR)
+            results = {r.id: r for r in run_checks(checks, app)}
+
+        result = results["data_fetching_expo_public_env_prefix"]
+        self.assertEqual(result.status, "not_applicable")
+
+    def test_real_data_fetching_env_prefix_ignores_server_side_api_route_secret(self):
+        # Follow-up review regression guard: the skill explicitly endorses
+        # unprefixed server-only secrets inside +api.ts route handlers --
+        # this is the opposite of a violation, not an oversight to flag.
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "app" / "api").mkdir(parents=True)
+            (app / "app" / "api" / "secret+api.ts").write_text(
+                "export async function POST() {\n"
+                "  const secret = process.env.OPENAI_API_KEY;\n"
+                "  return Response.json({ configured: Boolean(secret) });\n"
+                "}\n"
+            )
+
+            checks, _ = resolve_checks_for_skills(["expo-data-fetching"], REAL_CHECKS_DIR)
+            results = {r.id: r for r in run_checks(checks, app)}
+
+        result = results["data_fetching_expo_public_env_prefix"]
+        self.assertEqual(result.status, "not_applicable")
+
+    def test_real_data_fetching_env_prefix_ignores_commented_env_read(self):
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "app").mkdir()
+            (app / "app" / "index.tsx").write_text(
+                "// const secret = process.env.SECRET;\n"
+                "export default function App(){ return null; }\n"
+            )
+
+            checks, _ = resolve_checks_for_skills(["expo-data-fetching"], REAL_CHECKS_DIR)
+            results = {r.id: r for r in run_checks(checks, app)}
+
+        result = results["data_fetching_expo_public_env_prefix"]
+        self.assertEqual(result.status, "not_applicable")
+
+    def test_real_data_fetching_uses_fetch_check_passes_on_plain_fetch(self):
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "app").mkdir()
+            (app / "app" / "index.tsx").write_text(
+                "export default async function App(){ const r = await fetch('https://example.com'); return null; }\n"
+            )
+
+            checks, _ = resolve_checks_for_skills(["expo-data-fetching"], REAL_CHECKS_DIR)
+            results = {r.id: r for r in run_checks(checks, app)}
+
+        self.assertTrue(results["data_fetching_no_axios"].passed)
+        self.assertTrue(results["data_fetching_uses_fetch_or_query_lib"].passed)
+
+    def test_real_dom_use_dom_directive_check(self):
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "components").mkdir()
+            (app / "components" / "map.tsx").write_text(
+                "'use dom';\nexport default function Map(){ return <div />; }\n"
+            )
+
+            checks, _ = resolve_checks_for_skills(["expo-dom"], REAL_CHECKS_DIR)
+            results = {r.id: r for r in run_checks(checks, app)}
+
+        self.assertTrue(results["dom_use_dom_directive_present"].passed)
+
+    def test_real_dom_use_dom_directive_check_ignores_text_outside_directive_prologue(self):
+        # Code-review regression guard: the bare regex `['"]use dom['"]`
+        # matches "use dom" anywhere, including inside an ordinary string
+        # assignment -- not just a real leading directive.
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "components").mkdir()
+            (app / "components" / "map.tsx").write_text(
+                "const label = \"use dom\";\n"
+                "export default function NotActuallyDom(){ return <div>{label}</div>; }\n"
+            )
+
+            checks, _ = resolve_checks_for_skills(["expo-dom"], REAL_CHECKS_DIR)
+            results = {r.id: r for r in run_checks(checks, app)}
+
+        result = results["dom_use_dom_directive_present"]
+        if result.status == "unavailable":
+            self.skipTest("node/npm unavailable in this environment")
+        self.assertEqual(result.status, "failed")
+
+    def test_real_dom_use_dom_directive_check_ignores_standalone_statement_after_other_code(self):
+        # Follow-up review regression guard, distinct from the assignment
+        # case above: a bare "use dom"; expression statement is also not a
+        # real directive once it's not the file's first statement -- Babel's
+        # own directive-prologue rule, not just a string-shape difference.
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "components").mkdir()
+            (app / "components" / "map.tsx").write_text(
+                "const initialized = true;\n"
+                "\"use dom\";\n\n"
+                "export default function NotActuallyDom() { return <div />; }\n"
+            )
+
+            checks, _ = resolve_checks_for_skills(["expo-dom"], REAL_CHECKS_DIR)
+            results = {r.id: r for r in run_checks(checks, app)}
+
+        result = results["dom_use_dom_directive_present"]
+        if result.status == "unavailable":
+            self.skipTest("node/npm unavailable in this environment")
+        self.assertEqual(result.status, "failed")
+
+    def test_real_dom_use_dom_directive_check_ignores_directive_looking_comment(self):
+        # A comment is stripped before the regex prefilter even runs, so it
+        # never becomes a candidate at all.
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "components").mkdir()
+            (app / "components" / "map.tsx").write_text(
+                "/* \"use dom\"; */\n"
+                "export default function NotActuallyDom() { return <div />; }\n"
+            )
+
+            checks, _ = resolve_checks_for_skills(["expo-dom"], REAL_CHECKS_DIR)
+            results = {r.id: r for r in run_checks(checks, app)}
+
+        self.assertEqual(results["dom_use_dom_directive_present"].status, "failed")
+
+    def test_real_dom_layout_excludes_use_dom_check(self):
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "app").mkdir()
+            (app / "app" / "_layout.tsx").write_text(
+                "'use dom';\nexport default function Layout(){ return <div />; }\n"
+            )
+
+            checks, _ = resolve_checks_for_skills(["expo-dom"], REAL_CHECKS_DIR)
+            results = {r.id: r for r in run_checks(checks, app)}
+
+        result = results["dom_layout_excludes_use_dom"]
+        if result.status == "unavailable":
+            self.skipTest("node/npm unavailable in this environment")
+        self.assertFalse(result.passed)
+        self.assertEqual(result.status, "failed")
+
+    def test_real_dom_layout_excludes_use_dom_check_ignores_unrelated_string_in_layout(self):
+        # Follow-up review regression guard: the layout-exclusion check had
+        # the inverse problem from the directive check -- it used to fail on
+        # any 'use dom'-shaped text in a _layout file, not just a real,
+        # AST-confirmed directive. A real DOM component exists elsewhere so
+        # the third review round's engagement precondition (not_applicable
+        # unless a real DOM component is confirmed somewhere) doesn't mask
+        # this test's actual intent -- the unrelated string in the _layout
+        # file itself must not count as a violation.
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "app").mkdir()
+            (app / "app" / "_layout.tsx").write_text(
+                "const label = \"use dom\";\n"
+                "import { Stack } from 'expo-router';\n"
+                "export default function Layout(){ return <Stack />; }\n"
+            )
+            (app / "components").mkdir()
+            (app / "components" / "map.tsx").write_text(
+                "'use dom';\nexport default function Map(){ return <div />; }\n"
+            )
+
+            checks, _ = resolve_checks_for_skills(["expo-dom"], REAL_CHECKS_DIR)
+            results = {r.id: r for r in run_checks(checks, app)}
+
+        result = results["dom_layout_excludes_use_dom"]
+        if result.status == "unavailable":
+            self.skipTest("node/npm unavailable in this environment")
+        self.assertTrue(result.passed)
+        self.assertEqual(result.status, "passed")
+
+    def test_real_dom_layout_excludes_use_dom_check_passes_for_ordinary_layout(self):
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "app").mkdir()
+            (app / "app" / "_layout.tsx").write_text(
+                "import { Stack } from 'expo-router';\nexport default function Layout(){ return <Stack />; }\n"
+            )
+            (app / "components").mkdir()
+            (app / "components" / "map.tsx").write_text(
+                "'use dom';\nexport default function Map(){ return <div />; }\n"
+            )
+
+            checks, _ = resolve_checks_for_skills(["expo-dom"], REAL_CHECKS_DIR)
+            results = {r.id: r for r in run_checks(checks, app)}
+
+        self.assertTrue(results["dom_layout_excludes_use_dom"].passed)
+
+    def test_real_dom_layout_excludes_use_dom_check_not_applicable_without_real_dom_component(self):
+        # Third review round (P1): an app with an ordinary _layout file and
+        # no real DOM component anywhere used to get a vacuous pass from
+        # dom_layout_excludes_use_dom, reporting 1/2 (50%) uptake despite
+        # never using expo-dom. Now not_applicable in this case, matching
+        # dom_single_default_export_and_no_native_jsx's own precondition --
+        # only dom_use_dom_directive_present (failed) scores.
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "app").mkdir()
+            (app / "app" / "_layout.tsx").write_text(
+                "import { Stack } from 'expo-router';\nexport default function Layout(){ return <Stack />; }\n"
+            )
+
+            checks_by_skill, _ = resolve_checks_by_skill(["expo-dom"], REAL_CHECKS_DIR)
+            checks, _ = resolve_checks_for_skills(["expo-dom"], REAL_CHECKS_DIR)
+            results_by_id = {r.id: r for r in run_checks(checks, app)}
+
+        result = results_by_id["dom_layout_excludes_use_dom"]
+        if result.status == "unavailable":
+            self.skipTest("node/npm unavailable in this environment")
+        self.assertEqual(result.status, "not_applicable")
+
+        skills = compute_skill_results(
+            expected_skills=["expo-dom"],
+            triggered_skills=[],
+            checks_by_skill=checks_by_skill,
+            results_by_id=results_by_id,
+            app_dir_missing=False,
+        )
+        self.assertEqual(skills["expo-dom"]["total"], 1)
+        self.assertEqual(skills["expo-dom"]["passed"], 0)
+
+    def test_real_dom_layout_excludes_use_dom_check_not_applicable_with_no_layout_files(self):
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "components").mkdir()
+            (app / "components" / "map.tsx").write_text(
+                "'use dom';\nexport default function Map(){ return <div />; }\n"
+            )
+
+            checks, _ = resolve_checks_for_skills(["expo-dom"], REAL_CHECKS_DIR)
+            results = {r.id: r for r in run_checks(checks, app)}
+
+        result = results["dom_layout_excludes_use_dom"]
+        self.assertEqual(result.status, "not_applicable")
+        self.assertIsNone(result.passed)
+
+    def test_real_dom_single_default_export_check_passes_on_clean_dom_component(self):
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "components").mkdir()
+            (app / "components" / "map.tsx").write_text(
+                "'use dom';\n"
+                "import { useState } from 'react';\n"
+                "export default function Map() {\n"
+                "  const [count, setCount] = useState(0);\n"
+                "  return <div onClick={() => setCount(count + 1)}>{count}</div>;\n"
+                "}\n"
+            )
+
+            checks, _ = resolve_checks_for_skills(["expo-dom"], REAL_CHECKS_DIR)
+            results = {r.id: r for r in run_checks(checks, app)}
+
+        self.assertTrue(results["dom_single_default_export_and_no_native_jsx"].passed)
+
+    def test_real_dom_single_default_export_check_flags_react_native_jsx_inside_dom_file(self):
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "components").mkdir()
+            (app / "components" / "map.tsx").write_text(
+                "'use dom';\n"
+                "import { View, Text } from 'react-native';\n"
+                "export default function Map() {\n"
+                "  return <View><Text>hi</Text></View>;\n"
+                "}\n"
+            )
+
+            checks, _ = resolve_checks_for_skills(["expo-dom"], REAL_CHECKS_DIR)
+            results = {r.id: r for r in run_checks(checks, app)}
+
+        result = results["dom_single_default_export_and_no_native_jsx"]
+        if result.status == "unavailable":
+            self.skipTest("node/npm unavailable in this environment")
+        self.assertFalse(result.passed)
+
+    def test_real_dom_single_default_export_check_flags_namespace_react_native_jsx(self):
+        # Code-review regression guard: `import * as RN from 'react-native'`
+        # + <RN.Text> is a JSXMemberExpression, not a bare JSXIdentifier --
+        # an AST walk that only handled named imports would let this evade
+        # the native-JSX check entirely.
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "components").mkdir()
+            (app / "components" / "map.tsx").write_text(
+                "'use dom';\n"
+                "import * as RN from 'react-native';\n"
+                "export default function Map() {\n"
+                "  return <RN.View><RN.Text>hi</RN.Text></RN.View>;\n"
+                "}\n"
+            )
+
+            checks, _ = resolve_checks_for_skills(["expo-dom"], REAL_CHECKS_DIR)
+            results = {r.id: r for r in run_checks(checks, app)}
+
+        result = results["dom_single_default_export_and_no_native_jsx"]
+        if result.status == "unavailable":
+            self.skipTest("node/npm unavailable in this environment")
+        self.assertFalse(result.passed)
+        self.assertIn("RN.Text", result.evidence)
+
+    def test_real_dom_single_default_export_check_unavailable_on_malformed_source(self):
+        # Malformed source that fails to parse must read unavailable, not a
+        # silent pass -- a parser failure is not evidence of compliance.
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "components").mkdir()
+            (app / "components" / "map.tsx").write_text(
+                "'use dom';\nexport default function Map() { return <div"
+            )
+
+            checks, _ = resolve_checks_for_skills(["expo-dom"], REAL_CHECKS_DIR)
+            results = {r.id: r for r in run_checks(checks, app)}
+
+        result = results["dom_single_default_export_and_no_native_jsx"]
+        self.assertEqual(result.status, "unavailable")
+        self.assertIsNone(result.passed)
+
+    def test_real_dom_single_default_export_check_unavailable_when_one_of_two_candidates_is_malformed(self):
+        # Follow-up review regression guard, the exact scenario reproduced
+        # against the prior head: one clean, valid 'use dom' file plus one
+        # malformed 'use dom' candidate used to silently return passed --
+        # the first confirmed-and-clean file's success hid the second
+        # file's parser failure entirely.
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "components").mkdir()
+            (app / "components" / "map.tsx").write_text(
+                "'use dom';\nexport default function Map(){ return <div />; }\n"
+            )
+            (app / "components" / "broken.tsx").write_text(
+                "'use dom';\nexport default function Broken() { return <div"
+            )
+
+            checks, _ = resolve_checks_for_skills(["expo-dom"], REAL_CHECKS_DIR)
+            results = {r.id: r for r in run_checks(checks, app)}
+
+        result = results["dom_single_default_export_and_no_native_jsx"]
+        self.assertEqual(result.status, "unavailable")
+        self.assertIsNone(result.passed)
+
+    def test_dom_single_default_export_check_unavailable_when_parser_cannot_run(self):
+        # Direct unit test of the unavailable path without depending on the
+        # environment's real node/npm install: monkeypatch extract_ast_facts
+        # to simulate "parser genuinely couldn't run" (returns None).
+        from eval_harness.evaluator.skill_invocation.uptake_checks import code_checks
+
+        original = code_checks.extract_ast_facts
+        code_checks.extract_ast_facts = lambda path: None
+        try:
+            with tempfile.TemporaryDirectory() as td:
+                app = Path(td)
+                (app / "components").mkdir()
+                (app / "components" / "map.tsx").write_text(
+                    "'use dom';\nexport default function Map(){ return <div />; }\n"
+                )
+
+                checks, _ = resolve_checks_for_skills(["expo-dom"], REAL_CHECKS_DIR)
+                results = {r.id: r for r in run_checks(checks, app)}
+        finally:
+            code_checks.extract_ast_facts = original
+
+        result = results["dom_single_default_export_and_no_native_jsx"]
+        self.assertEqual(result.status, "unavailable")
+        self.assertIsNone(result.passed)
+
+    def test_real_dom_single_default_export_check_not_applicable_when_no_dom_files_exist(self):
+        # Precondition doesn't hold (no 'use dom' files at all) -- this must
+        # read not_applicable, not a vacuous pass, so it can't inflate an
+        # expo-dom uptake score for an app that never touches expo-dom.
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "app").mkdir()
+            (app / "app" / "index.tsx").write_text("export default function App(){ return null; }\n")
+
+            checks, _ = resolve_checks_for_skills(["expo-dom"], REAL_CHECKS_DIR)
+            results = {r.id: r for r in run_checks(checks, app)}
+
+        result = results["dom_single_default_export_and_no_native_jsx"]
+        self.assertEqual(result.status, "not_applicable")
+        self.assertIsNone(result.passed)
+
+    def test_real_tailwind_checks(self):
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "package.json").write_text(json.dumps({"dependencies": {"nativewind": "5.0.0", "tailwindcss": "4.0.0"}}))
+            (app / "metro.config.js").write_text(
+                "const { withNativewind } = require('nativewind/metro');\n"
+                "module.exports = withNativewind(config, {});\n"
+            )
+            (app / "postcss.config.mjs").write_text(
+                "export default { plugins: { '@tailwindcss/postcss': {} } };\n"
+            )
+            (app / "src").mkdir()
+            (app / "src" / "global.css").write_text("@import 'tailwindcss';\n")
+
+            checks, _ = resolve_checks_for_skills(["expo-tailwind-setup"], REAL_CHECKS_DIR)
+            results = {r.id: r for r in run_checks(checks, app)}
+
+        for check_id in [
+            "tailwind_nativewind_package_dependency",
+            "tailwind_css_package_dependency",
+            "tailwind_metro_config_uses_withnativewind",
+            "tailwind_postcss_uses_official_plugin",
+            "tailwind_global_css_exists",
+        ]:
+            self.assertTrue(results[check_id].passed, check_id)
+
+    def test_real_hosting_checks(self):
+        # hosting_api_route_exists was dropped entirely: EAS Hosting also
+        # serves static sites with no API routes at all, so requiring one
+        # unconditionally isn't a valid applicability signal from the file
+        # tree alone.
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "app" / "api").mkdir(parents=True)
+            (app / "app" / "api" / "users+api.ts").write_text(
+                "export function GET(request) { return Response.json({ ok: true }); }\n"
+            )
+
+            checks, _ = resolve_checks_for_skills(["eas-hosting"], REAL_CHECKS_DIR)
+            results = {r.id: r for r in run_checks(checks, app)}
+
+        self.assertNotIn("hosting_api_route_exists", results)
+        self.assertTrue(results["hosting_api_routes_use_typescript"].passed)
+        self.assertEqual(results["hosting_api_routes_use_typescript"].status, "passed")
+        self.assertTrue(results["hosting_no_banned_node_imports_in_api_routes"].passed)
+        self.assertEqual(results["hosting_no_banned_node_imports_in_api_routes"].status, "passed")
+
+    def test_real_hosting_checks_not_applicable_when_no_api_routes_exist(self):
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "app").mkdir()
+            (app / "app" / "index.tsx").write_text("export default function App(){ return null; }\n")
+
+            checks, _ = resolve_checks_for_skills(["eas-hosting"], REAL_CHECKS_DIR)
+            results = {r.id: r for r in run_checks(checks, app)}
+
+        self.assertEqual(results["hosting_api_routes_use_typescript"].status, "not_applicable")
+        self.assertIsNone(results["hosting_api_routes_use_typescript"].passed)
+        self.assertEqual(results["hosting_no_banned_node_imports_in_api_routes"].status, "not_applicable")
+        self.assertIsNone(results["hosting_no_banned_node_imports_in_api_routes"].passed)
+
+    def test_real_hosting_typescript_check_flags_jsx_too(self):
+        # Follow-up review regression guard: the filename regex recognizes
+        # .js/.jsx/.ts/.tsx, but the old check only rejected an exact .js
+        # suffix -- a +api.jsx route wrongly passed the TypeScript rule.
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "app" / "api").mkdir(parents=True)
+            (app / "app" / "api" / "users+api.jsx").write_text(
+                "export function GET(request) { return Response.json({ ok: true }); }\n"
+            )
+
+            checks, _ = resolve_checks_for_skills(["eas-hosting"], REAL_CHECKS_DIR)
+            results = {r.id: r for r in run_checks(checks, app)}
+
+        self.assertFalse(results["hosting_api_routes_use_typescript"].passed)
+        self.assertEqual(results["hosting_api_routes_use_typescript"].status, "failed")
+
+    def test_real_hosting_flags_banned_node_import_in_api_route(self):
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "app" / "api").mkdir(parents=True)
+            (app / "app" / "api" / "users+api.ts").write_text(
+                "import fs from 'fs';\nexport function GET(request) { return Response.json({}); }\n"
+            )
+
+            checks, _ = resolve_checks_for_skills(["eas-hosting"], REAL_CHECKS_DIR)
+            results = {r.id: r for r in run_checks(checks, app)}
+
+        self.assertFalse(results["hosting_no_banned_node_imports_in_api_routes"].passed)
+
+    def test_real_hosting_no_banned_node_import_check_ignores_non_api_files(self):
+        # Regression guard for the code-driven filter: a banned import in a
+        # normal (non +api.ts) file must not trip this check -- that's what
+        # makes it different from a blanket text_absent check. Since there
+        # are no +api routes at all here, the correct result is
+        # not_applicable, not a vacuous pass.
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "app").mkdir()
+            (app / "app" / "utils.ts").write_text("import fs from 'fs';\nexport const x = 1;\n")
+
+            checks, _ = resolve_checks_for_skills(["eas-hosting"], REAL_CHECKS_DIR)
+            results = {r.id: r for r in run_checks(checks, app)}
+
+        self.assertEqual(results["hosting_no_banned_node_imports_in_api_routes"].status, "not_applicable")
+        self.assertIsNone(results["hosting_no_banned_node_imports_in_api_routes"].passed)
+
+    def test_real_app_clip_checks(self):
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "targets" / "clip").mkdir(parents=True)
+            (app / "public" / ".well-known").mkdir(parents=True)
+            (app / "public" / ".well-known" / "apple-app-site-association").write_text("{}")
+
+            checks, _ = resolve_checks_for_skills(["expo-app-clip"], REAL_CHECKS_DIR)
+            results = {r.id: r for r in run_checks(checks, app)}
+
+        self.assertTrue(results["app_clip_target_dir_exists"].passed)
+        self.assertTrue(results["app_clip_aasa_file_exists"].passed)
 
     def _write_ground_truth(self, root: Path, *skills: str) -> tuple[Path, Path]:
         """Write a minimal dataset/prd_skills.json (app "test-app" -> skills)

@@ -11,6 +11,8 @@ from typing import Any
 from .build_health.bundle_check import read_bundle_result
 from .build_health.syntax_check import check_syntax
 from .uptake_checks.registry import (
+    SCORED_STATUSES,
+    STATUS_UNAVAILABLE,
     CheckResult,
     UptakeResults,
     resolve_checks_by_skill,
@@ -337,10 +339,46 @@ def compute_skill_results(
             entry.update(uptake_status="missing_app", passed=None, total=len(checks), uptake_rate=None, checks=[])
         else:
             skill_check_results = [results_by_id[c.id] for c in checks if c.id in results_by_id]
-            passed = sum(1 for r in skill_check_results if r.passed)
-            total = len(skill_check_results)
+            # Only passed/failed results count toward uptake -- a
+            # not_applicable check (its precondition doesn't hold for this
+            # app) or an unavailable one (evidence couldn't be collected,
+            # e.g. the AST parser didn't run) has no opinion on uptake and
+            # must not move the rate either way. `checks` below still
+            # includes every result -- including those two statuses -- so
+            # the report can show them, just not scored.
+            scored = [r for r in skill_check_results if r.status in SCORED_STATUSES]
+            passed = sum(1 for r in scored if r.passed)
+            total = len(scored)
+            # "measured" only means what it says: at least one check for
+            # this skill actually produced a scored (passed/failed) result.
+            # If every check came back not_applicable/unavailable, nothing
+            # was measured -- labeling that "measured" with passed=0/total=0
+            # would contradict uptake_rate=None right next to it. Mirrors
+            # unsupported/missing_app: a null rate needs a status that
+            # explains *why* it's null, not just "measured, scored zero".
+            #
+            # Third review round (P2): "unavailable" outranks "measured",
+            # not just "not_applicable" -- even when something DID score.
+            # Otherwise a skill with one passed check and two checks whose
+            # evidence genuinely couldn't be collected (e.g. the AST parser
+            # didn't run) reads as an unqualified "measured, 100%", which
+            # overstates confidence in a result built on incomplete
+            # evidence. `passed`/`total`/`uptake_rate` still reflect only
+            # the checks that did score -- this only changes the label so
+            # downstream consumers don't treat a partial result as a full
+            # one. not_applicable checks don't trigger this: they were
+            # successfully classified as irrelevant, which isn't missing
+            # evidence.
+            if any(r.status == STATUS_UNAVAILABLE for r in skill_check_results):
+                uptake_status = "unavailable"
+            elif scored:
+                uptake_status = "measured"
+            elif skill_check_results:
+                uptake_status = "not_applicable"
+            else:
+                uptake_status = "measured"
             entry.update(
-                uptake_status="measured",
+                uptake_status=uptake_status,
                 passed=passed,
                 total=total,
                 uptake_rate=round(passed / total, 4) if total else None,
@@ -417,6 +455,7 @@ def write_html_report(payload: dict[str, Any], path: Path | str) -> None:
             "</tr>"
         )
     skill_rows = []
+    check_rows = []
     for skill_id, result in (payload.get("skills") or {}).items():
         passed = result.get("passed")
         total = result.get("total")
@@ -429,6 +468,19 @@ def write_html_report(payload: dict[str, Any], path: Path | str) -> None:
             f"<td>{_e(_pct(result.get('uptake_rate')))}</td>"
             "</tr>"
         )
+        for check in result.get("checks") or []:
+            # Includes not_applicable/unavailable checks alongside
+            # passed/failed ones -- those two statuses are excluded from the
+            # passed/total/uptake_rate math above, but must still be visible
+            # here rather than silently dropped from the report entirely.
+            check_rows.append(
+                "<tr>"
+                f"<td>{_e(skill_id)}</td>"
+                f"<td>{_e(check.get('id'))}</td>"
+                f"<td>{_e(check.get('status'))}</td>"
+                f"<td>{_e(check.get('evidence'))}</td>"
+                "</tr>"
+            )
     doc = f"""<!doctype html>
 <html>
 <head>
@@ -454,6 +506,12 @@ def write_html_report(payload: dict[str, Any], path: Path | str) -> None:
   <table>
     <thead><tr><th>Skill</th><th>Trigger</th><th>Uptake status</th><th>Passed/Total</th><th>Uptake rate</th></tr></thead>
     <tbody>{''.join(skill_rows)}</tbody>
+  </table>
+  <h2>Per-check detail</h2>
+  <p class="note">Every check run per skill, including not_applicable (its precondition didn't hold for this app) and unavailable (evidence couldn't be collected, e.g. a parser didn't run) -- neither counts toward Passed/Total or Uptake rate above, but both are shown here rather than silently dropped.</p>
+  <table>
+    <thead><tr><th>Skill</th><th>Check</th><th>Status</th><th>Evidence</th></tr></thead>
+    <tbody>{''.join(check_rows)}</tbody>
   </table>
 </body>
 </html>
