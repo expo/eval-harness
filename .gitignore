@@ -51,3 +51,6 @@ agent-workspace/
 
 # session-local learnings (promote durable items to AGENTS.md)
 .learnings/
+
+# local worktrees
+.worktrees/
