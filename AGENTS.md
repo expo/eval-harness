@@ -62,9 +62,14 @@ runner plus uploaded artifacts.
   skill set in `dataset/prd_skills.json`, and resolves each expected skill's
   uptake checks via `uptake_checks/skill_map.json` (skill id -> check ids)
   against the declarative lexical + structural checks in `checks_data.json`
-  (no syntax-tree or route-graph checks currently exist -- a syntax-tree
-  check was tried and cut as not worth its complexity; see
-  `uptake_checks/README.md`). Checks are deliberately
+  plus code-driven checks (including syntax-tree, see `uptake_checks/code_checks.py`)
+  registered via `@register`; route-graph checks still don't exist -- see
+  `uptake_checks/README.md`. 9 of 21 Expo skills are currently mapped; the
+  rest are either CLI/cloud-ops skills with no source-tree footprint at all
+  (deferred to a future trace-based checking axis, not this static-check
+  registry) or assume a pre-existing app this harness doesn't produce -- see
+  `SKILL_UPTAKE_COVERAGE_ANALYSIS.md` (repo root, untracked) for the
+  full-ecosystem gap analysis. Checks are deliberately
   skill-agnostic atomic facts about the code; `skill_map.json` is the only
   file coupled to the current skill taxonomy, so a skill rename/merge/split
   only touches that one mapping. See `uptake_checks/README.md`. There is no

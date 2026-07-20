@@ -1,5 +1,5 @@
 {
-  "_comment": "skill id -> [check id, ...]. This is the ONLY file coupled to the current skill taxonomy -- if Expo renames/merges/splits skills later, only this mapping changes, not the checks themselves (see registry.py's module docstring). Only expo-router and expo-project-structure are mapped so far (phase 1); skills without an entry here simply get a 'no uptake checks mapped' warning, same as an unmapped skill did under the old skill_cases/ format.",
+  "_comment": "skill id -> [check id, ...]. This is the ONLY file coupled to the current skill taxonomy -- if Expo renames/merges/splits skills later, only this mapping changes, not the checks themselves (see registry.py's module docstring). Phase 1 mapped expo-router and expo-project-structure; phase 2 (SKILL_UPTAKE_COVERAGE_ANALYSIS.md, repo root, untracked) added expo-native-ui, expo-ui, expo-data-fetching, expo-dom, expo-tailwind-setup, eas-hosting, and expo-app-clip (config subset). Skills without an entry here simply get a 'no uptake checks mapped' warning, same as an unmapped skill did under the old skill_cases/ format -- see that doc for the 12 skills deliberately left unmapped and why.",
   "expo-router": [
     "router_import",
     "router_navigation_api_used",
@@ -8,13 +8,55 @@
     "router_app_dir_exists",
     "router_has_index_route",
     "router_has_layout_file",
-    "router_no_colocated_non_route_files_in_app_dir"
+    "router_no_colocated_non_route_files_in_app_dir",
+    "router_kebab_case_filenames_in_app_dir",
+    "router_no_illegal_group_only_file",
+    "router_not_found_route_exists",
+    "tsconfig_path_alias_configured"
   ],
   "expo-project-structure": [
     "router_app_dir_exists",
-    "project_structure_uses_stylesheet_create",
     "project_structure_components_dir_exists",
     "project_structure_no_separate_styles_files",
-    "project_structure_no_dunder_tests_dir"
+    "project_structure_no_dunder_tests_dir",
+    "tsconfig_path_alias_configured"
+  ],
+  "expo-native-ui": [
+    "native_ui_no_expo_av",
+    "native_ui_no_platform_os",
+    "native_ui_no_dimensions_get",
+    "native_ui_no_safe_area_view_from_react_native",
+    "router_no_direct_react_navigation_import"
+  ],
+  "expo-ui": [
+    "expo_ui_import_used",
+    "expo_ui_no_host_from_subpackage",
+    "expo_ui_platform_specific_trees_not_in_app_dir"
+  ],
+  "expo-data-fetching": [
+    "data_fetching_no_axios",
+    "data_fetching_uses_fetch_or_query_lib",
+    "data_fetching_expo_public_env_prefix"
+  ],
+  "expo-dom": [
+    "dom_use_dom_directive_present",
+    "dom_layout_excludes_use_dom",
+    "dom_single_default_export_and_no_native_jsx"
+  ],
+  "expo-tailwind-setup": [
+    "tailwind_nativewind_package_dependency",
+    "tailwind_css_package_dependency",
+    "tailwind_metro_config_uses_withnativewind",
+    "tailwind_postcss_uses_official_plugin",
+    "tailwind_global_css_exists"
+  ],
+  "eas-hosting": [
+    "hosting_api_route_exists",
+    "hosting_api_routes_use_typescript",
+    "hosting_no_banned_node_imports_in_api_routes"
+  ],
+  "expo-app-clip": [
+    "app_clip_target_dir_exists",
+    "app_clip_aasa_file_exists"
   ]
 }

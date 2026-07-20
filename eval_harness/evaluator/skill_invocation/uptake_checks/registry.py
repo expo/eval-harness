@@ -14,11 +14,14 @@ know which backs a given id:
   - data-driven (category: lexical/structural): declared in checks_data.json,
     interpreted by the generic `run_check` dispatch below (kinds: import,
     text, text_any, text_absent, path_exists, path_absent,
-    package_dependency).
-  - code-driven (e.g. a future syntax-tree/route-graph category): registered
-    via the `@register` decorator with a real `run(app_tree)` function --
-    none currently exist (see checks_data.json's header comment), but the
-    dispatch already treats them identically.
+    package_dependency, tsconfig_path_alias).
+  - code-driven (category: lexical/structural/syntax-tree/route-graph, see
+    code_checks.py): registered via the `@register` decorator with a real
+    `run(app_tree)` function -- used when a check needs either per-file-subset
+    filtering (e.g. "no _layout file may have this directive", which isn't
+    expressible as the generic dispatch's "any file matches X") or real AST
+    parsing (e.g. counting default exports), not just a global text/path
+    pattern. The dispatch treats data- and code-driven checks identically.
 """
 
 from __future__ import annotations
@@ -289,6 +292,8 @@ def run_check(check: Check, app_tree: AppTree) -> CheckResult:
         return _check_path_absent(check, app_tree)
     if kind == "package_dependency":
         return _check_package_dependency(check, app_tree)
+    if kind == "tsconfig_path_alias":
+        return _check_tsconfig_path_alias(check, app_tree)
     raise ValueError(f"Unknown check kind {kind!r} for check {check.id!r}")
 
 
@@ -358,3 +363,22 @@ def _check_package_dependency(check: Check, app_tree: AppTree) -> CheckResult:
     deps.update(data.get("devDependencies") or {})
     passed = target in deps
     return _result(check, passed, f"package.json {'contains' if passed else 'does not contain'} {target}")
+
+
+def _check_tsconfig_path_alias(check: Check, app_tree: AppTree) -> CheckResult:
+    """tsconfig.json/jsconfig.json aren't in SOURCE_SUFFIXES (not JS/TS source),
+    so this reads them directly, the same way _check_package_dependency reads
+    package.json rather than relying on the generic file corpus."""
+    target = str(check.target)
+    for name in ("tsconfig.json", "jsconfig.json"):
+        cfg = app_tree.root / name
+        if not cfg.exists():
+            continue
+        try:
+            data = json.loads(_strip_comments(cfg.read_text(encoding="utf-8")))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        paths = ((data.get("compilerOptions") or {}).get("paths")) or {}
+        if target in paths:
+            return _result(check, True, f"{name}: compilerOptions.paths has {target!r}")
+    return _result(check, False, f"no tsconfig.json/jsconfig.json compilerOptions.paths entry for {target!r}")

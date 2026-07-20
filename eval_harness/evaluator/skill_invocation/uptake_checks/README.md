@@ -11,15 +11,21 @@ cascade of increasingly strong (and increasingly expensive) signals:
   `text_any`, `text_absent`, `import`).
 - **Structural checks**: filesystem shape (`path_exists`, `path_absent`,
   `package_dependency`).
-- **Syntax-tree checks**: tried and cut (see git history:
-  `router_layout_defines_navigator`, a real-AST check for "does a _layout
-  file's JSX tree actually render a navigator, not just import one
-  unused"). On inspection this added little over a properly tag-anchored
+- **Syntax-tree checks**: a first attempt (`router_layout_defines_navigator`,
+  see git history) was cut -- it added little over a properly tag-anchored
   lexical regex (`<Stack[\s/>]` etc. already requires literal JSX-tag
-  syntax, not just the identifier appearing) -- the real false positives
-  found this session (boilerplate text, bare substrings) were both fixed
-  at the lexical/structural level, not by parsing. Would revisit if a
-  future check genuinely needs tree structure a regex can't approximate.
+  syntax, not just the identifier appearing). Revived later (see
+  `code_checks.py`, `../build_health/scripts/extract-ast-facts.js`) once
+  three *different* skills turned up guidance regex genuinely can't verify:
+  `expo-dom`'s exactly-one-default-export-and-no-native-JSX rule is
+  implemented (`dom_single_default_export_and_no_native_jsx`);
+  `expo-data-fetching`'s "`response.ok` must actually gate the parse" and
+  `expo-tailwind-setup`'s "`className` usage must go through the wrapped
+  component" are validated candidates not yet implemented (see
+  `SKILL_UPTAKE_COVERAGE_ANALYSIS.md`, repo root, untracked). Uses the same
+  Babel subprocess as build_health's syntax check, no `@babel/traverse`
+  dependency -- a plain recursive AST walk is enough for export-counting and
+  import-bound JSX element names.
 - **Route-graph checks**: not built yet. Needs the authored app's real
   `node_modules` (Expo's typed-routes generator), so unlike a syntax-tree
   check it can't run at analysis time -- it has to run at authoring time
@@ -45,7 +51,24 @@ is the *only* file that says "skill X currently claims checks [A, B, C]."
 This means a skill can be renamed, merged, or split later by editing
 `skill_map.json` alone -- the checks themselves don't move, and a check can
 be shared across multiple skills (e.g. `router_app_dir_exists` is claimed by
-both `expo-router` and `expo-project-structure` today).
+both `expo-router` and `expo-project-structure`, and
+`router_no_direct_react_navigation_import` by both `expo-router` and
+`expo-native-ui`, today).
+
+## Which skills have checks
+
+9 of the 21 skills under `skills/plugins/expo/skills/` are mapped in
+`skill_map.json`: `expo-router`, `expo-project-structure`, `expo-native-ui`,
+`expo-ui`, `expo-data-fetching`, `expo-dom`, `expo-tailwind-setup`,
+`eas-hosting`, `expo-app-clip` (config subset only). The other 12 are
+deliberately unmapped -- most because their guidance is a CLI/cloud-ops
+process or external-dashboard interpretation that leaves no trace in an
+authored app's source tree at all (no check category, however clever,
+closes that gap; it would need trace-based checking of what the agent ran,
+a different axis entirely), a few because they assume a pre-existing app
+this harness's "build fresh from a PRD" pattern doesn't produce. See
+`SKILL_UPTAKE_COVERAGE_ANALYSIS.md` (repo root, untracked) for the
+full-ecosystem breakdown and reasoning per skill.
 
 `dataset/prd_skills.json` is a separate, upstream question: which skills a
 given PRD should trigger at all. This package only answers "given an

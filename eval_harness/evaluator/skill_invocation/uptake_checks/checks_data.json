@@ -1,5 +1,5 @@
 {
-  "_comment": "Lexical (regex, comment-stripped) and structural (path) checks. No syntax-tree or route-graph checks currently exist (tried a syntax-tree check and cut it -- the lexical regex checks already cover the same ground once properly anchored; a route-graph check needs its own research pass on Metro internals, see git history). Future code-driven checks would register via @register instead of being declared here. Every check here is skill-agnostic; skill_map.json is the only file that says which skill(s) currently claim a given check.",
+  "_comment": "Lexical (regex, comment-stripped) and structural (path) checks. Syntax-tree checks now exist too, but are code-driven (see code_checks.py, registered via @register) rather than declared here -- route-graph checks still don't exist (needs its own research pass on Metro internals, see git history). Every check here is skill-agnostic; skill_map.json is the only file that says which skill(s) currently claim a given check. See SKILL_UPTAKE_COVERAGE_ANALYSIS.md (repo root, untracked) for the full-ecosystem gap analysis this file's expo-native-ui/expo-ui/expo-data-fetching/expo-dom/expo-tailwind-setup/eas-hosting/expo-app-clip checks and the expo-router/expo-project-structure gap-fill checks came from.",
   "checks": [
     {
       "id": "router_import",
@@ -66,13 +66,6 @@
       "description": "Anti-pattern the skill calls out by name: never co-locate components/types/utilities in the app directory. This is a denylist heuristic, not exhaustive -- it can miss the anti-pattern under an unlisted name, and could in principle false-positive if an app has a genuine *route* literally named one of these (not observed in any real app checked so far)."
     },
     {
-      "id": "project_structure_uses_stylesheet_create",
-      "category": "lexical",
-      "kind": "text",
-      "target": "StyleSheet\\.create\\(",
-      "description": "Uses StyleSheet.create -- colocated-styles signal (paired with the absence check below)"
-    },
-    {
       "id": "project_structure_components_dir_exists",
       "category": "structural",
       "kind": "path_exists",
@@ -92,6 +85,180 @@
       "kind": "path_absent",
       "target": ["**/__tests__/**"],
       "description": "Anti-pattern: the skill prefers colocated x.test.ts beside x.ts over a __tests__/ folder"
+    },
+    {
+      "id": "tsconfig_path_alias_configured",
+      "category": "structural",
+      "kind": "tsconfig_path_alias",
+      "target": "@/*",
+      "description": "Shared by expo-router and expo-project-structure: tsconfig.json (or jsconfig.json) compilerOptions.paths configures the '@/*' alias both skills prefer over relative imports."
+    },
+    {
+      "id": "router_kebab_case_filenames_in_app_dir",
+      "category": "structural",
+      "kind": "path_absent",
+      "target": [
+        "app/**/*[A-Z]*.tsx", "app/**/*[A-Z]*.ts", "app/**/*[A-Z]*.jsx", "app/**/*[A-Z]*.js",
+        "src/app/**/*[A-Z]*.tsx", "src/app/**/*[A-Z]*.ts", "src/app/**/*[A-Z]*.jsx", "src/app/**/*[A-Z]*.js"
+      ],
+      "description": "expo-router rule: kebab-case file names in app/, no special characters (which includes no uppercase letters). Route-group names like (tabs), dynamic segments like [id], and _layout/index are all lowercase already, so this only flags a genuine PascalCase/camelCase route filename."
+    },
+    {
+      "id": "router_no_illegal_group_only_file",
+      "category": "structural",
+      "kind": "path_absent",
+      "target": [
+        "app/**/(*)*.tsx", "app/**/(*)*.ts", "app/**/(*)*.jsx", "app/**/(*)*.js",
+        "src/app/**/(*)*.tsx", "src/app/**/(*)*.ts", "src/app/**/(*)*.jsx", "src/app/**/(*)*.js"
+      ],
+      "description": "expo-router rule: a route group can never be a file named (foo).tsx -- it must be a (foo)/index.tsx directory. Distinct from router_no_colocated_non_route_files_in_app_dir (that's about non-route files under a denylisted name, this is about the illegal group-as-file shape)."
+    },
+    {
+      "id": "router_not_found_route_exists",
+      "category": "structural",
+      "kind": "path_exists",
+      "target": ["app/+not-found.*", "src/app/+not-found.*"],
+      "description": "expo-router convention: a +not-found route for unmatched paths."
+    },
+    {
+      "id": "native_ui_no_expo_av",
+      "category": "lexical",
+      "kind": "text_absent",
+      "target": "from ['\"]expo-av['\"]",
+      "description": "expo-native-ui rule: expo-av is removed -- use expo-audio/expo-video instead."
+    },
+    {
+      "id": "native_ui_no_platform_os",
+      "category": "lexical",
+      "kind": "text_absent",
+      "target": "Platform\\.OS",
+      "description": "expo-native-ui rule: use process.env.EXPO_OS, not Platform.OS."
+    },
+    {
+      "id": "native_ui_no_dimensions_get",
+      "category": "lexical",
+      "kind": "text_absent",
+      "target": "Dimensions\\.get\\(",
+      "description": "expo-native-ui rule: use useWindowDimensions, not Dimensions.get()."
+    },
+    {
+      "id": "native_ui_no_safe_area_view_from_react_native",
+      "category": "lexical",
+      "kind": "text_absent",
+      "target": "import\\s*\\{[^}]*\\bSafeAreaView\\b[^}]*\\}\\s*from\\s*['\"]react-native['\"]",
+      "description": "expo-native-ui rule: use react-native-safe-area-context, not react-native's own SafeAreaView. Anchored to the import statement (not a bare word match) to avoid flagging the correct import from react-native-safe-area-context."
+    },
+    {
+      "id": "expo_ui_import_used",
+      "category": "structural",
+      "kind": "package_dependency",
+      "target": "@expo/ui",
+      "description": "@expo/ui is a declared dependency. Checked via package.json rather than an import-statement regex, since a correct app may import only from a subpackage (@expo/ui/swift-ui, @expo/ui/jetpack-compose) and never the bare '@expo/ui' root -- coupling this signal to a specific import path would wrongly fail that case."
+    },
+    {
+      "id": "expo_ui_no_host_from_subpackage",
+      "category": "lexical",
+      "kind": "text_absent",
+      "target": "\\bHost\\b[^\\n]*from\\s*['\"]@expo/ui/(swift-ui|jetpack-compose)['\"]",
+      "description": "expo-ui rule: Host must always be imported from the '@expo/ui' root, never from a platform-specific subpackage."
+    },
+    {
+      "id": "expo_ui_platform_specific_trees_not_in_app_dir",
+      "category": "structural",
+      "kind": "path_absent",
+      "target": ["app/**/*.ios.tsx", "app/**/*.android.tsx", "src/app/**/*.ios.tsx", "src/app/**/*.android.tsx"],
+      "description": "expo-ui rule: platform-specific @expo/ui trees must live in components/, never under app/ -- Expo Router doesn't support platform extensions for route files."
+    },
+    {
+      "id": "data_fetching_no_axios",
+      "category": "lexical",
+      "kind": "text_absent",
+      "target": "from ['\"]axios['\"]",
+      "description": "expo-data-fetching rule: avoid axios, prefer the built-in fetch (or expo/fetch)."
+    },
+    {
+      "id": "data_fetching_uses_fetch_or_query_lib",
+      "category": "lexical",
+      "kind": "text_any",
+      "target": ["fetch\\(", "from ['\"]@tanstack/react-query['\"]", "from ['\"]swr['\"]"],
+      "description": "expo-data-fetching rule: real network requests use fetch directly, or a proper data-fetching library (React Query, SWR) for anything non-trivial."
+    },
+    {
+      "id": "data_fetching_expo_public_env_prefix",
+      "category": "lexical",
+      "kind": "text",
+      "target": "EXPO_PUBLIC_[A-Z0-9_]+",
+      "description": "expo-data-fetching rule: only EXPO_PUBLIC_-prefixed env vars are exposed client-side. A proxy signal that the app engaged with this naming convention at all, not a guarantee no secret was misnamed into one."
+    },
+    {
+      "id": "dom_use_dom_directive_present",
+      "category": "lexical",
+      "kind": "text",
+      "target": "['\"]use dom['\"]",
+      "description": "expo-dom rule: a DOM component file must start with the 'use dom' directive."
+    },
+    {
+      "id": "tailwind_nativewind_package_dependency",
+      "category": "structural",
+      "kind": "package_dependency",
+      "target": "nativewind",
+      "description": "expo-tailwind-setup rule: nativewind is a declared dependency."
+    },
+    {
+      "id": "tailwind_css_package_dependency",
+      "category": "structural",
+      "kind": "package_dependency",
+      "target": "tailwindcss",
+      "description": "expo-tailwind-setup rule: tailwindcss is a declared dependency."
+    },
+    {
+      "id": "tailwind_metro_config_uses_withnativewind",
+      "category": "lexical",
+      "kind": "text",
+      "target": "withNativewind\\(",
+      "description": "expo-tailwind-setup rule: metro.config.js must wrap its config with withNativewind(...)."
+    },
+    {
+      "id": "tailwind_postcss_uses_official_plugin",
+      "category": "lexical",
+      "kind": "text",
+      "target": "@tailwindcss/postcss",
+      "description": "expo-tailwind-setup rule: postcss.config.mjs uses the official @tailwindcss/postcss plugin. Checked as a text match rather than path_exists on postcss.config.mjs alone, since postcss.config.mjs is read as source (.mjs is a SOURCE_SUFFIXES extension) and this also confirms the right plugin, not just any postcss config file."
+    },
+    {
+      "id": "tailwind_global_css_exists",
+      "category": "structural",
+      "kind": "path_exists",
+      "target": ["src/global.css", "global.css"],
+      "description": "expo-tailwind-setup rule: a global.css importing the tailwind theme/preflight/utilities exists. Existence-only -- CSS file content isn't part of the source corpus any lexical check reads, so this can't confirm the actual @import lines."
+    },
+    {
+      "id": "hosting_api_route_exists",
+      "category": "structural",
+      "kind": "path_exists",
+      "target": ["app/**/*+api.ts", "app/**/*+api.js", "src/app/**/*+api.ts", "src/app/**/*+api.js"],
+      "description": "eas-hosting rule: server-only logic lives in +api.ts route files under app/."
+    },
+    {
+      "id": "hosting_api_routes_use_typescript",
+      "category": "structural",
+      "kind": "path_absent",
+      "target": ["app/**/*+api.js", "src/app/**/*+api.js"],
+      "description": "eas-hosting rule: use TypeScript for API routes -- a plain-JS +api.js file is the anti-pattern. Vacuously passes if the app has no API routes at all."
+    },
+    {
+      "id": "app_clip_target_dir_exists",
+      "category": "structural",
+      "kind": "path_exists",
+      "target": ["targets/clip"],
+      "description": "expo-app-clip rule: an App Clip target is scaffolded at targets/clip/ via @bacons/apple-targets. Config-subset check only -- see SKILL_UPTAKE_COVERAGE_ANALYSIS.md for why the fuller app.json/AASA-content rules aren't checked here."
+    },
+    {
+      "id": "app_clip_aasa_file_exists",
+      "category": "structural",
+      "kind": "path_exists",
+      "target": ["public/.well-known/apple-app-site-association", "web/.well-known/apple-app-site-association"],
+      "description": "expo-app-clip rule: the Apple App Site Association file is hosted at .well-known/apple-app-site-association. Existence-only, not content-verified (needs its appclips/webcredentials/activitycontinuation blocks for real correctness, deferred)."
     }
   ]
 }
