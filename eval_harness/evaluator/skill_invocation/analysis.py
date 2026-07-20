@@ -12,6 +12,7 @@ from .build_health.bundle_check import read_bundle_result
 from .build_health.syntax_check import check_syntax
 from .uptake_checks.registry import (
     SCORED_STATUSES,
+    STATUS_UNAVAILABLE,
     CheckResult,
     UptakeResults,
     resolve_checks_by_skill,
@@ -348,8 +349,27 @@ def compute_skill_results(
             scored = [r for r in skill_check_results if r.status in SCORED_STATUSES]
             passed = sum(1 for r in scored if r.passed)
             total = len(scored)
+            # "measured" only means what it says: at least one check for
+            # this skill actually produced a scored (passed/failed) result.
+            # If every check came back not_applicable/unavailable, nothing
+            # was measured -- labeling that "measured" with passed=0/total=0
+            # would contradict uptake_rate=None right next to it. Mirrors
+            # unsupported/missing_app: a null rate needs a status that
+            # explains *why* it's null, not just "measured, scored zero".
+            if scored:
+                uptake_status = "measured"
+            elif any(r.status == STATUS_UNAVAILABLE for r in skill_check_results):
+                # Missing evidence outranks "doesn't apply" -- a mix of the
+                # two with nothing scored means at least one check couldn't
+                # even determine its own applicability, which is a stronger
+                # claim than "confirmed not relevant".
+                uptake_status = "unavailable"
+            elif skill_check_results:
+                uptake_status = "not_applicable"
+            else:
+                uptake_status = "measured"
             entry.update(
-                uptake_status="measured",
+                uptake_status=uptake_status,
                 passed=passed,
                 total=total,
                 uptake_rate=round(passed / total, 4) if total else None,

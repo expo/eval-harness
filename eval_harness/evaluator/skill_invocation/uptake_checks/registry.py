@@ -57,11 +57,15 @@ _LINE_COMMENT_RE = re.compile(r"//.*")
 _BLOCK_COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
 
 
-def _strip_comments(text: str) -> str:
+def strip_comments(text: str) -> str:
     """Best-effort JS/TS comment stripping. Not a real parser (doesn't
     understand `//`/`/*` inside strings or template literals), but closes the
     common false-positive case: a stray `// TODO: add loading state` comment
-    with no real implementation satisfying a check."""
+    with no real implementation satisfying a check. Public (not `_`-prefixed)
+    because code_checks.py's code-driven checks need the same false-positive
+    protection as every declarative check below -- a regex scan over raw,
+    un-stripped text is the same class of bug regardless of which dispatch
+    path runs it."""
     return _LINE_COMMENT_RE.sub("", _BLOCK_COMMENT_RE.sub("", text))
 
 
@@ -339,7 +343,7 @@ def _check_import(check: Check, app_tree: AppTree) -> CheckResult:
     target = str(check.target)
     needles = [f"from '{target}'", f'from "{target}"', f"require('{target}')", f'require("{target}")']
     for path, text in app_tree.files.items():
-        if any(n in _strip_comments(text) for n in needles):
+        if any(n in strip_comments(text) for n in needles):
             return _result(check, True, f"{path}: imports {target}")
     return _result(check, False, f"No source file imports {target}")
 
@@ -347,7 +351,7 @@ def _check_import(check: Check, app_tree: AppTree) -> CheckResult:
 def _check_text(check: Check, app_tree: AppTree) -> CheckResult:
     pattern = re.compile(str(check.target))
     for path, text in app_tree.files.items():
-        if pattern.search(_strip_comments(text)):
+        if pattern.search(strip_comments(text)):
             return _result(check, True, f"{path}: matches {check.target!r}")
     return _result(check, False, f"No source file matches {check.target!r}")
 
@@ -357,7 +361,7 @@ def _check_text_any(check: Check, app_tree: AppTree) -> CheckResult:
     for option in options:
         pattern = re.compile(str(option))
         for path, text in app_tree.files.items():
-            if pattern.search(_strip_comments(text)):
+            if pattern.search(strip_comments(text)):
                 return _result(check, True, f"{path}: matches {option!r}")
     return _result(check, False, f"No source file matches any of {options!r}")
 
@@ -365,7 +369,7 @@ def _check_text_any(check: Check, app_tree: AppTree) -> CheckResult:
 def _check_text_absent(check: Check, app_tree: AppTree) -> CheckResult:
     pattern = re.compile(str(check.target))
     for path, text in app_tree.files.items():
-        if pattern.search(_strip_comments(text)):
+        if pattern.search(strip_comments(text)):
             return _result(check, False, f"{path}: contains forbidden {check.target!r}")
     return _result(check, True, f"No source file contains forbidden {check.target!r}")
 
@@ -409,7 +413,7 @@ def _check_tsconfig_path_alias(check: Check, app_tree: AppTree) -> CheckResult:
         if not cfg.exists():
             continue
         try:
-            data = json.loads(_strip_comments(cfg.read_text(encoding="utf-8")))
+            data = json.loads(strip_comments(cfg.read_text(encoding="utf-8")))
         except (UnicodeDecodeError, json.JSONDecodeError):
             continue
         paths = ((data.get("compilerOptions") or {}).get("paths")) or {}

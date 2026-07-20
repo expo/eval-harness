@@ -180,13 +180,6 @@
       "description": "expo-data-fetching rule: real network requests use fetch directly, or a proper data-fetching library (React Query, SWR) for anything non-trivial."
     },
     {
-      "id": "dom_use_dom_directive_present",
-      "category": "lexical",
-      "kind": "text",
-      "target": "(?m)^[ \\t]*['\"]use dom['\"];?[ \\t]*$",
-      "description": "expo-dom rule: a DOM component file must start with the 'use dom' directive. Anchored to its own line (not a bare substring match) so an unrelated string like `const label = \"use dom\"` isn't mistaken for the directive."
-    },
-    {
       "id": "tailwind_nativewind_package_dependency",
       "category": "structural",
       "kind": "package_dependency",
