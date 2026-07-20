@@ -1,7 +1,7 @@
 """Code-driven uptake checks, registered via registry.register.
 
 Distinct from checks_data.json's declarative lexical/structural checks for
-one of three reasons:
+one of four reasons:
 
 - Per-file-subset filtering that the generic dispatch can't express. The
   generic dispatch only ever answers "does any file match X" / "does no
@@ -21,6 +21,14 @@ one of three reasons:
   apply to a server-only +api.ts route's own secrets, which are correctly
   unprefixed). The generic dispatch has no not_applicable concept -- only
   code-driven checks can return it.
+- Engagement gating for negative/anti-pattern checks (third review round):
+  a declarative text_absent/path_absent check always reads `passed` when
+  its forbidden pattern is absent, even when the check's skill was never
+  engaged with at all -- that's not evidence of correct usage, just absence
+  of any usage. expo_ui_no_host_from_subpackage, data_fetching_no_axios,
+  and the expo-native-ui anti-pattern checks are code-driven specifically
+  so each can require its own engagement precondition before a clean pass
+  counts as real uptake; see the "engagement preconditions" section below.
 
 Every check here must return not_applicable when its precondition doesn't
 hold, and unavailable when evidence genuinely couldn't be collected (e.g.
@@ -69,6 +77,74 @@ _PROCESS_ENV_READ_RE = re.compile(r"process\.env\.([A-Za-z_][A-Za-z0-9_]*)")
 # expo-native-ui skill itself recommends over Platform.OS) -- it will never
 # be EXPO_PUBLIC_-prefixed and was never meant to be.
 _ENV_PREFIX_EXEMPT = {"NODE_ENV", "EXPO_OS"}
+
+# --- engagement preconditions (third review round) -------------------------
+#
+# A declarative text_absent/path_absent check always reads `passed` when its
+# forbidden pattern is absent -- including when the check's skill was never
+# engaged with at all, which isn't evidence of correct usage. The checks
+# below are code-driven specifically so each can require an explicit
+# engagement precondition before a "no violation found" result counts as a
+# real pass; without engagement, they return not_applicable instead. A
+# *failing* check never needs gating -- finding the forbidden pattern is
+# itself proof the app touched that area, so it's always scored.
+
+# Same patterns as declarative check expo_ui_import_used (checks_data.json) --
+# duplicated here (JSON can't share a Python regex) because this is also the
+# engagement precondition for expo-ui's two anti-pattern checks below.
+_EXPO_UI_IMPORT_RES = [
+    re.compile(r"""from\s*['"]@expo/ui['"]"""),
+    re.compile(r"""from\s*['"]@expo/ui/swift-ui['"]"""),
+    re.compile(r"""from\s*['"]@expo/ui/jetpack-compose['"]"""),
+    re.compile(r"""from\s*['"]@expo/ui/community/"""),
+]
+
+
+def _expo_ui_imported(app_tree: AppTree) -> bool:
+    return any(
+        pattern.search(strip_comments(text))
+        for text in app_tree.files.values()
+        for pattern in _EXPO_UI_IMPORT_RES
+    )
+
+
+_EXPO_UI_HOST_FROM_SUBPACKAGE_RE = re.compile(
+    r"""\bHost\b[^\n]*from\s*['"]@expo/ui/(swift-ui|jetpack-compose)['"]"""
+)
+_EXPO_UI_PLATFORM_TREE_GLOBS = ["app/**/*.ios.tsx", "app/**/*.android.tsx", "src/app/**/*.ios.tsx", "src/app/**/*.android.tsx"]
+
+# Same patterns as declarative check data_fetching_uses_fetch_or_query_lib --
+# duplicated for the same reason: it's also the engagement precondition for
+# data_fetching_no_axios below (an axios import is itself engagement too, so
+# that's checked directly rather than duplicated here).
+_FETCH_OR_QUERY_LIB_RES = [
+    re.compile(r"fetch\("),
+    re.compile(r"""from\s*['"]@tanstack/react-query['"]"""),
+    re.compile(r"""from\s*['"]swr['"]"""),
+]
+_AXIOS_IMPORT_RE = re.compile(r"""from\s*['"]axios['"]""")
+
+# expo-native-ui's own recommended replacements for the three legacy APIs its
+# anti-pattern checks ban -- also the skill's only positive engagement signal
+# (see native_ui_uses_recommended_apis below).
+_NATIVE_UI_MODERN_API_RES = [
+    re.compile(r"useWindowDimensions\("),
+    re.compile(r"""from\s*['"]expo-audio['"]"""),
+    re.compile(r"""from\s*['"]expo-video['"]"""),
+    re.compile(r"""from\s*['"]react-native-safe-area-context['"]"""),
+]
+
+
+def _native_ui_engaged(app_tree: AppTree) -> bool:
+    return any(
+        pattern.search(strip_comments(text))
+        for text in app_tree.files.values()
+        for pattern in _NATIVE_UI_MODERN_API_RES
+    )
+
+
+_EXPO_ROUTER_IMPORT_RE = re.compile(r"""from\s*['"]expo-router['"]|require\(['"]expo-router['"]\)""")
+_REACT_NAVIGATION_IMPORT_RE = re.compile(r"""from\s*['"]@react-navigation/""")
 
 
 def _passed(check_id: str, category: str, evidence: str) -> CheckResult:
@@ -158,14 +234,16 @@ def _dom_use_dom_directive_present(app_tree: AppTree) -> CheckResult:
     "AST-backed (uses the same confirmed-directive facts as dom_use_dom_directive_present) so "
     "an unrelated 'use dom'-shaped string inside a _layout file (a comment, an unrelated "
     "string constant) doesn't false-fail this check -- only a real, AST-confirmed directive "
-    "counts as the violation. not_applicable if the app has no _layout files at all.",
+    "counts as the violation. not_applicable if the app has no real confirmed DOM component at "
+    "all (third review round: gating this only on 'no _layout files' let an ordinary app with "
+    "zero DOM usage vacuously pass, since almost every expo-router app has _layout files -- this "
+    "now matches dom_single_default_export_and_no_native_jsx's own not_applicable precondition), "
+    "or if the app has a confirmed DOM component but no _layout files at all.",
 )
 def _dom_layout_excludes_use_dom(app_tree: AppTree) -> CheckResult:
-    layout_paths = {path for path in app_tree.files if _LAYOUT_FILENAME_RE.match(path.name)}
-    if not layout_paths:
-        return _not_applicable("dom_layout_excludes_use_dom", "syntax-tree", "no _layout files found")
-
     confirmed, unavailable_paths = _dom_candidate_files(app_tree)
+    layout_paths = {path for path in app_tree.files if _LAYOUT_FILENAME_RE.match(path.name)}
+
     violating_layouts = sorted(path for path, _ in confirmed if path in layout_paths)
     if violating_layouts:
         return _failed(
@@ -178,9 +256,18 @@ def _dom_layout_excludes_use_dom(app_tree: AppTree) -> CheckResult:
             "dom_layout_excludes_use_dom", "syntax-tree",
             f"parser could not confirm whether {unresolved_layouts[0]} has a real 'use dom' directive",
         )
+    if not confirmed:
+        return _not_applicable(
+            "dom_layout_excludes_use_dom", "syntax-tree",
+            "no file has a confirmed 'use dom' directive -- this rule only applies once a real "
+            "DOM component exists",
+        )
+    if not layout_paths:
+        return _not_applicable("dom_layout_excludes_use_dom", "syntax-tree", "no _layout files found")
     return _passed(
         "dom_layout_excludes_use_dom", "syntax-tree",
-        f"none of {len(layout_paths)} _layout file(s) has a confirmed 'use dom' directive",
+        f"{len(confirmed)} confirmed DOM component(s); none of {len(layout_paths)} _layout file(s) "
+        "has a confirmed 'use dom' directive",
     )
 
 
@@ -315,4 +402,211 @@ def _data_fetching_expo_public_env_prefix(app_tree: AppTree) -> CheckResult:
     return _passed(
         "data_fetching_expo_public_env_prefix", "lexical",
         f"all client-read env var(s) {sorted(env_var_names)!r} use the EXPO_PUBLIC_ prefix",
+    )
+
+
+@register(
+    "expo_ui_no_host_from_subpackage",
+    category="lexical",
+    description="expo-ui rule: Host must always be imported from the '@expo/ui' root, never from "
+    "a platform-specific subpackage. Converted from a declarative text_absent check (third review "
+    "round): a bare absence check vacuously passed for apps that never imported @expo/ui at all, "
+    "so this is now not_applicable unless the app actually imports @expo/ui somewhere.",
+)
+def _expo_ui_no_host_from_subpackage(app_tree: AppTree) -> CheckResult:
+    for path, text in app_tree.files.items():
+        if _EXPO_UI_HOST_FROM_SUBPACKAGE_RE.search(strip_comments(text)):
+            return _failed(
+                "expo_ui_no_host_from_subpackage", "lexical",
+                f"{path}: imports Host from a platform-specific @expo/ui subpackage",
+            )
+    if not _expo_ui_imported(app_tree):
+        return _not_applicable(
+            "expo_ui_no_host_from_subpackage", "lexical",
+            "no @expo/ui import found -- this rule only applies once the skill is engaged",
+        )
+    return _passed(
+        "expo_ui_no_host_from_subpackage", "lexical",
+        "no file imports Host from a platform-specific @expo/ui subpackage",
+    )
+
+
+@register(
+    "expo_ui_platform_specific_trees_not_in_app_dir",
+    category="structural",
+    description="expo-ui rule: platform-specific @expo/ui trees must live in components/, never "
+    "under app/ -- Expo Router doesn't support platform extensions for route files. Converted "
+    "from a declarative path_absent check (third review round): same vacuous-pass problem as "
+    "expo_ui_no_host_from_subpackage above.",
+)
+def _expo_ui_platform_specific_trees_not_in_app_dir(app_tree: AppTree) -> CheckResult:
+    matches = app_tree.glob_any(_EXPO_UI_PLATFORM_TREE_GLOBS)
+    if matches:
+        return _failed(
+            "expo_ui_platform_specific_trees_not_in_app_dir", "structural",
+            f"forbidden path exists: {matches[0].relative_to(app_tree.root)}",
+        )
+    if not _expo_ui_imported(app_tree):
+        return _not_applicable(
+            "expo_ui_platform_specific_trees_not_in_app_dir", "structural",
+            "no @expo/ui import found -- this rule only applies once the skill is engaged",
+        )
+    return _passed(
+        "expo_ui_platform_specific_trees_not_in_app_dir", "structural",
+        f"no path matched any of {_EXPO_UI_PLATFORM_TREE_GLOBS!r}",
+    )
+
+
+@register(
+    "data_fetching_no_axios",
+    category="lexical",
+    description="expo-data-fetching rule: avoid axios, prefer the built-in fetch (or expo/fetch). "
+    "Converted from a declarative text_absent check (third review round): a bare absence check "
+    "vacuously passed for apps with no observable data-fetching behavior at all. Finding axios "
+    "itself is always scored (importing it is proof the app engaged with data fetching, even if "
+    "the wrong way); a clean pass additionally requires observable fetch/query-lib usage as "
+    "independent proof of engagement -- otherwise not_applicable.",
+)
+def _data_fetching_no_axios(app_tree: AppTree) -> CheckResult:
+    for path, text in app_tree.files.items():
+        if _AXIOS_IMPORT_RE.search(strip_comments(text)):
+            return _failed("data_fetching_no_axios", "lexical", f"{path}: imports axios")
+    engaged = any(
+        pattern.search(strip_comments(text))
+        for text in app_tree.files.values()
+        for pattern in _FETCH_OR_QUERY_LIB_RES
+    )
+    if not engaged:
+        return _not_applicable(
+            "data_fetching_no_axios", "lexical",
+            "no observable data-fetching behavior (no fetch/query-lib usage, no axios import)",
+        )
+    return _passed(
+        "data_fetching_no_axios", "lexical",
+        "data-fetching behavior observed via fetch/query-lib usage, and no axios import found",
+    )
+
+
+@register(
+    "native_ui_uses_recommended_apis",
+    category="lexical",
+    description="expo-native-ui's only positive engagement signal (third review round): the skill's "
+    "three anti-pattern checks below (no_expo_av, no_dimensions_get, no_safe_area_view_from_"
+    "react_native) were all absence-only, so a fully-conformant-but-unengaged app -- one that "
+    "never touches audio/video, window sizing, or safe-area layout at all -- vacuously passed "
+    "every one of them. This check looks for the skill's own recommended modern replacements "
+    "(useWindowDimensions, expo-audio/expo-video, react-native-safe-area-context) and also gates "
+    "the three anti-pattern checks below: their passes only count once this establishes real "
+    "engagement.",
+)
+def _native_ui_uses_recommended_apis(app_tree: AppTree) -> CheckResult:
+    for path, text in app_tree.files.items():
+        for pattern in _NATIVE_UI_MODERN_API_RES:
+            if pattern.search(strip_comments(text)):
+                return _passed(
+                    "native_ui_uses_recommended_apis", "lexical",
+                    f"{path}: matches {pattern.pattern!r}",
+                )
+    return _failed(
+        "native_ui_uses_recommended_apis", "lexical",
+        "no file uses useWindowDimensions, expo-audio/expo-video, or react-native-safe-area-context",
+    )
+
+
+@register(
+    "native_ui_no_expo_av",
+    category="lexical",
+    description="expo-native-ui rule: expo-av is removed -- use expo-audio/expo-video instead. "
+    "Converted from a declarative text_absent check (third review round): gated on "
+    "native_ui_uses_recommended_apis' own engagement signal, since this skill has no other "
+    "positive check to fall back on.",
+)
+def _native_ui_no_expo_av(app_tree: AppTree) -> CheckResult:
+    for path, text in app_tree.files.items():
+        if re.search(r"""from\s*['"]expo-av['"]""", strip_comments(text)):
+            return _failed("native_ui_no_expo_av", "lexical", f"{path}: imports expo-av")
+    if not _native_ui_engaged(app_tree):
+        return _not_applicable(
+            "native_ui_no_expo_av", "lexical",
+            "no observable native-ui engagement (no useWindowDimensions/expo-audio/expo-video/"
+            "react-native-safe-area-context usage)",
+        )
+    return _passed("native_ui_no_expo_av", "lexical", "no file imports expo-av")
+
+
+@register(
+    "native_ui_no_dimensions_get",
+    category="lexical",
+    description="expo-native-ui rule: use useWindowDimensions, not Dimensions.get(). Converted "
+    "from a declarative text_absent check (third review round): same engagement gating as "
+    "native_ui_no_expo_av above.",
+)
+def _native_ui_no_dimensions_get(app_tree: AppTree) -> CheckResult:
+    for path, text in app_tree.files.items():
+        if re.search(r"Dimensions\.get\(", strip_comments(text)):
+            return _failed("native_ui_no_dimensions_get", "lexical", f"{path}: calls Dimensions.get()")
+    if not _native_ui_engaged(app_tree):
+        return _not_applicable(
+            "native_ui_no_dimensions_get", "lexical",
+            "no observable native-ui engagement (no useWindowDimensions/expo-audio/expo-video/"
+            "react-native-safe-area-context usage)",
+        )
+    return _passed("native_ui_no_dimensions_get", "lexical", "no file calls Dimensions.get()")
+
+
+@register(
+    "native_ui_no_safe_area_view_from_react_native",
+    category="lexical",
+    description="expo-native-ui rule: use react-native-safe-area-context, not react-native's own "
+    "SafeAreaView. Converted from a declarative text_absent check (third review round): same "
+    "engagement gating as native_ui_no_expo_av above. Anchored to the import statement (not a "
+    "bare word match) to avoid flagging the correct import from react-native-safe-area-context.",
+)
+def _native_ui_no_safe_area_view_from_react_native(app_tree: AppTree) -> CheckResult:
+    pattern = re.compile(r"""import\s*\{[^}]*\bSafeAreaView\b[^}]*\}\s*from\s*['"]react-native['"]""")
+    for path, text in app_tree.files.items():
+        if pattern.search(strip_comments(text)):
+            return _failed(
+                "native_ui_no_safe_area_view_from_react_native", "lexical",
+                f"{path}: imports SafeAreaView from react-native",
+            )
+    if not _native_ui_engaged(app_tree):
+        return _not_applicable(
+            "native_ui_no_safe_area_view_from_react_native", "lexical",
+            "no observable native-ui engagement (no useWindowDimensions/expo-audio/expo-video/"
+            "react-native-safe-area-context usage)",
+        )
+    return _passed(
+        "native_ui_no_safe_area_view_from_react_native", "lexical",
+        "no file imports SafeAreaView from react-native",
+    )
+
+
+@register(
+    "router_no_direct_react_navigation_import",
+    category="lexical",
+    description="SDK 56+ rule: never import @react-navigation/* directly -- use expo-router/"
+    "react-navigation instead. Converted from a declarative text_absent check (third review "
+    "round): shared by expo-router and expo-native-ui, and a bare absence check vacuously passed "
+    "for an app with zero navigation engagement of any kind. Gated on an expo-router import "
+    "(virtually always present in a real expo-router app, so this rarely changes expo-router's "
+    "own scoring) -- finding a direct @react-navigation import is itself scored regardless of "
+    "gating, since importing it is proof of navigation engagement.",
+)
+def _router_no_direct_react_navigation_import(app_tree: AppTree) -> CheckResult:
+    for path, text in app_tree.files.items():
+        if _REACT_NAVIGATION_IMPORT_RE.search(strip_comments(text)):
+            return _failed(
+                "router_no_direct_react_navigation_import", "lexical",
+                f"{path}: imports @react-navigation/* directly",
+            )
+    engaged = any(_EXPO_ROUTER_IMPORT_RE.search(strip_comments(text)) for text in app_tree.files.values())
+    if not engaged:
+        return _not_applicable(
+            "router_no_direct_react_navigation_import", "lexical",
+            "no expo-router import found -- this rule only applies once the app engages with routing",
+        )
+    return _passed(
+        "router_no_direct_react_navigation_import", "lexical",
+        "no file imports @react-navigation/* directly",
     )

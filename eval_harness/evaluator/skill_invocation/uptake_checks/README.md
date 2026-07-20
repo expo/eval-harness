@@ -82,6 +82,39 @@ couldn't run at all (an infra failure reading as compliance). Both were
 found in code review before merging -- see the checks' own descriptions and
 `code_checks.py`'s module docstring for the specific cases.
 
+`compute_skill_results` also treats `unavailable` as outranking a mix of
+scored results: a skill with one passed check and one unavailable check
+reads `uptake_status="unavailable"`, not an unqualified "measured, 100%" --
+partial evidence shouldn't read as full confidence, even though the scored
+`passed`/`total`/`uptake_rate` numbers are still reported alongside it.
+`not_applicable` doesn't trigger this (it was successfully classified as
+irrelevant, which isn't missing evidence).
+
+### Engagement gating for negative checks
+
+A `text_absent`/`path_absent` check (or its code-driven equivalent) always
+reads `passed` when its forbidden pattern is absent -- including when the
+app never engaged with that skill at all, which isn't evidence of correct
+usage, just absence of any usage. `expo_ui_no_host_from_subpackage`,
+`expo_ui_platform_specific_trees_not_in_app_dir`, `data_fetching_no_axios`,
+and expo-native-ui's three anti-pattern checks are code-driven specifically
+so each can require an engagement precondition (some positive signal for
+that skill, e.g. an `@expo/ui` import, or observable fetch/query-lib usage)
+before a clean pass counts as real uptake -- otherwise `not_applicable`.
+`dom_layout_excludes_use_dom`'s own precondition was similarly tightened to
+require a real confirmed DOM component, not just "any `_layout` file
+exists" (almost always true, so it was providing no gating at all). A
+*failing* negative check never needs gating: finding the forbidden pattern
+is itself proof the app touched that area.
+
+expo-native-ui had no positive check at all before this, so a fully
+conformant-but-unengaged app (one that never touches audio/video, window
+sizing, or safe-area layout) vacuously passed every one of its checks.
+`native_ui_uses_recommended_apis` is a new positive check -- looks for the
+skill's own recommended replacements (`useWindowDimensions`,
+expo-audio/expo-video, `react-native-safe-area-context`) -- and doubles as
+the engagement precondition for the other three.
+
 ## Design: checks are not owned by skills
 
 Every check in `checks_data.json` verifies one durable, skill-agnostic fact

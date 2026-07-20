@@ -356,14 +356,23 @@ def compute_skill_results(
             # would contradict uptake_rate=None right next to it. Mirrors
             # unsupported/missing_app: a null rate needs a status that
             # explains *why* it's null, not just "measured, scored zero".
-            if scored:
-                uptake_status = "measured"
-            elif any(r.status == STATUS_UNAVAILABLE for r in skill_check_results):
-                # Missing evidence outranks "doesn't apply" -- a mix of the
-                # two with nothing scored means at least one check couldn't
-                # even determine its own applicability, which is a stronger
-                # claim than "confirmed not relevant".
+            #
+            # Third review round (P2): "unavailable" outranks "measured",
+            # not just "not_applicable" -- even when something DID score.
+            # Otherwise a skill with one passed check and two checks whose
+            # evidence genuinely couldn't be collected (e.g. the AST parser
+            # didn't run) reads as an unqualified "measured, 100%", which
+            # overstates confidence in a result built on incomplete
+            # evidence. `passed`/`total`/`uptake_rate` still reflect only
+            # the checks that did score -- this only changes the label so
+            # downstream consumers don't treat a partial result as a full
+            # one. not_applicable checks don't trigger this: they were
+            # successfully classified as irrelevant, which isn't missing
+            # evidence.
+            if any(r.status == STATUS_UNAVAILABLE for r in skill_check_results):
                 uptake_status = "unavailable"
+            elif scored:
+                uptake_status = "measured"
             elif skill_check_results:
                 uptake_status = "not_applicable"
             else:

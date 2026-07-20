@@ -1,5 +1,5 @@
 {
-  "_comment": "Lexical (regex, comment-stripped) and structural (path) checks. Syntax-tree checks now exist too, but are code-driven (see code_checks.py, registered via @register) rather than declared here -- route-graph checks still don't exist (needs its own research pass on Metro internals, see git history). Every check here is skill-agnostic; skill_map.json is the only file that says which skill(s) currently claim a given check. See SKILL_UPTAKE_COVERAGE_ANALYSIS.md (repo root, untracked) for the full-ecosystem gap analysis this file's expo-native-ui/expo-ui/expo-data-fetching/expo-dom/expo-tailwind-setup/eas-hosting/expo-app-clip checks and the expo-router/expo-project-structure gap-fill checks came from.",
+  "_comment": "Lexical (regex, comment-stripped) and structural (path) checks. Syntax-tree checks now exist too, but are code-driven (see code_checks.py, registered via @register) rather than declared here -- route-graph checks still don't exist (needs its own research pass on Metro internals, see git history). Every check here is skill-agnostic; skill_map.json is the only file that says which skill(s) currently claim a given check. See SKILL_UPTAKE_COVERAGE_ANALYSIS.md (repo root, untracked) for the full-ecosystem gap analysis this file's expo-native-ui/expo-ui/expo-data-fetching/expo-dom/expo-tailwind-setup/eas-hosting/expo-app-clip checks and the expo-router/expo-project-structure gap-fill checks came from. Third review round: several negative/anti-pattern checks that used to live here (router_no_direct_react_navigation_import, native_ui_no_expo_av, native_ui_no_dimensions_get, native_ui_no_safe_area_view_from_react_native, expo_ui_no_host_from_subpackage, expo_ui_platform_specific_trees_not_in_app_dir, data_fetching_no_axios) moved to code_checks.py so each can require an engagement precondition before a clean pass counts as uptake -- the declarative dispatch has no not_applicable concept, so a check needing conditional applicability must be code-driven (see code_checks.py's module docstring).",
   "checks": [
     {
       "id": "router_import",
@@ -24,13 +24,6 @@
       "kind": "text_any",
       "target": ["<Stack[\\s/>]", "<Tabs[\\s/>]", "<NativeTabs[\\s/>]", "<Drawer[\\s/>]", "<Slot[\\s/>]"],
       "description": "Uses a real Stack/Tabs/NativeTabs/Drawer/Slot JSX element, not a bare word match. Drawer confirmed necessary against a real wiki_reader app using expo-router/drawer -- a Stack/Tabs/NativeTabs-only list would have false-negatived on legitimate code."
-    },
-    {
-      "id": "router_no_direct_react_navigation_import",
-      "category": "lexical",
-      "kind": "text_absent",
-      "target": "from ['\"]@react-navigation/",
-      "description": "SDK 56+ rule: never import @react-navigation/* directly -- use expo-router/react-navigation instead"
     },
     {
       "id": "router_app_dir_exists",
@@ -121,27 +114,6 @@
       "description": "expo-router convention: a +not-found route for unmatched paths."
     },
     {
-      "id": "native_ui_no_expo_av",
-      "category": "lexical",
-      "kind": "text_absent",
-      "target": "from ['\"]expo-av['\"]",
-      "description": "expo-native-ui rule: expo-av is removed -- use expo-audio/expo-video instead."
-    },
-    {
-      "id": "native_ui_no_dimensions_get",
-      "category": "lexical",
-      "kind": "text_absent",
-      "target": "Dimensions\\.get\\(",
-      "description": "expo-native-ui rule: use useWindowDimensions, not Dimensions.get()."
-    },
-    {
-      "id": "native_ui_no_safe_area_view_from_react_native",
-      "category": "lexical",
-      "kind": "text_absent",
-      "target": "import\\s*\\{[^}]*\\bSafeAreaView\\b[^}]*\\}\\s*from\\s*['\"]react-native['\"]",
-      "description": "expo-native-ui rule: use react-native-safe-area-context, not react-native's own SafeAreaView. Anchored to the import statement (not a bare word match) to avoid flagging the correct import from react-native-safe-area-context."
-    },
-    {
       "id": "expo_ui_import_used",
       "category": "lexical",
       "kind": "text_any",
@@ -150,27 +122,6 @@
         "from ['\"]@expo/ui/jetpack-compose['\"]", "from ['\"]@expo/ui/community/"
       ],
       "description": "Actually imports from @expo/ui (root, a platform-specific subpackage, or a community drop-in), not just declares it as a package.json dependency. A dependency-only check (an earlier version of this check) has a real loophole: an app can declare @expo/ui and never import or render anything from it, and still pass every expo-ui check, since the other two are absence checks -- confirmed live against both real hot_chocolate/wiki_reader apps, which declare the dependency but never import it anywhere in src/."
-    },
-    {
-      "id": "expo_ui_no_host_from_subpackage",
-      "category": "lexical",
-      "kind": "text_absent",
-      "target": "\\bHost\\b[^\\n]*from\\s*['\"]@expo/ui/(swift-ui|jetpack-compose)['\"]",
-      "description": "expo-ui rule: Host must always be imported from the '@expo/ui' root, never from a platform-specific subpackage."
-    },
-    {
-      "id": "expo_ui_platform_specific_trees_not_in_app_dir",
-      "category": "structural",
-      "kind": "path_absent",
-      "target": ["app/**/*.ios.tsx", "app/**/*.android.tsx", "src/app/**/*.ios.tsx", "src/app/**/*.android.tsx"],
-      "description": "expo-ui rule: platform-specific @expo/ui trees must live in components/, never under app/ -- Expo Router doesn't support platform extensions for route files."
-    },
-    {
-      "id": "data_fetching_no_axios",
-      "category": "lexical",
-      "kind": "text_absent",
-      "target": "from ['\"]axios['\"]",
-      "description": "expo-data-fetching rule: avoid axios, prefer the built-in fetch (or expo/fetch)."
     },
     {
       "id": "data_fetching_uses_fetch_or_query_lib",
