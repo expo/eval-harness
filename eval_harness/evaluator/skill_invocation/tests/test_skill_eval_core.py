@@ -7,13 +7,16 @@ from pathlib import Path
 from eval_harness.evaluator.skill_invocation.analysis import (
     aggregate_skill_results,
     analyze_artifacts,
+    compute_skill_results,
     discover_artifact_layout,
     score_case_run,
 )
 from eval_harness.evaluator.skill_invocation.uptake_checks.registry import (
+    Check,
     all_checks,
     load_checks_data,
     load_skill_map,
+    resolve_checks_by_skill,
     resolve_checks_for_skills,
     run_checks,
 )
@@ -300,6 +303,109 @@ class SkillEvalCoreTests(unittest.TestCase):
 
         self.assertTrue(results["router_navigator_jsx_tag"].passed)
 
+    def test_compute_skill_results_gives_each_skill_independent_trigger_and_uptake(self):
+        # SKILL_EVALUATOR_REVIEW.md finding 1: two expected skills, only one
+        # triggers -- each must get its own result, not a shared pooled
+        # number. Also covers "static uptake is still reported when an
+        # expected skill was not triggered" -- expo-ui's uptake is measured
+        # even though it never triggered.
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "app").mkdir()
+            (app / "app" / "index.tsx").write_text(
+                "import { Stack } from 'expo-router';\n"
+                "export default function App(){ return <Stack />; }\n"
+            )
+            checks_dir = _write_checks_dir(
+                Path(td) / "checks",
+                checks=[
+                    {"id": "router_check", "category": "lexical", "kind": "import", "target": "expo-router"},
+                    {"id": "ui_check", "category": "lexical", "kind": "import", "target": "@expo/ui"},
+                ],
+                skill_map={"expo-router": ["router_check"], "expo-ui": ["ui_check"]},
+            )
+            checks_by_skill, _ = resolve_checks_by_skill(["expo-router", "expo-ui"], checks_dir)
+            pooled_checks, _ = resolve_checks_for_skills(["expo-router", "expo-ui"], checks_dir)
+            results_by_id = {r.id: r for r in run_checks(pooled_checks, app)}
+
+            skills = compute_skill_results(
+                expected_skills=["expo-router", "expo-ui"],
+                triggered_skills=["expo-router"],
+                checks_by_skill=checks_by_skill,
+                results_by_id=results_by_id,
+                app_dir_missing=False,
+            )
+
+        self.assertTrue(skills["expo-router"]["triggered"])
+        self.assertEqual(skills["expo-router"]["trigger_status"], "observed")
+        self.assertEqual(skills["expo-router"]["uptake_rate"], 1.0)
+
+        self.assertFalse(skills["expo-ui"]["triggered"])
+        self.assertEqual(skills["expo-ui"]["trigger_status"], "not_observed")
+        self.assertEqual(skills["expo-ui"]["uptake_status"], "measured")
+        self.assertEqual(skills["expo-ui"]["uptake_rate"], 0.0)
+
+    def test_compute_skill_results_projects_a_shared_check_into_both_skills(self):
+        # A check mapped to two skills must contribute its full result to
+        # both -- execution dedup (run once) is not an attribution rule.
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "app").mkdir()
+            (app / "app" / "index.tsx").write_text("export default function App(){ return null; }\n")
+            checks_dir = _write_checks_dir(
+                Path(td) / "checks",
+                checks=[{"id": "shared_check", "category": "structural", "kind": "path_exists", "target": ["app"]}],
+                skill_map={"skill-a": ["shared_check"], "skill-b": ["shared_check"]},
+            )
+            checks_by_skill, _ = resolve_checks_by_skill(["skill-a", "skill-b"], checks_dir)
+            pooled_checks, _ = resolve_checks_for_skills(["skill-a", "skill-b"], checks_dir)
+            self.assertEqual(len(pooled_checks), 1, "shared check should only be executed once")
+            results_by_id = {r.id: r for r in run_checks(pooled_checks, app)}
+
+            skills = compute_skill_results(
+                expected_skills=["skill-a", "skill-b"],
+                triggered_skills=[],
+                checks_by_skill=checks_by_skill,
+                results_by_id=results_by_id,
+                app_dir_missing=False,
+            )
+
+        self.assertEqual(skills["skill-a"]["uptake_rate"], 1.0)
+        self.assertEqual(skills["skill-b"]["uptake_rate"], 1.0)
+        self.assertTrue(skills["skill-a"]["checks"][0]["passed"])
+        self.assertTrue(skills["skill-b"]["checks"][0]["passed"])
+
+    def test_compute_skill_results_marks_unmapped_skill_unsupported(self):
+        # An expected skill absent from skill_map.json must not look like
+        # "zero checks needed, trivially satisfied".
+        skills = compute_skill_results(
+            expected_skills=["expo-ui"],
+            triggered_skills=[],
+            checks_by_skill={"expo-ui": None},
+            results_by_id={},
+            app_dir_missing=False,
+        )
+
+        self.assertEqual(skills["expo-ui"]["uptake_status"], "unsupported")
+        self.assertIsNone(skills["expo-ui"]["uptake_rate"])
+        self.assertIsNone(skills["expo-ui"]["total"])
+
+    def test_compute_skill_results_marks_missing_app_distinct_from_measured_zero(self):
+        # A missing app tree must not look like "measured, scored zero".
+        checks_by_skill = {"expo-ui": [Check(id="c1", category="lexical", kind="import", target="@expo/ui")]}
+
+        skills = compute_skill_results(
+            expected_skills=["expo-ui"],
+            triggered_skills=[],
+            checks_by_skill=checks_by_skill,
+            results_by_id={},
+            app_dir_missing=True,
+        )
+
+        self.assertEqual(skills["expo-ui"]["uptake_status"], "missing_app")
+        self.assertIsNone(skills["expo-ui"]["uptake_rate"])
+        self.assertEqual(skills["expo-ui"]["total"], 1)
+
     def test_path_exists_and_path_absent_checks(self):
         with tempfile.TemporaryDirectory() as td:
             app = Path(td)
@@ -577,7 +683,10 @@ class SkillEvalCoreTests(unittest.TestCase):
         self.assertEqual(payload["outcome_status"], "complete")
         self.assertEqual(payload["runs"][0]["evaluator_pct"], 87.5)
         self.assertTrue(payload["runs"][0]["build_success"])
-        self.assertEqual(payload["skills"]["expo-ui"]["trigger_recall"], 1.0)
+        self.assertTrue(payload["skills"]["expo-ui"]["triggered"])
+        self.assertEqual(payload["skills"]["expo-ui"]["trigger_status"], "observed")
+        self.assertEqual(payload["skills"]["expo-ui"]["uptake_status"], "measured")
+        self.assertEqual(payload["skills"]["expo-ui"]["uptake_rate"], 1.0)
         self.assertNotIn("classification", payload["skills"]["expo-ui"])
 
     def test_analyze_artifacts_marks_missing_trace_without_crashing(self):
