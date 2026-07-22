@@ -241,6 +241,32 @@ class SkillEvalCoreTests(unittest.TestCase):
         self.assertFalse(results[0].passed)
         self.assertNotIn("reset-project.js", results[0].evidence)
 
+    def test_lexical_check_ignores_skip_dir_name_in_absolute_path_above_app_root(self):
+        # Regression guard: found live on a real EAS Workflows run, where the
+        # app is authored under /home/expo/workingdir/build/... -- "build" is
+        # a literal segment of the CI runner's own working directory, not
+        # anything inside the app. AppTree must only match SKIP_DIR_PARTS
+        # against parts relative to the app root, never against the parent
+        # directories of an absolute app_dir -- otherwise every file in every
+        # app authored on that runner is silently skipped, and every lexical
+        # check (and the syntax build-health check) reports zero files found.
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td) / "build" / "agent-workspace" / "app"
+            app.mkdir(parents=True)
+            (app / "_layout.tsx").write_text("import { Stack } from 'expo-router';\n")
+            checks_dir = _write_checks_dir(
+                Path(td) / "checks",
+                checks=[{"id": "uses_router", "category": "lexical", "kind": "import", "target": "expo-router"}],
+                skill_map={"expo-router": ["uses_router"]},
+            )
+
+            checks, _ = resolve_checks_for_skills(["expo-router"], checks_dir)
+            results = run_checks(checks, app)
+            syntax = check_syntax(app)
+
+        self.assertTrue(results[0].passed)
+        self.assertEqual(syntax["total_files"], 1)
+
     def test_path_checks_ignore_scripts_dir(self):
         # Same regression, for path_exists/path_absent -- scripts/ must be
         # excluded from structural checks too, not just lexical ones.

@@ -130,10 +130,11 @@ class AppTree:
                 continue
             if path.name in SKIP_FILENAMES:
                 continue
-            if any(part in SKIP_DIR_PARTS for part in path.parts):
+            rel_path = path.relative_to(self.root)
+            if any(part in SKIP_DIR_PARTS for part in rel_path.parts):
                 continue
             try:
-                files[path.relative_to(self.root)] = path.read_text(encoding="utf-8")
+                files[rel_path] = path.read_text(encoding="utf-8")
             except UnicodeDecodeError:
                 continue
         return files
