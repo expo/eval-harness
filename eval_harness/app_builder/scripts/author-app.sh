@@ -34,7 +34,12 @@ PRD="${PRD:-dataset/prds/hot_chocolate/prd/mvp.txt}"
 # skill_invocation's analysis to score against.
 SCENARIO="${SCENARIO:-skills_available_unmentioned}"
 SKILL_MENTION="${SKILL_MENTION:-}"
-export AGENT AGENT_MODEL METRO_MODE PRD SCENARIO SKILL_MENTION
+# Base authoring prompt file, relative to repo root (see eval::run_coding_agent
+# in agents.sh, which concatenates it with "## App PRD" + the PRD content, and
+# the "## Guidance" skill_mention block for skills_available_mentioned).
+# Overridable to compare prompt variants against the same PRD/scenario matrix.
+PROMPT_FILE="${PROMPT_FILE:-eval_harness/app_builder/prompts/author_app.md}"
+export AGENT AGENT_MODEL METRO_MODE PRD SCENARIO SKILL_MENTION PROMPT_FILE
 
 # Lets the agent's own `eas init --id "$EAS_PROJECT_ID"` (see author_app.md) link its freshly
 # authored project to the same EAS project the harness itself uses, rather than needing to mint
@@ -58,6 +63,7 @@ echo "RUN_ID=$RUN_ID  AGENT=$AGENT  WORKSPACE=$WORKSPACE"
   echo "PRD=$PRD"
   echo "METRO_MODE=$METRO_MODE"
   echo "SCENARIO=$SCENARIO"
+  echo "PROMPT_FILE=$PROMPT_FILE"
 } >"$OUT/author.env"
 
 EVAL_PROXY_PIDS=()

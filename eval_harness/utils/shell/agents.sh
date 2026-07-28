@@ -92,16 +92,20 @@ EOF
 # install/lookup entirely and loads the plugin via `--plugin-dir` from this
 # local path instead -- used by the skills-repo CI integration so a PR's own
 # proposed skill changes get exercised, not whatever's currently published.
+# PROMPT_FILE (default eval_harness/app_builder/prompts/author_app.md):
+# base authoring prompt, relative to repo root -- overridable to compare
+# prompt variants against the same PRD/scenario matrix.
 eval::run_coding_agent() { # agent root workspace prd_file out_dir [model]
   local agent="$1" root="$2" workspace="$3" prd_file="$4" out="$5" model="${6:-}"
   [ "$agent" = "claude" ] && agent="claude-code"
   local scenario="${SCENARIO:-skills_available_unmentioned}"
   local skills_enabled=1
   [ "$scenario" = "skills_unavailable" ] && skills_enabled=0
+  local prompt_file="${PROMPT_FILE:-eval_harness/app_builder/prompts/author_app.md}"
   echo "================= STAGE C: coding agent ($agent) authors the app ================="
-  echo "  scenario=$scenario  skills_enabled=$skills_enabled"
+  echo "  scenario=$scenario  skills_enabled=$skills_enabled  prompt_file=$prompt_file"
   local prompt TO
-  prompt="$(cat "$root/eval_harness/app_builder/prompts/author_app.md")"
+  prompt="$(cat "$root/$prompt_file")"
   if [ "$scenario" = "skills_available_mentioned" ] && [ -n "${SKILL_MENTION:-}" ]; then
     # Inserted before "The PRD follows." (not after the PRD itself) so it
     # reads as part of the task instructions the agent sees first, not as a

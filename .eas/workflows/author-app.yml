@@ -38,6 +38,13 @@ on:
         default: ''
         required: false
         description: Skill id to explicitly name in the prompt; only used when skill_scenario=skills_available_mentioned
+      prompt_file:
+        type: string
+        default: eval_harness/app_builder/prompts/author_app.md
+        required: false
+        description: >-
+          Base authoring prompt path under the repo root. Overridable to
+          compare prompt variants against the same PRD/scenario matrix.
 
 jobs:
   author_app:
@@ -49,6 +56,7 @@ jobs:
       PRD: ${{ inputs.prd || 'dataset/prds/notes/prd/mvp.txt' }}
       SCENARIO: ${{ inputs.skill_scenario || 'skills_available_unmentioned' }}
       SKILL_MENTION: ${{ inputs.skill_mention || '' }}
+      PROMPT_FILE: ${{ inputs.prompt_file || 'eval_harness/app_builder/prompts/author_app.md' }}
     steps:
       - uses: eas/checkout
 
