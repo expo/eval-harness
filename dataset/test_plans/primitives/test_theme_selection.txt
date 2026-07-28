@@ -1,0 +1,80 @@
+<test_plan>
+
+<purpose>
+Primitive: Settings → Appearance mode selection (System + Light + Dark) (APP-AGNOSTIC).
+Verify that an appearance settings surface exposes the PRD-specified mutually exclusive modes and that choosing explicit dark or light mode updates the app immediately.
+
+This test plan is APP-AGNOSTIC. Use the supplied App PRD to determine how settings opens, the appearance option labels, the default mode, and which visible surfaces should adapt.
+</purpose>
+
+<seeding_and_precondition>
+Read the supplied App PRD to determine:
+
+- SETTINGS ENTRY: the action that presents appearance settings.
+- APPEARANCE OPTIONS: the exact labels and default selection.
+- ADAPTIVE SURFACES: visible app areas expected to change with the selected mode.
+
+Reach the screen containing the settings entry. Do not open settings during setup.
+
+If the PRD does not expose user-selectable appearance modes, record this primitive as not-applicable and immediately call complete_step with the note "N/A: PRD indicates app has no appearance-mode selection."
+</seeding_and_precondition>
+
+<steps>
+<step>
+
+<name>
+test_appearance_options_are_mutually_exclusive
+</name>
+
+Open appearance settings.
+
+Verify:
+- Every appearance option named by the PRD is visible
+- The PRD-specified default option is selected on a fresh launch
+- Exactly one appearance option is selected
+
+<points>3</points>
+</step>
+
+<step>
+
+<name>
+test_dark_and_light_modes_apply_immediately
+</name>
+
+Select Dark.
+
+Verify:
+- Dark becomes the only selected appearance option
+- The visible app surface changes to a dark appearance without requiring an app restart
+- Text and controls remain legible in dark appearance
+
+Select Light.
+
+Verify:
+- Light becomes the only selected appearance option
+- The visible app surface changes to a light appearance without requiring an app restart
+- Text and controls remain legible in light appearance
+
+<points>6</points>
+</step>
+
+<step>
+
+<name>
+test_system_mode_can_be_restored
+</name>
+
+Select System.
+
+Verify:
+- System becomes the only selected appearance option
+- The app returns to the current device appearance
+
+<points>2</points>
+</step>
+</steps>
+
+<full_points>11</full_points>
+
+</test_plan>

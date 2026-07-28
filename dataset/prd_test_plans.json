@@ -36,5 +36,15 @@
     "test_empty_state.txt",
     "test_pull_to_refresh.txt",
     "test_keyboard_handling.txt"
+  ],
+  "pool": [
+    "test_native_tab_bar.txt",
+    "test_tab_screen_transition.txt",
+    "test_native_search_tab.txt",
+    "test_text_search_filter.txt",
+    "test_shared_header_scroll_edge_effect.txt",
+    "test_scrollable_grid.txt",
+    "test_native_form_sheet.txt",
+    "test_theme_selection.txt"
   ]
 }

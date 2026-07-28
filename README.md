@@ -39,7 +39,7 @@ eval_harness/
   utils/                      # artifacts, iOS, shell, and telemetry helpers (shared)
 
 dataset/
-  prds/                       # Notes, Hot Chocolate, and Wiki Reader app PRDs (shared)
+  prds/                       # Notes, Hot Chocolate, Wiki Reader, and Pool app PRDs (shared)
   test_plans/primitives/      # app-agnostic primitive plans
   prd_skills.json             # app -> expected skill ids (skill-eval ground truth)
   prd_test_plans.json         # app -> relevant test-plan filenames (iOS-eval ground truth)
@@ -92,6 +92,16 @@ eas workflow:run .eas/workflows/eval-e2e.yml \
   -F prd=dataset/prds/notes/prd/mvp.txt \
   -F run_eval_ios=true \
   -F run_eval_skill=false
+```
+
+Run the focused iOS 27 native navigation and glass fixture by changing the PRD:
+
+```bash
+eas workflow:run .eas/workflows/eval-e2e.yml \
+  -F agent=codex \
+  -F prd=dataset/prds/pool/prd/mvp.txt \
+  -F run_eval_ios=true \
+  -F run_eval_skill=true
 ```
 
 Authoring always uses a direct PRD path. Which test plans run in `eval_ios`,

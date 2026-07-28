@@ -1,5 +1,6 @@
 {
   "notes": ["expo-project-structure", "expo-router"],
   "hot_chocolate": ["expo-project-structure", "expo-router", "expo-native-ui", "expo-ui"],
-  "wiki_reader": ["expo-project-structure", "expo-router", "expo-data-fetching", "expo-native-ui", "expo-ui"]
+  "wiki_reader": ["expo-project-structure", "expo-router", "expo-data-fetching", "expo-native-ui", "expo-ui"],
+  "pool": ["expo-project-structure", "expo-router", "expo-native-ui"]
 }

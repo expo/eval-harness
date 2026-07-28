@@ -1,0 +1,63 @@
+<test_plan>
+
+<purpose>
+Primitive: Surface → Native scrollable grid (vertical movement + inset-aware navigation chrome) (APP-AGNOSTIC).
+Verify that a collection the PRD describes as a native vertical scroll view can reach below-the-fold content while preserving its grid layout and remaining correctly inset around persistent navigation chrome.
+
+This test plan is APP-AGNOSTIC. Use the supplied App PRD to determine the scrollable collection, its column count, a card initially visible near the top, and a card that begins below the fold.
+</purpose>
+
+<seeding_and_precondition>
+Read the supplied App PRD to determine:
+
+- COLLECTION: a screen with enough seeded items to require vertical scrolling.
+- GRID SHAPE: the required number of columns.
+- TOP ITEM: an identifying card visible near the initial top position.
+- BELOW-FOLD ITEM: an identifying card that is not initially visible and can be reached by scrolling.
+- PERSISTENT CHROME: the header and tab bar around which content must remain usable.
+
+Reach the collection at its initial top position. Note a visible top card and confirm that a known later card is not yet visible.
+
+If the PRD has no scrollable grid or collection, record this primitive as not-applicable and immediately call complete_step with the note "N/A: PRD indicates app has no scrollable grid."
+</seeding_and_precondition>
+
+<steps>
+<step>
+
+<name>
+test_grid_scrolls_to_below_fold_content
+</name>
+
+Scroll downward through the collection until a card that began below the fold is visible.
+
+Verify:
+- The below-fold card becomes visible after vertical scrolling
+- The initially noted top card is no longer visible after scrolling far enough
+- The collection retains the PRD-specified column count
+- The fixed header remains visible
+- The fixed tab bar remains visible
+- Visible cards are not covered by the home indicator or made unreachable behind the tab bar
+
+<points>6</points>
+</step>
+
+<step>
+
+<name>
+test_grid_returns_to_inset_top
+</name>
+
+Scroll back to the top of the collection.
+
+Verify:
+- The initially noted top card is visible again
+- The first row is positioned below the readable header content
+- The grid remains in the PRD-specified column layout
+
+<points>3</points>
+</step>
+</steps>
+
+<full_points>9</full_points>
+
+</test_plan>

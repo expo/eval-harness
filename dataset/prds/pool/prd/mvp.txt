@@ -1,0 +1,181 @@
+Pool — Native Glass Navigation App (MVP)
+
+## Overview
+
+Pool is a small, read-only visual gallery built to exercise Expo's iOS-native
+navigation surfaces and iOS 27 glass and scroll-edge effects. The app has two
+primary sections, Home and Pools, plus native search and a compact appearance
+settings sheet.
+
+The visual content is bundled with the app. There are no accounts, network
+requests, editing flows, or backend services.
+
+## Target Platform
+
+- iPhone running iOS 27.
+- Framework: React Native with Expo SDK 57.x.
+- Use Expo's file-based routes for every app destination and navigation
+  surface.
+- The app is intentionally iOS-specific. Android and web parity are not
+  required.
+- Native platform surfaces must be used for the tab bar, search presentation,
+  scroll-edge effect, and settings form sheet. Do not recreate those surfaces
+  with a custom JavaScript tab bar, search overlay, blur gradient, or drawer.
+- The project must include `package.json` with `expo`, `react`, and
+  `react-native` dependencies, Expo configuration, and an app entry point.
+- The app must use safe-area-aware layout and remain usable around the status
+  bar, Dynamic Island, home indicator, tab bar, and keyboard.
+
+## Seeded Visual Content
+
+The app includes at least 18 bundled visual cards in Home and at least 18 in
+Pools so that both screens require substantial vertical scrolling.
+
+Each card displays:
+
+- A local image, illustration, or colorful visual treatment.
+- A short, visible, unique title.
+
+The cards are arranged in a two-column grid. Home and Pools must use visibly
+different content. Each screen includes a visible section label ("Home" or
+"Pools") above its grid so the active destination is unambiguous to the
+evaluator.
+
+## Shared Header
+
+Home, Pools, and Search use the same fixed native header:
+
+- Left: a circular profile picture.
+- Center: the title `Pool`, rendered with the iOS New York system serif
+  typeface or the closest available New York system variant.
+- Right: a settings button using the system settings/gear symbol and the
+  accessibility label `Settings`.
+
+The title is visually centered regardless of the widths of the left and right
+items. The header remains fixed while screen content scrolls beneath it.
+
+At the top scroll edge, use the native soft scroll-edge effect to create a
+progressive blur: content becomes increasingly blurred as it passes beneath
+the header. This must look like a soft, progressive transition rather than a
+uniform blur, opaque header fill, hard cutoff, or manually drawn gradient.
+
+The same header layout, controls, typography, and scroll-edge behavior remain
+in place when switching between Home and Pools.
+
+## Native Tab Bar
+
+Use an iOS-native tab bar with two primary tabs in this order:
+
+1. Home
+2. Pools
+
+Home is selected on first launch.
+
+The Home and Pools items:
+
+- Appear together in the leading/left portion of the tab bar.
+- Display only their centered text labels.
+- Do not display icons or badges.
+- Show the system-native selected state for exactly one tab at a time.
+
+A separate system search item appears in the trailing/right native search
+position. It uses the native search role and system search glyph; it is not a
+third labeled primary-content tab.
+
+On iOS 27, the tab bar uses the system Liquid Glass appearance. It remains
+anchored above the home indicator while content scrolls behind it, allowing
+the colors and motion of the grid to remain perceptible through the
+translucent glass material.
+
+## Tab Switching
+
+Tapping Home or Pools changes the visible grid and moves the active state to
+the selected tab.
+
+The screen content uses a directional horizontal slide transition:
+
+- Home to Pools slides toward the next screen.
+- Pools to Home slides in the opposite direction.
+- The shared header and native tab bar stay fixed while the content area
+  transitions.
+
+Each primary tab preserves its vertical scroll position when the user switches
+away and returns.
+
+## Scrolling
+
+Home and Pools each use a native vertical scroll view with automatic content
+inset adjustment. The two-column grid:
+
+- Scrolls smoothly from its first row to cards that begin below the fold.
+- Extends behind the translucent header and tab bar.
+- Does not place its first or last cards underneath untappable navigation
+  chrome.
+- Preserves the two-column layout throughout the scroll.
+
+Scrolling is deliberately central to this app: it must make the progressive
+header blur and the tab bar's transparency and Liquid Glass response clearly
+visible.
+
+## Native Search
+
+The separate search item is visually isolated in the trailing/right native
+search position.
+
+When the user taps it:
+
+- The system search item becomes a native search input in the tab bar's search
+  position.
+- The input receives focus automatically.
+- The iOS keyboard opens.
+- A Search results view appears beneath the unchanged shared `Pool` header.
+
+Search matches the visible card title using a case-insensitive substring
+comparison across both Home and Pools. Results update as the user types and
+identify whether each match belongs to Home or Pools.
+
+An empty query shows all cards. The native clear affordance empties the query
+and restores all results. Cancelling search dismisses the keyboard and returns
+to the primary tab that was selected before search opened.
+
+## Appearance Settings Sheet
+
+Tapping the Settings button presents a native iOS form sheet from the bottom.
+The sheet:
+
+- Opens at a medium, partial-height detent.
+- Leaves part of the current screen visible behind it.
+- Shows the native grabber.
+- Can be dismissed by dragging down.
+- Has the title `Appearance`.
+
+The sheet provides exactly three mutually exclusive appearance choices:
+
+- System
+- Light
+- Dark
+
+System is the default. Selecting Light or Dark immediately overrides the app's
+appearance. Selecting System makes the app follow the device appearance again.
+Exactly one option is visibly selected at a time.
+
+The selected appearance applies consistently to the header, grids, native tab
+bar, search view, and settings sheet. Text and controls remain legible in every
+mode.
+
+## Accessibility
+
+- The Home and Pools tab labels are exposed to accessibility.
+- The search item and active search input are exposed with a Search label.
+- The profile picture has the accessibility label `Profile`.
+- The settings button has the accessibility label `Settings`.
+- Every visual card exposes its visible title.
+- Appearance choices expose their labels and selected state.
+
+## Out of Scope
+
+- User accounts or profile editing.
+- Creating, editing, deleting, or favoriting cards.
+- Network-backed content.
+- Pool booking, schedules, maps, or payments.
+- Android and web-specific navigation designs.

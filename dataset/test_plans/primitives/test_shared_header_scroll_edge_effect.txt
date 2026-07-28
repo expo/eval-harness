@@ -1,0 +1,64 @@
+<test_plan>
+
+<purpose>
+Primitive: Navigation and surface → Shared native header + soft scroll-edge effect (APP-AGNOSTIC).
+Verify that the PRD-specified header is shared across primary destinations, remains fixed above scrolling content, and uses the native soft scroll-edge effect to progressively blur content passing beneath it.
+
+This test plan is APP-AGNOSTIC. Use the supplied App PRD to determine the shared title, leading item, trailing action, title typography, primary screens, and required top-edge effect.
+</purpose>
+
+<seeding_and_precondition>
+Read the supplied App PRD to determine:
+
+- HEADER: its title, leading item, trailing action, and title typography.
+- PRIMARY SCREENS: at least two destinations that should share the same header.
+- SCROLLABLE SCREEN: a primary screen with enough visual content to pass beneath the header.
+- EDGE EFFECT: whether the PRD requires a soft progressive blur at the top scroll edge.
+
+Reach the first primary screen at the top of its scrollable content.
+
+If the PRD does not specify a shared fixed header over scrollable content, record this primitive as not-applicable and immediately call complete_step with the note "N/A: PRD indicates app has no shared fixed header with a scroll-edge effect."
+</seeding_and_precondition>
+
+<steps>
+<step>
+
+<name>
+test_header_configuration_is_shared
+</name>
+
+Observe the header on the first primary screen, then switch to the second primary screen.
+
+Verify:
+- The header shows the PRD-specified leading item
+- The header title text matches the PRD
+- The header title is visually centered
+- The header title uses the PRD-specified serif typography when required
+- The header shows the PRD-specified trailing action
+- The second primary screen retains the same header layout
+
+<points>6</points>
+</step>
+
+<step>
+
+<name>
+test_soft_scroll_edge_effect_under_fixed_header
+</name>
+
+On a primary screen with scrollable visuals, slowly scroll the content upward beneath the header.
+
+Verify:
+- The header remains fixed while the content moves beneath it
+- Content becomes progressively more blurred as it approaches and passes beneath the header
+- The top-edge treatment has a soft transition rather than a hard cutoff line
+- The header remains readable while colorful content passes behind it
+- Scrolling back to the top restores a clean, correctly inset first row
+
+<points>5</points>
+</step>
+</steps>
+
+<full_points>11</full_points>
+
+</test_plan>

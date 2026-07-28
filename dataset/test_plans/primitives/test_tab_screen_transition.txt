@@ -1,0 +1,59 @@
+<test_plan>
+
+<purpose>
+Primitive: Navigation → Tab content transition (directional horizontal slide) (APP-AGNOSTIC).
+Verify that switching between ordered primary tabs uses the PRD-specified directional horizontal slide while persistent navigation chrome remains stationary.
+
+This test plan is APP-AGNOSTIC. Use the supplied App PRD to determine two adjacent tabs, their order, their identifying content, and whether their content should slide during tab selection.
+</purpose>
+
+<seeding_and_precondition>
+Read the supplied App PRD to determine:
+
+- PREVIOUS TAB and NEXT TAB: two adjacent primary destinations with distinct identifying content.
+- PERSISTENT CHROME: any header and tab bar that should remain stationary during the transition.
+
+Reach the previous tab with its identifying content visible. Do not switch tabs during setup.
+
+If the PRD does not specify an animated transition between tab screens, record this primitive as not-applicable and immediately call complete_step with the note "N/A: PRD indicates tab switching has no required animated content transition."
+</seeding_and_precondition>
+
+<steps>
+<step>
+
+<name>
+test_forward_tab_switch_slides_content
+</name>
+
+Tap the next tab and observe the transition.
+
+Verify:
+- The content area moves with a visible horizontal slide rather than changing instantaneously
+- The slide moves in the forward direction established by the PRD's tab order
+- The next tab's identifying content is visible when the transition finishes
+- The persistent header remains stationary during the content transition when the PRD specifies one
+- The tab bar remains stationary during the content transition
+
+<points>5</points>
+</step>
+
+<step>
+
+<name>
+test_reverse_tab_switch_reverses_slide
+</name>
+
+Tap the previous tab and observe the transition.
+
+Verify:
+- The content area moves with a visible horizontal slide
+- The reverse slide moves in the opposite direction from the forward slide
+- The previous tab's identifying content is visible when the transition finishes
+
+<points>3</points>
+</step>
+</steps>
+
+<full_points>8</full_points>
+
+</test_plan>
