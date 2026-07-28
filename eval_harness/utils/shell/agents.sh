@@ -101,10 +101,14 @@ eval::run_coding_agent() { # agent root workspace prd_file out_dir [model]
   echo "================= STAGE C: coding agent ($agent) authors the app ================="
   echo "  scenario=$scenario  skills_enabled=$skills_enabled"
   local prompt TO
-  prompt="$(cat "$root/eval_harness/app_builder/prompts/author_app.md")"$'\n\n## App PRD\n\n'"$(cat "$prd_file")"
+  prompt="$(cat "$root/eval_harness/app_builder/prompts/author_app.md")"
   if [ "$scenario" = "skills_available_mentioned" ] && [ -n "${SKILL_MENTION:-}" ]; then
+    # Inserted before "The PRD follows." (not after the PRD itself) so it
+    # reads as part of the task instructions the agent sees first, not as a
+    # late addendum tacked on after the whole PRD.
     prompt="$prompt"$'\n\n## Guidance\n\nExplicitly use Expo'"'"'s "'"$SKILL_MENTION"'" skill/guidance for the relevant part of this feature.'
   fi
+  prompt="$prompt"$'\n\nThe PRD follows.\n\n## App PRD\n\n'"$(cat "$prd_file")"
   TO="$(eval::_agent_timeout)"
 
   if [ "$agent" = "codex" ]; then
