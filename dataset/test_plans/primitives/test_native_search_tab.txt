@@ -1,0 +1,69 @@
+<test_plan>
+
+<purpose>
+Primitive: Navigation → Native tab-bar search (separate search role + native input activation) (APP-AGNOSTIC).
+Verify that a separate native search-role item occupies the platform's trailing search position and activates the system search field, keyboard, and search destination rather than opening a custom overlay or top-of-content text field.
+
+Search-result filtering is covered separately by the text-search-filter primitive. This plan focuses on native placement and activation.
+
+This test plan is APP-AGNOSTIC. Use the supplied App PRD to determine the search item's placement, the expected search destination, and the destination to restore after cancellation.
+</purpose>
+
+<seeding_and_precondition>
+Read the supplied App PRD to determine:
+
+- SEARCH ITEM: the separate native search-role control and its expected trailing placement.
+- SEARCH DESTINATION: identifying content visible while native search is active.
+- RETURN DESTINATION: the selected primary tab that should return after cancellation.
+
+Reach a primary tab with the native tab bar visible. Note the selected primary tab. Do not activate search during setup.
+
+If the PRD does not specify a separate native tab-bar search item, record this primitive as not-applicable and immediately call complete_step with the note "N/A: PRD indicates app has no native tab-bar search item."
+</seeding_and_precondition>
+
+<steps>
+<step>
+
+<name>
+test_search_role_activates_native_input_and_keyboard
+</name>
+
+Tap the separate search item.
+
+Verify:
+- Before activation, the search item is visually separated from the primary tabs in the trailing native search position
+- A native search input appears in the tab bar's search position after activation
+- The native search input has keyboard focus
+- The iOS keyboard is visible
+- The PRD-specified search destination content is visible above the keyboard
+
+Type a short query into the active field.
+
+Verify:
+- The typed query is visible in the native search input
+- The search input remains visible above the keyboard while editing
+
+<points>7</points>
+</step>
+
+<step>
+
+<name>
+test_cancel_search_restores_primary_tab
+</name>
+
+Use the native cancel affordance.
+
+Verify:
+- The keyboard is dismissed
+- The native search input leaves its active editing state
+- The primary tab selected before search is restored
+- The primary tab bar returns to its non-search layout
+
+<points>4</points>
+</step>
+</steps>
+
+<full_points>11</full_points>
+
+</test_plan>

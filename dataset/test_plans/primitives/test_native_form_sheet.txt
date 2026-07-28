@@ -1,0 +1,63 @@
+<test_plan>
+
+<purpose>
+Primitive: Navigation → Native form sheet (system presentation + partial detent + interactive dismissal) (APP-AGNOSTIC).
+Verify that a surface the PRD identifies as a platform-native form sheet presents from the bottom with the system sheet treatment, rests at its specified partial-height detent, and supports native drag-to-dismiss behavior.
+
+This test plan is APP-AGNOSTIC. Use the supplied App PRD to determine which action presents the form sheet, its title, its initial detent, and identifying content inside it.
+</purpose>
+
+<seeding_and_precondition>
+Read the supplied App PRD to determine:
+
+- FORM SHEET: the surface explicitly required to use the platform-native form-sheet presentation.
+- PRESENTATION ACTION: the control that opens the form sheet.
+- INITIAL DETENT: the partial height where the sheet should initially rest.
+- SHEET CONTENT: its title and other identifying controls or content.
+
+Reach the screen containing the presentation action. Do not open the sheet during setup.
+
+If the PRD does not require a platform-native form sheet, record this primitive as not-applicable and immediately call complete_step with the note "N/A: PRD indicates app has no native form sheet."
+</seeding_and_precondition>
+
+<steps>
+<step>
+
+<name>
+test_native_form_sheet_presentation
+</name>
+
+Use the PRD-specified action to present the form sheet.
+
+Verify:
+- The sheet animates into view from the bottom
+- The sheet rests at the PRD-specified partial-height detent
+- The underlying screen remains partially visible
+- A system-style grabber is visible at the top of the sheet
+- The sheet shows the PRD-specified title
+- The sheet shows its PRD-specified identifying content
+- The sheet uses the platform form-sheet shape and material rather than appearing as a full-screen replacement
+
+<points>7</points>
+</step>
+
+<step>
+
+<name>
+test_native_form_sheet_drag_dismiss
+</name>
+
+Drag the grabber or sheet body downward past the dismiss threshold.
+
+Verify:
+- The sheet follows the downward gesture before dismissal
+- The sheet dismisses after crossing the threshold
+- The underlying screen is restored as the active surface
+
+<points>3</points>
+</step>
+</steps>
+
+<full_points>10</full_points>
+
+</test_plan>

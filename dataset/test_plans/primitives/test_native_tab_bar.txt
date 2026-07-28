@@ -1,0 +1,80 @@
+<test_plan>
+
+<purpose>
+Primitive: Navigation → Native tab bar (label-only primary tabs + separate native search item) (APP-AGNOSTIC).
+Verify that an app whose PRD calls for a system-native tab bar presents its primary destinations as native tab items, gives the selected destination a single active state, and places a search-role item separately in the platform's native search position.
+
+This test plan is APP-AGNOSTIC. Use the supplied App PRD to determine the primary tab labels, their order, whether they should have icons, the initially selected tab, and whether a separate search-role item is required.
+</purpose>
+
+<seeding_and_precondition>
+Read the supplied App PRD to determine:
+
+- PRIMARY TABS: their visible labels, order, and whether the PRD requires label-only items.
+- INITIAL TAB: the destination selected on a fresh launch.
+- SEARCH ITEM: whether the PRD requires a separate native search-role item and where the platform should place it.
+
+Start from a fresh launch on the app's root screen with the tab bar visible.
+
+If the PRD does not require a native tab bar, record this primitive as not-applicable and immediately call complete_step with the note "N/A: PRD indicates app has no native tab bar."
+</seeding_and_precondition>
+
+<steps>
+<step>
+
+<name>
+test_native_tab_bar_structure_and_selection
+</name>
+
+Observe the tab bar before interacting with it.
+
+Verify:
+- The system-style tab bar is visible at the platform's bottom navigation position
+- The PRD-specified primary tab labels are visible in the specified order
+- Each primary tab is label-only when the PRD forbids primary-tab icons
+- The PRD-specified initial tab is visibly selected
+- Exactly one primary tab has the selected appearance
+- A system search item is visually separated in the trailing native search position when the PRD specifies one
+- The tab bar has the platform's translucent glass/material appearance when the PRD requires it
+
+<points>7</points>
+</step>
+
+<step>
+
+<name>
+test_native_tab_selection_moves_active_state
+</name>
+
+Tap a different primary tab.
+
+Verify:
+- The tapped tab's identifying screen content is visible
+- The tapped tab now has the selected appearance
+- The previously selected tab no longer has the selected appearance
+- The native tab bar remains visible after the destination changes
+
+<points>4</points>
+</step>
+
+<step>
+
+<name>
+test_native_tab_preserves_destination_state
+</name>
+
+On a primary tab with scrollable content, scroll until a below-fold item is
+visible and note that item. Switch to another primary tab, then switch back.
+
+Verify:
+- The previously noted below-fold item is still visible without re-scrolling
+- The returned tab has the selected appearance
+- The other tab no longer has the selected appearance
+
+<points>3</points>
+</step>
+</steps>
+
+<full_points>14</full_points>
+
+</test_plan>
