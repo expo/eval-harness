@@ -32,6 +32,7 @@ warnings.filterwarnings("ignore", message="urllib3 v2 only supports OpenSSL")
 
 from .maestro.evaluator import MaestroEvaluator
 from .agent_device.evaluator import AgentDeviceEvaluator
+from .report import write_html_report
 
 _PACKAGE_DIR = Path(__file__).resolve().parent
 _REPO_ROOT = _PACKAGE_DIR.parents[2]
@@ -263,6 +264,10 @@ def main():
     print(f"\nResults written to {args.output}")
     print(f"Macro avg: {suite_macro_avg}% across {len(plan_results) - n_not_applicable} scored test plan(s){na_suffix}")
     print(f"Micro (verify-weighted): {suite_micro_pct}% ({total_score}/{total_full})")
+
+    html_path = args.output.with_suffix(".html")
+    write_html_report(output, html_path)
+    print(f"HTML report written to {html_path}")
 
 
 if __name__ == "__main__":
