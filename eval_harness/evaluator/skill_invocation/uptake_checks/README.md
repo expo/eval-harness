@@ -85,8 +85,142 @@ The other 12 are deliberately unmapped: most because their guidance is a CLI/clo
 | `code_checks.py` | Code-driven checks: per-file-subset filtering, real AST parsing, or conditional (`not_applicable`-capable) rules the generic declarative dispatch can't express |
 | `trigger.py` | Trigger detection, trace-based + recall/precision scoring against `dataset/prd_skills.json` |
 
-## Adding a check
+## Contributor guide: add coverage for another skill
 
-1. Add an entry to `checks_data.json` (or a `@register`-decorated function for a code-driven category).
-2. Add its id to whichever skill(s) in `skill_map.json` should claim it.
-3. A skill absent from `skill_map.json`, or a mapped id missing from the registry, produces a warning in `metrics.json` rather than crashing — same degrade-don't-crash philosophy as the rest of this evaluator.
+Most additions require two configuration changes:
+
+### 1. Add checks
+
+Add each observable rule from the skill to the `"checks"` array in
+`checks_data.json`:
+
+```json
+{
+  "id": "example_api_used",
+  "category": "lexical",
+  "kind": "text_any",
+  "target": ["useExample\\(", "<Example[\\s/>]"],
+  "description": "Uses one of the supported Example APIs"
+}
+```
+
+Available kinds:
+
+| Category | Kinds |
+| --- | --- |
+| `lexical` | `import`, `text`, `text_any`, `text_absent` |
+| `structural` | `path_exists`, `path_absent`, `package_dependency`, `tsconfig_path_alias` |
+
+`text` targets are Python regular expressions. `text_any` accepts a list of
+alternative expressions. Path targets are app-root-relative globs and may also
+be lists. `package_dependency` checks `dependencies` and `devDependencies` in
+the root `package.json`.
+
+### 2. Map checks to the skill
+
+Add the canonical skill id and its check ids to `skill_map.json`:
+
+```json
+{
+  "expo-example-skill": [
+    "example_api_used"
+  ]
+}
+```
+
+Existing checks may be reused by multiple skills. Do not include an `expo:`
+plugin namespace in the skill id.
+
+### Example: `expo-router`
+
+A shortened version of the existing `expo-router` configuration looks like
+this in `checks_data.json`:
+
+```json
+{
+  "id": "router_import",
+  "category": "lexical",
+  "kind": "import",
+  "target": "expo-router",
+  "description": "Imports from expo-router"
+},
+{
+  "id": "router_app_dir_exists",
+  "category": "structural",
+  "kind": "path_exists",
+  "target": ["app", "src/app"],
+  "description": "app/ (or src/app/) directory exists"
+}
+```
+
+The checks are then assigned to the skill in `skill_map.json`:
+
+```json
+{
+  "expo-router": [
+    "router_import",
+    "router_app_dir_exists"
+  ]
+}
+```
+
+An authored app with an `app/` directory and a source file containing
+`import { Link } from "expo-router"` passes both checks. The real
+`expo-router` mapping contains additional checks; this example only shows the
+mechanics.
+
+### 3. Validate
+
+Run from the repository root:
+
+```bash
+uv run python -m json.tool \
+  eval_harness/evaluator/skill_invocation/uptake_checks/checks_data.json \
+  >/dev/null
+uv run python -m json.tool \
+  eval_harness/evaluator/skill_invocation/uptake_checks/skill_map.json \
+  >/dev/null
+PYTHONPATH=. uv run python -m unittest \
+  eval_harness.evaluator.skill_invocation.tests.test_skill_eval_core
+```
+
+Then run the analyzer against at least one known-good authored app artifact:
+
+```bash
+PYTHONPATH=. uv run python -m \
+  eval_harness.evaluator.skill_invocation.main analyze-artifacts \
+  --authored-artifact /path/to/authored-app.tar.gz \
+  --scenario skills_available_unmentioned \
+  --out-dir /tmp/skill-eval-report
+```
+
+Inspect the new skill under `.skills` in `/tmp/skill-eval-report/metrics.json`.
+It should have `uptake_status: "measured"`, the expected check count, and no
+missing-mapping or unknown-check warnings.
+
+For EAS validation, replay `.eas/workflows/eval-skill-use.yml` against a prior
+`authored-app` artifact and inspect the resulting `skill-eval-report`.
+
+### Optional: add regression tests
+
+For checks with tricky matching behavior, add focused cases to
+`../tests/test_skill_eval_core.py`. Useful tests include:
+
+- one implementation that should pass;
+- one similar implementation that should fail; and
+- alternative valid APIs or project layouts supported by the skill.
+
+The existing `_write_checks_dir`, `resolve_checks_for_skills`, and `run_checks`
+helpers can run checks against small temporary app trees.
+
+### Best practices
+
+- Keep each check atomic and grounded in a specific instruction from the
+  skill.
+- Reuse existing checks where possible; every mapped check has equal weight.
+- Accept all valid APIs and layouts allowed by the skill.
+- Anchor regexes to real syntax: for example, `"<List[\\s/>]"` avoids matching
+  `<FlatList>`.
+- Document known proxy limitations in the check description.
+- Use `dataset/prd_skills.json` only to change which skills a PRD is expected
+  to trigger; it is separate from uptake-check configuration.

@@ -206,6 +206,9 @@ PYTHONPATH=. uv run python -m unittest eval_harness.evaluator.skill_invocation.t
 PYTHONPATH=. uv run python -m unittest eval_harness.evaluator.ios_agentic.tests.test_test_plan_resolution
 ```
 
+To add static uptake coverage for another Expo skill, follow the
+[uptake-check contributor guide](eval_harness/evaluator/skill_invocation/uptake_checks/README.md#contributor-guide-add-coverage-for-another-skill).
+
 Validate EAS workflows:
 
 ```bash
