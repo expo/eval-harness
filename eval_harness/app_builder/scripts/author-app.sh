@@ -70,17 +70,15 @@ EVAL_PROXY_PIDS=()
 trap 'eval::stop_proxies; bash "$ROOT/eval_harness/utils/artifacts/collect_artifacts.sh" "$ROOT" "$RUN_ID" "$OUT" "$WORKSPACE" "$EVAL" "$TELEMETRY_DIR"' EXIT
 
 echo "================= STAGE A: coding-agent CLI install ================="
-if [ -z "${ANTHROPIC_API_KEY:-}" ]; then echo "  ❌ ANTHROPIC_API_KEY unset"; else echo "  ANTHROPIC_API_KEY bound (len ${#ANTHROPIC_API_KEY})"; fi
-ac=$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' https://api.anthropic.com/v1/messages \
-  -H "x-api-key: ${ANTHROPIC_API_KEY:-}" -H "anthropic-version: 2023-06-01" -H "content-type: application/json" \
-  -d '{"model":"claude-haiku-4-5","max_tokens":8,"messages":[{"role":"user","content":"hi"}]}' 2>/dev/null || echo "curl-fail")
-echo "  direct anthropic (no proxy): $ac"
+bash "$ROOT/eval_harness/utils/shell/check_claude_auth.sh" || exit 1
 
 echo "================= STAGE A2: uv + trace deps ================="
 eval::install_uv_and_evaluator "$EVAL" "$OUT"
 
 npm install -g @anthropic-ai/claude-code >"$OUT/a-cc-install.log" 2>&1
 claude --version >/dev/null 2>&1; eval::gate $? "claude-code CLI install"
+claude auth status --text >"$OUT/a-cc-auth.log" 2>&1
+eval::gate $? "claude-code OAuth auth status"
 if [ "$AGENT" = "codex" ]; then
   npm install -g @openai/codex >"$OUT/a-codex-install.log" 2>&1
   codex --version >/dev/null 2>&1; eval::gate $? "codex CLI install"

@@ -12,7 +12,7 @@ eval::run_evaluator() { # eval_dir test_plan prd out_json out_dir [extra args...
   esac
   echo "  test_plan=${test_plan:-<auto-resolved from prd_test_plans.json>}"
   echo "  prd=$prd"
-  if [ -z "${ANTHROPIC_API_KEY:-}" ]; then echo "  ❌ ANTHROPIC_API_KEY unset"; fi
+  bash "$_EVAL_STAGES_DIR/check_claude_auth.sh" || return 1
   local TO=""
   if command -v gtimeout >/dev/null 2>&1; then TO="gtimeout 1800";
   elif command -v timeout >/dev/null 2>&1; then TO="timeout 1800";

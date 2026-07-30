@@ -54,7 +54,11 @@ push secrets to the EAS `production` environment:
 eas env:push production --path .env
 ```
 
-Required for Claude Code authoring and evaluator runs: `ANTHROPIC_API_KEY`.
+Required for Claude Code authoring and evaluator runs:
+`CLAUDE_CODE_OAUTH_TOKEN`, generated locally with `claude setup-token`. Do not
+also set `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN`; Claude Code gives those
+credentials higher priority than subscription OAuth, and the harness rejects
+them to prevent accidentally bypassing the intended Claude subscription.
 Required for Codex authoring: `OPENAI_API_KEY`.
 Optional: `EXPO_TOKEN` (an Expo Robot User access token) so the coding agent can
 run its own `eas build` self-verification step during authoring, and so the

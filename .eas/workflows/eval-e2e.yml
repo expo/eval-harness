@@ -7,7 +7,7 @@
 #   eas workflow:run .eas/workflows/eval-e2e.yml
 #
 # Secrets come ONLY from the `production` environment (auto-injected as $VAR).
-# Required: ANTHROPIC_API_KEY. Optional: OPENAI_API_KEY (AGENT=codex),
+# Required: CLAUDE_CODE_OAUTH_TOKEN. Optional: OPENAI_API_KEY (AGENT=codex),
 # GCS_BUCKET + GCP_SA_KEY (mirror exfil), BRAINTRUST_API_KEY (trace push).
 # Braintrust defaults to project `expo-evals`; override with BRAINTRUST_PROJECT,
 # BRAINTRUST_CC_PROJECT, or BRAINTRUST_EVAL_PROJECT.
@@ -95,9 +95,8 @@ jobs:
     steps:
       - uses: eas/checkout
 
-      - name: Check ANTHROPIC_API_KEY bound
-        run: |
-          if [ -n "${ANTHROPIC_API_KEY:-}" ]; then echo "ANTHROPIC_API_KEY bound (len ${#ANTHROPIC_API_KEY})"; else echo "MISSING"; exit 1; fi
+      - name: Check Claude subscription OAuth
+        run: bash ./eval_harness/utils/shell/check_claude_auth.sh
 
       - name: Author app with coding agent
         run: bash ./eval_harness/app_builder/scripts/author-app.sh
@@ -144,9 +143,8 @@ jobs:
     steps:
       - uses: eas/checkout
 
-      - name: Check ANTHROPIC_API_KEY bound
-        run: |
-          if [ -n "${ANTHROPIC_API_KEY:-}" ]; then echo "ANTHROPIC_API_KEY bound (len ${#ANTHROPIC_API_KEY})"; else echo "MISSING"; exit 1; fi
+      - name: Check Claude subscription OAuth
+        run: bash ./eval_harness/utils/shell/check_claude_auth.sh
 
       - name: Download authored app
         uses: eas/download_artifact

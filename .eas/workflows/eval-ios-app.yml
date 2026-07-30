@@ -45,9 +45,8 @@ jobs:
     steps:
       - uses: eas/checkout
 
-      - name: Check ANTHROPIC_API_KEY bound
-        run: |
-          if [ -n "${ANTHROPIC_API_KEY:-}" ]; then echo "ANTHROPIC_API_KEY bound (len ${#ANTHROPIC_API_KEY})"; else echo "MISSING"; exit 1; fi
+      - name: Check Claude subscription OAuth
+        run: bash ./eval_harness/utils/shell/check_claude_auth.sh
 
       - name: Download authored app by artifact ID
         uses: eas/download_artifact
