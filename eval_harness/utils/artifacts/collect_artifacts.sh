@@ -7,7 +7,7 @@
 # Assembles eval-out/$RUN_ID/bundle/ from:
 #   app/        the agent-authored workspace (minus node_modules / build dirs)
 #   telemetry/  proxy JSONL, OTLP exports, reconstructed agent traces
-#   eval/       the evaluator's traces dir + result.json
+#   eval/       the evaluator's traces dir + result.json + report.html
 #   logs/       per-stage logs
 #   manifest.json   the single object that stitches it all by RUN_ID
 # then tars it. The workflow uploads eval-out as an EAS generic artifact; GCS is
@@ -148,6 +148,7 @@ find "$EVAL/traces" -mindepth 1 -maxdepth 1 -type d -print 2>/dev/null | while I
   cp -R "$trace_dir" "$BUNDLE/eval/traces/" 2>/dev/null
 done
 [ -f "$OUT/result.json" ] && cp "$OUT/result.json" "$BUNDLE/eval/result.json" 2>/dev/null
+[ -f "$OUT/result.html" ] && cp "$OUT/result.html" "$BUNDLE/eval/report.html" 2>/dev/null
 if [ "${PUSH_EVAL_TRACE_BT:-0}" = "1" ] && [ -n "${BRAINTRUST_API_KEY:-}" ]; then
   find "$BUNDLE/eval/traces" -mindepth 1 -maxdepth 1 -type d -print 2>/dev/null | while IFS= read -r trace_dir; do
     run_trace_py "$ROOT/eval_harness/utils/telemetry/tracing/eval_trace_bt.py" \
@@ -229,6 +230,7 @@ manifest = {
         "agent_traces": "telemetry/traces/",
         "eval_traces": "eval/traces/",
         "result": "eval/result.json",
+        "report": "eval/report.html",
         "logs": "logs/",
     },
 }
