@@ -63,8 +63,9 @@
     },
     "repositorySourcePath": {
       "type": "string",
-      "minLength": 3,
-      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\)[^\\u0000\\r\\n]+\\.(?:md|txt|json|ya?ml|py|ts|js|sh)$"
+      "minLength": 1,
+      "description": "A repository-relative path, not an absolute path, URL, drive path, traversal, or backslash-separated path.",
+      "pattern": "^(?!/)(?![A-Za-z][A-Za-z0-9+.-]*:)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\)[^\\u0000\\r\\n]+$"
     },
     "naturalProperty": {
       "type": "object",

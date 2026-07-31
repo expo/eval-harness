@@ -27,8 +27,8 @@ not be read as a failure or a pass.
 
 | Slice | Branch/PR | Property IDs | Python evidence | TS evidence | Differential | Coverage | EAS | AI | Expo | Status |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Baseline and migration documentation | `codex/ts-migration-docs`; [PR #24](https://github.com/expo/eval-experiments/pull/24) | None yet | 114 tests pass at `555a83d` | Not applicable | Not applicable | Baseline recorded below | Authoring and skill jobs pass; iOS times out | Pending | Pending | In progress |
-| Bun and TypeScript toolchain | Planned `codex/ts-toolchain`; PR pending | None expected | Must remain passing | Pending | Not applicable | TS baseline pending | Bun provisioning pending | Pending | Pending | Not started |
+| Baseline and migration documentation | `codex/ts-migration-docs`; [PR #24](https://github.com/expo/eval-experiments/pull/24) | None yet | Corrected baseline: 118 tests; PR branch: 120 tests | Not applicable | Not applicable | Baseline recorded below | Authoring and skill jobs pass; iOS times out | Codex pass; Copilot pending | Pending | In progress |
+| Bun and TypeScript toolchain | `codex/ts-toolchain`; PR pending | None expected | 120 tests must remain passing | Local files present; verification pending | Not applicable | TS baseline pending | EAS Bun provisioning pending | Pending | Pending | In progress |
 | Timeout and process helper | Planned `codex/ts-timeout`; PR pending | To be selected after contract review | Characterization and cleanup tests pending | Pending | Pending | Python module currently absent from coverage report | Authoring replay pending | Pending | Pending | Not started |
 | Telemetry parsers and emission | Branch/PR pending | To be selected per parser | Fixture and property tests pending | Pending | Pending | Script-style modules currently absent from coverage report | `author-app.yml` pending | Pending | Pending | Not started |
 | Deterministic skill evaluator | Branch/PR pending | To be selected | Existing core suite passes | Pending | Pending | Core mostly covered; CLI is 0% | Skill replay pending | Pending | Pending | Not started |
@@ -46,12 +46,30 @@ initially marked ready for Expo review.
 | --- | --- | --- | --- | --- |
 | Integration | `codex/migrate-to-ts` | `main` | Repository root | Umbrella draft not opened |
 | A | `codex/ts-migration-docs` | `codex/migrate-to-ts` | `.worktrees/ts-migration-docs` | [Draft PR #24](https://github.com/expo/eval-experiments/pull/24) |
-| B | `codex/ts-toolchain` | `codex/ts-migration-docs` | Not created | Not opened |
+| B | `codex/ts-toolchain` | `codex/ts-migration-docs` | `.worktrees/ts-toolchain` | Local work in progress; not opened |
 | C | `codex/ts-timeout` | `codex/ts-toolchain` | Not created | Not opened |
 
 No fourth dependent PR may be opened until the bottom PR merges. After a
 bottom PR merges, its successor is rebased and retargeted, affected checks are
 rerun, and materially changed diffs are reviewed again.
+
+## File-level change ledger
+
+Every tracked path is approved and reviewed independently of its containing
+slice. “Proposed before edit” means the file's purpose, exact change, expected
+effect, and verification were presented in the task before it was modified.
+
+| Path | Slice | Purpose | Approval evidence | Review | Evidence commit | State |
+| --- | --- | --- | --- | --- | --- | --- |
+| `MIGRATION_TESTING.md` | Documentation | Define migration and testing gates. | Explicitly approved before review-fix edit. | Codex re-review passed. | `aa4d0af`; fix commit pending | Ready to commit |
+| `MIGRATION_STATUS.md` | Documentation | Record branches, evidence, risks, and reviews. | Explicitly approved before review-fix edit. | Codex re-review passed. | `c719dd3`; fix commit pending | Ready to commit |
+| `README.md` | Documentation | Link migration material without changing runtime guidance. | Plan approved; proposed before edit. | Codex review: no issue. | `aa4d0af` | Implemented in PR #24 |
+| `test_properties.json` | Documentation | Hold reviewed language-independent properties. | Plan approved; proposed before edit. | Codex review: no issue. | `aa4d0af` | Empty draft in PR #24 |
+| `test_properties.schema.json` | Documentation | Validate property-record structure and safe source paths. | Explicitly approved before retaining review fix. | Codex re-review passed. | `aa4d0af`; fix commit pending | Ready to commit |
+| `eval_harness/utils/tests/test_property_catalog.py` | Documentation | Enforce uniqueness of the stable property ID. | Explicitly approved before retaining review fix. | Codex re-review passed. | Pending | Ready to commit |
+
+Generated files, renames, deletions, and workflow changes use the same ledger.
+A material rebase returns affected rows to a pending review state.
 
 ## Baseline identity
 
@@ -62,29 +80,38 @@ rerun, and materially changed diffs are reviewed again.
 | Integration branch | `codex/migrate-to-ts` |
 | Documentation branch | `codex/ts-migration-docs` |
 | Python | CPython 3.12.13, resolved by uv |
-| Existing Python test count | 114 |
-| Existing Python test result | Pass |
+| Original recorded discovery count | 114 |
+| Utility tests omitted by original discovery | 4 |
+| Corrected pre-migration baseline | 118 passing tests |
+| Documentation branch count | 120 passing tests, including 2 new catalog-integrity tests |
 | Active runtime Python physical lines | 7,482 |
 | Notes PRD | `dataset/prds/notes/prd/mvp.txt` |
 | Notes primitive plan | `dataset/test_plans/primitives/test_insert.txt` |
 
-### Python test command
+### Python test commands
 
 ```bash
 PYTHONPATH=. uv run python -m unittest discover \
   -s eval_harness \
   -p 'test_*.py'
+
+PYTHONPATH=. uv run python -m unittest discover \
+  -s eval_harness/utils/tests \
+  -p 'test_*.py'
 ```
 
-Result:
+Current documentation-branch result:
 
 ```text
-Ran 114 tests in 2.729s
-OK
+Main discovery:    114 tests, OK
+Utility discovery:  6 tests, OK
+Combined:          120 tests, OK
 ```
 
-The suite intentionally prints two error messages while testing invalid
-test-plan configurations. Those messages do not represent suite failures.
+Before the two catalog tests were added, utility discovery contained four
+tests, making the corrected untouched baseline 118 rather than 114. The main
+discovery intentionally prints two error messages while testing invalid
+test-plan configurations; those messages do not represent suite failures.
 
 ## Coverage baseline
 
@@ -208,8 +235,8 @@ ordering unless a separately reviewed behavior change says otherwise.
 | Replay input | The authored-app artifact above is the fixed Python baseline input for later skill and iOS replays. |
 
 This is an observed failure of the existing Python baseline, not a migration
-regression. It establishes that the current full Notes iOS workload does not
-fit the workflow's 30-minute evaluator budget. The reusable authored-app
+regression. The current full Notes iOS workload did not fit the workflow's
+30-minute evaluator budget in this baseline run. The reusable authored-app
 artifact and successful skill result remain valid baseline evidence. A later
 iOS replay must either use a deliberately bounded test surface or first address
 the separately reviewed runtime-budget issue; increasing a timeout silently is
@@ -220,9 +247,10 @@ not a migration-equivalence change.
 | Date | Commit | Slice | Command or workflow | Result | Notes |
 | --- | --- | --- | --- | --- | --- |
 | 2026-07-31 | `555a83d` | Baseline | `PYTHONPATH=. uv run python -m unittest discover -s eval_harness -p 'test_*.py'` | Pass: 114 tests | Untouched Python baseline. |
+| 2026-07-31 | `555a83d` | Baseline correction | `PYTHONPATH=. uv run python -m unittest eval_harness.utils.tests.test_claude_auth` | Pass: 4 tests | Existing utility tests omitted by the original discovery command; corrected untouched baseline is 118. |
 | 2026-07-31 | `555a83d` | Coverage | Planned Coverage.py command without `--source` | Pass: 60% of 3,935 discovered statements | Omits completely unimported modules. |
 | 2026-07-31 | `555a83d` | Coverage | Coverage.py with explicit evaluator and utility sources | Pass: 59% of 3,998 discovered statements | Script-style utility modules still absent; recorded as blind spots. |
-| 2026-07-31 | `555a83d` | Property catalog | Draft 2020-12 metaschema and instance validation | Pass | `jsonschema` supplied ephemerally by uv; no project dependency added. |
+| 2026-07-31 | `aa4d0af` | Property catalog | Draft 2020-12 metaschema and instance validation | Pass | First commit containing the validated schema and catalog; `jsonschema` supplied ephemerally by uv. |
 | 2026-07-31 | `555a83d` | Notes E2E baseline | `eas workflow:run .eas/workflows/eval-e2e.yml -F agent=claude-code -F prd=dataset/prds/notes/prd/mvp.txt -F run_eval_ios=true -F run_eval_skill=true -F skill_scenario=skills_available_unmentioned` | Partial: authoring and skill pass; iOS timeout | Run `019fb9e9-266b-7d99-9828-0e3ef9f11622`; timeout occurred during the third of 11 plans. |
 | 2026-07-31 | `555a83d` | EAS artifact inspection | Inspect authored app, skill report, and iOS failure bundle | Partial pass | Skill JSON/HTML valid; iOS logs and traces recoverable; no final iOS result; outer tar has a malformed trailing entry. |
 
@@ -245,7 +273,7 @@ without being silently fixed as part of syntax translation.
 | Review | Reviewer or tool | State | Link or evidence |
 | --- | --- | --- | --- |
 | Author self-review | Pending | Pending | — |
-| Codex review | Pending | Pending | — |
+| Codex review | Independent Codex reviewer | Pass | Initial findings fixed; final re-review found no remaining issues and assessed the slice ready to merge. |
 | AI-assisted PR review | Codex plus GitHub Copilot when available | Pending | Run Codex review locally; request Copilot review on a stable draft and after material rebases. No additional third-party bot initially. |
 | Expo collaborator review | Pending | Pending | — |
 | Umbrella approval | Pending | Pending | — |

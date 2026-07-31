@@ -162,6 +162,20 @@ Operational data such as migration status, PR links, test commands, coverage,
 and EAS run IDs belongs in `MIGRATION_STATUS.md`. The stable property ID joins
 the two records without mixing the contract with project-management details.
 
+Validate the schema itself, the catalog structure, and property-ID uniqueness
+after every catalog edit:
+
+```bash
+uv run --with jsonschema python -c 'import json; from pathlib import Path; from jsonschema import Draft202012Validator; schema=json.loads(Path("test_properties.schema.json").read_text()); catalog=json.loads(Path("test_properties.json").read_text()); Draft202012Validator.check_schema(schema); Draft202012Validator(schema).validate(catalog); print("schema and catalog valid")'
+
+PYTHONPATH=. uv run python -m unittest \
+  eval_harness.utils.tests.test_property_catalog
+```
+
+JSON Schema's `uniqueItems` compares complete objects. It cannot reject two
+different property objects that reuse the same `id`. The repository test above
+therefore enforces uniqueness of the stable join key separately.
+
 Property discovery follows this sequence:
 
 ```mermaid
@@ -436,6 +450,27 @@ identical trajectories. Instead:
 Record each EAS run's commit, workflow, inputs, run URL or ID, artifact IDs,
 result, and explained discrepancies in `MIGRATION_STATUS.md`.
 
+## Canonical Python suite
+
+Run both commands whenever this guide requires the complete Python suite:
+
+```bash
+PYTHONPATH=. uv run python -m unittest discover \
+  -s eval_harness \
+  -p 'test_*.py'
+
+PYTHONPATH=. uv run python -m unittest discover \
+  -s eval_harness/utils/tests \
+  -p 'test_*.py'
+```
+
+The second command is intentionally separate. `eval_harness/utils/` contains
+script-style helpers and has no package `__init__.py`, so Python's recursive
+discovery from `eval_harness` does not enter its `tests/` directory. Adding a
+package marker solely for test discovery could change import behavior. At the
+documentation baseline, the two commands run 114 and 6 tests respectively;
+these counts will grow as migration tests are added.
+
 ## Coverage
 
 Coverage reports which executable lines ran during a test suite. It helps find
@@ -510,6 +545,31 @@ When a check fails, first classify the failure before changing code or tests:
 
 Never silently update an expected value merely because TypeScript produced a
 different result. Explain which category applies and preserve the evidence.
+
+## Per-file approval and review gate
+
+The per-slice checklist does not replace file-level review. Before modifying
+any tracked path, present:
+
+```text
+Next file
+Why it exists
+Exact proposed change
+Expected observable effect
+Test to run
+Expected result
+```
+
+Wait for approval, then modify only that path, explain its diff, and run the
+promised check before proposing another path. The same rule applies to new
+files, generated lockfiles, renames, deletions, and workflow configuration.
+Read-only inspection and commands that do not rewrite tracked files need no
+file approval.
+
+Record each changed path in the file-level ledger in `MIGRATION_STATUS.md`.
+The ledger records its slice, change purpose, approval evidence, review state,
+evidence commit, and final state. If a rebase materially changes a reviewed
+file, move its review state back to pending and request review again.
 
 ## Per-slice migration checklist
 
