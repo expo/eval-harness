@@ -27,7 +27,7 @@ not be read as a failure or a pass.
 
 | Slice | Branch/PR | Property IDs | Python evidence | TS evidence | Differential | Coverage | EAS | AI | Expo | Status |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Baseline and migration documentation | `codex/ts-migration-docs`; [PR #24](https://github.com/expo/eval-experiments/pull/24) | None yet | Corrected baseline: 118 tests; PR branch: 120 tests | Not applicable | Not applicable | Baseline recorded below | Authoring and skill jobs pass; iOS times out | Codex pass; Copilot pending | Pending | In progress |
+| Baseline and migration documentation | `codex/ts-migration-docs`; [PR #24](https://github.com/expo/eval-experiments/pull/24) | None yet | Corrected baseline: 118 tests; PR branch: 120 tests | Not applicable | Not applicable | Baseline recorded below | Authoring and skill jobs pass; iOS times out | Codex pass | Pending | Ready for review |
 | Bun and TypeScript toolchain | `codex/ts-toolchain`; PR pending | None expected | 120 tests must remain passing | Local files present; verification pending | Not applicable | TS baseline pending | EAS Bun provisioning pending | Pending | Pending | In progress |
 | Timeout and process helper | Planned `codex/ts-timeout`; PR pending | To be selected after contract review | Characterization and cleanup tests pending | Pending | Pending | Python module currently absent from coverage report | Authoring replay pending | Pending | Pending | Not started |
 | Telemetry parsers and emission | Branch/PR pending | To be selected per parser | Fixture and property tests pending | Pending | Pending | Script-style modules currently absent from coverage report | `author-app.yml` pending | Pending | Pending | Not started |
@@ -275,7 +275,7 @@ without being silently fixed as part of syntax translation.
 | --- | --- | --- | --- |
 | Author self-review | Pending | Pending | — |
 | Codex review | Independent Codex reviewer | Pass | Initial findings fixed; final re-review found no remaining issues and assessed the slice ready to merge. |
-| AI-assisted PR review | Codex plus GitHub Copilot when available | Pending | Run Codex review locally; request Copilot review on a stable draft and after material rebases. No additional third-party bot initially. |
+| AI-assisted PR review | Independent Codex reviewer | Pass | User selected Codex review as sufficient; no Copilot or additional third-party review required. |
 | Expo collaborator review | Pending | Pending | — |
 | Umbrella approval | Pending | Pending | — |
 
