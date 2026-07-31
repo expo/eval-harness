@@ -45,7 +45,7 @@ initially marked ready for Expo review.
 | Position | Branch | Base | Local checkout | PR state |
 | --- | --- | --- | --- | --- |
 | Integration | `codex/migrate-to-ts` | `main` | Repository root | Umbrella draft not opened |
-| A | `codex/ts-migration-docs` | `codex/migrate-to-ts` | `.worktrees/ts-migration-docs` | [Draft PR #24](https://github.com/expo/eval-experiments/pull/24) |
+| A | `codex/ts-migration-docs` | `codex/migrate-to-ts` | `.worktrees/ts-migration-docs` | [PR #24](https://github.com/expo/eval-experiments/pull/24); ready for Expo review |
 | B | `codex/ts-toolchain` | `codex/ts-migration-docs` | `.worktrees/ts-toolchain` | Local work in progress; not opened |
 | C | `codex/ts-timeout` | `codex/ts-toolchain` | Not created | Not opened |
 
