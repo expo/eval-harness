@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "test_properties.schema.json",
+  "title": "eval-experiments natural property catalog",
+  "description": "Language-independent behavioral properties used to guide the Python-to-TypeScript migration.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "project",
+    "source",
+    "status",
+    "saturation_note",
+    "properties"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "project": {
+      "const": "eval-experiments"
+    },
+    "source": {
+      "enum": [
+        "human",
+        "agent"
+      ]
+    },
+    "status": {
+      "enum": [
+        "draft",
+        "complete"
+      ]
+    },
+    "saturation_note": {
+      "type": "string"
+    },
+    "properties": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/naturalProperty"
+      }
+    }
+  },
+  "$defs": {
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": ".*\\S.*"
+    },
+    "nonEmptyStringList": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/nonEmptyString"
+      }
+    },
+    "propertyId": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9]*(?:-[A-Z][A-Z0-9]*)*-[0-9]{3}$"
+    },
+    "repositorySourcePath": {
+      "type": "string",
+      "minLength": 3,
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\)[^\\u0000\\r\\n]+\\.(?:md|txt|json|ya?ml|py|ts|js|sh)$"
+    },
+    "naturalProperty": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "title",
+        "discovery_source",
+        "references",
+        "claim",
+        "given",
+        "when",
+        "then",
+        "oracle"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/propertyId"
+        },
+        "title": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "discovery_source": {
+          "$ref": "#/$defs/repositorySourcePath"
+        },
+        "references": {
+          "$ref": "#/$defs/nonEmptyStringList"
+        },
+        "claim": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "given": {
+          "$ref": "#/$defs/nonEmptyStringList"
+        },
+        "when": {
+          "$ref": "#/$defs/nonEmptyStringList"
+        },
+        "then": {
+          "$ref": "#/$defs/nonEmptyStringList"
+        },
+        "oracle": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      }
+    }
+  }
+}
