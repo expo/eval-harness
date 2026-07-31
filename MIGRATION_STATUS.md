@@ -61,12 +61,12 @@ effect, and verification were presented in the task before it was modified.
 
 | Path | Slice | Purpose | Approval evidence | Review | Evidence commit | State |
 | --- | --- | --- | --- | --- | --- | --- |
-| `MIGRATION_TESTING.md` | Documentation | Define migration and testing gates. | Explicitly approved before review-fix edit. | Codex re-review passed. | `aa4d0af`; fix commit pending | Ready to commit |
-| `MIGRATION_STATUS.md` | Documentation | Record branches, evidence, risks, and reviews. | Explicitly approved before review-fix edit. | Codex re-review passed. | `c719dd3`; fix commit pending | Ready to commit |
+| `MIGRATION_TESTING.md` | Documentation | Define migration and testing gates. | Explicitly approved before review-fix edit. | Codex re-review passed. | `aa4d0af`, `fd74f31` | Implemented in PR #24 |
+| `MIGRATION_STATUS.md` | Documentation | Record branches, evidence, risks, and reviews. | Explicitly approved before review-fix edit. | Codex re-review passed. | `c719dd3`, `fd74f31` | Implemented in PR #24 |
 | `README.md` | Documentation | Link migration material without changing runtime guidance. | Plan approved; proposed before edit. | Codex review: no issue. | `aa4d0af` | Implemented in PR #24 |
 | `test_properties.json` | Documentation | Hold reviewed language-independent properties. | Plan approved; proposed before edit. | Codex review: no issue. | `aa4d0af` | Empty draft in PR #24 |
-| `test_properties.schema.json` | Documentation | Validate property-record structure and safe source paths. | Explicitly approved before retaining review fix. | Codex re-review passed. | `aa4d0af`; fix commit pending | Ready to commit |
-| `eval_harness/utils/tests/test_property_catalog.py` | Documentation | Enforce uniqueness of the stable property ID. | Explicitly approved before retaining review fix. | Codex re-review passed. | Pending | Ready to commit |
+| `test_properties.schema.json` | Documentation | Validate property-record structure and safe source paths. | Explicitly approved before retaining review fix. | Codex re-review passed. | `aa4d0af`, `fd74f31` | Implemented in PR #24 |
+| `eval_harness/utils/tests/test_property_catalog.py` | Documentation | Enforce uniqueness of the stable property ID. | Explicitly approved before retaining review fix. | Codex re-review passed. | `fd74f31` | Implemented in PR #24 |
 
 Generated files, renames, deletions, and workflow changes use the same ledger.
 A material rebase returns affected rows to a pending review state.
@@ -251,6 +251,7 @@ not a migration-equivalence change.
 | 2026-07-31 | `555a83d` | Coverage | Planned Coverage.py command without `--source` | Pass: 60% of 3,935 discovered statements | Omits completely unimported modules. |
 | 2026-07-31 | `555a83d` | Coverage | Coverage.py with explicit evaluator and utility sources | Pass: 59% of 3,998 discovered statements | Script-style utility modules still absent; recorded as blind spots. |
 | 2026-07-31 | `aa4d0af` | Property catalog | Draft 2020-12 metaschema and instance validation | Pass | First commit containing the validated schema and catalog; `jsonschema` supplied ephemerally by uv. |
+| 2026-07-31 | `fd74f31` | Documentation review fixes | Main and utility unittest discovery plus schema, catalog, and duplicate-ID validation | Pass: 120 tests | Independent Codex re-review found no remaining issues and assessed the slice ready to merge. |
 | 2026-07-31 | `555a83d` | Notes E2E baseline | `eas workflow:run .eas/workflows/eval-e2e.yml -F agent=claude-code -F prd=dataset/prds/notes/prd/mvp.txt -F run_eval_ios=true -F run_eval_skill=true -F skill_scenario=skills_available_unmentioned` | Partial: authoring and skill pass; iOS timeout | Run `019fb9e9-266b-7d99-9828-0e3ef9f11622`; timeout occurred during the third of 11 plans. |
 | 2026-07-31 | `555a83d` | EAS artifact inspection | Inspect authored app, skill report, and iOS failure bundle | Partial pass | Skill JSON/HTML valid; iOS logs and traces recoverable; no final iOS result; outer tar has a malformed trailing entry. |
 
