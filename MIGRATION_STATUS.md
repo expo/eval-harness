@@ -29,7 +29,7 @@ not be read as a failure or a pass.
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Baseline and migration documentation | `codex/ts-migration-docs`; [PR #24](https://github.com/expo/eval-experiments/pull/24) | None yet | Corrected baseline: 118 tests; PR branch: 120 tests | Not applicable | Not applicable | Baseline recorded below | Authoring and skill jobs pass; iOS times out | Codex pass | Pending | Ready for review |
 | Bun and TypeScript toolchain | `codex/ts-toolchain`; [PR #25](https://github.com/expo/eval-experiments/pull/25) | None expected | Pass: 120 tests | Strict typecheck and 1 Bun smoke test pass from frozen lockfile | Not applicable | No runtime TS exists yet; smoke coverage is not meaningful | All four workflows validate; Linux replay installs Bun 1.3.14 and passes with baseline-equivalent metrics | Codex pass | Pending | Ready for review |
-| Timeout and process helper | Planned `codex/ts-timeout`; PR pending | To be selected after contract review | Characterization and cleanup tests pending | Pending | Pending | Python module currently absent from coverage report | Authoring replay pending | Pending | Pending | Not started |
+| Timeout and process helper | `codex/ts-timeout`; PR pending | None; process timing is unsuitable for useful PBT | 5 characterization tests pass; cleanup specification is expected-failing | Pending | Pending | Focused module coverage pending | Authoring replay pending | Pending | Pending | In progress |
 | Telemetry parsers and emission | Branch/PR pending | To be selected per parser | Fixture and property tests pending | Pending | Pending | Script-style modules currently absent from coverage report | `author-app.yml` pending | Pending | Pending | Not started |
 | Deterministic skill evaluator | Branch/PR pending | To be selected | Existing core suite passes | Pending | Pending | Core mostly covered; CLI is 0% | Skill replay pending | Pending | Pending | Not started |
 | iOS core, parsing, scoring, and reports | Branch/PR pending | To be selected | Existing report and resolution tests pass | Pending | Pending | Important modules range from 17% to 89% | iOS replay pending | Pending | Pending | Not started |
@@ -47,7 +47,7 @@ initially marked ready for Expo review.
 | Integration | `codex/migrate-to-ts` | `main` | Repository root | Umbrella draft not opened |
 | A | `codex/ts-migration-docs` | `codex/migrate-to-ts` | `.worktrees/ts-migration-docs` | [PR #24](https://github.com/expo/eval-experiments/pull/24); ready for Expo review |
 | B | `codex/ts-toolchain` | `codex/ts-migration-docs` | `.worktrees/ts-toolchain` | [PR #25](https://github.com/expo/eval-experiments/pull/25); ready for Expo review |
-| C | `codex/ts-timeout` | `codex/ts-toolchain` | Not created | Not opened |
+| C | `codex/ts-timeout` | `codex/ts-toolchain` | `.worktrees/ts-timeout` | Active development; not opened |
 
 No fourth dependent PR may be opened until the bottom PR merges. After a
 bottom PR merges, its successor is rebased and retargeted, affected checks are
@@ -77,6 +77,7 @@ effect, and verification were presented in the task before it was modified.
 | `.eas/workflows/eval-skill-use.yml` | Toolchain | Pin the tested Bun version on the skill-evaluator worker. | Explicitly approved before edit. | Codex re-review passed. | `e242545` | Expo validator passes |
 | `.eas/workflows/eval-ios-app.yml` | Toolchain | Pin the tested Bun version on the iOS-evaluator worker. | Explicitly approved before edit. | Codex re-review passed. | `e242545` | Expo validator passes |
 | `.eas/workflows/eval-e2e.yml` | Toolchain | Pin the tested Bun version for every job in the primary workflow. | Explicitly approved before edit. | Codex re-review passed. | `e242545` | Expo validator passes |
+| `eval_harness/utils/tests/test_timeout_exec.py` | Timeout helper | Characterize the Python CLI and expose incomplete descendant cleanup. | Explicitly approved before edit. | Pending. | Pending timeout commit. | 5 pass; 1 expected failure |
 
 Generated files, renames, deletions, and workflow changes use the same ledger.
 A material rebase returns affected rows to a pending review state.
@@ -285,6 +286,19 @@ not a migration-equivalence change.
 | 2026-08-01 | `a9db7ef` | Corrected toolchain | `bun run test:all` | Pass | The canonical command automatically selects the non-default Python `test` group; strict typecheck, 1 Bun test, and 120 Python tests pass. |
 | 2026-08-01 | `e950f42` | Live EAS Bun provisioning | Skill replay run `019fbbc0-efa2-7470-9927-3a6e16a3e293` | Partial: Bun pass; replay input failure | EAS installed Bun 1.3.14 successfully, then the historical artifact-ID lookup returned 404 before analysis. |
 | 2026-08-01 | `e950f42` | Controlled EAS skill replay | Skill replay run `019fbbc2-9ecd-78ec-b8e1-78876047633e` using the same artifact's fresh signed URL | Pass | Required report files present; normalized `metrics.json` exactly matches the Python baseline. |
+| 2026-08-01 | Working tree | Timeout Python characterization | `python -m unittest discover -s eval_harness/utils/tests -p 'test_timeout_exec.py' -v` | Pass: 5 tests; 1 expected failure | Expected failure is specifically `descendant process ... survived wrapper exit`. |
+| 2026-08-01 | Working tree | Timeout regression check | `bun run test:all` | Pass | Strict typecheck; 1 Bun test; 114 main Python tests; 12 utility tests including 1 expected failure. |
+
+## Migration defect backlog
+
+Every confirmed implementation defect receives a stable ID, an executable
+regression or expected-failing test, and an explicit disposition. Final cutover
+cannot silently ignore an open row: it must be fixed, linked to an owned
+follow-up issue with a deferral decision, or marked out of scope with rationale.
+
+| ID | Slice | Defect | Executable evidence | Follow-up gate | State |
+| --- | --- | --- | --- | --- | --- |
+| DEFECT-001 | Timeout helper | After a timeout, the direct child can exit on `SIGTERM` while a descendant that ignores `SIGTERM` remains alive in the managed process group. | `test_spec_timed_out_descendants_do_not_survive` is an expected failure; temporary probe and test cleanup forcibly kill the leaked descendant. | Decide explicitly whether to fix before TypeScript cutover or preserve temporarily and open an owned post-migration issue. Remove `expectedFailure` only when the cleanup contract passes. | Open |
 
 ## Discrepancies, defects, and risks
 
