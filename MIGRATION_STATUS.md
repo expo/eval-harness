@@ -28,7 +28,7 @@ not be read as a failure or a pass.
 | Slice | Branch/PR | Property IDs | Python evidence | TS evidence | Differential | Coverage | EAS | AI | Expo | Status |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Baseline and migration documentation | `codex/ts-migration-docs`; [PR #24](https://github.com/expo/eval-experiments/pull/24) | None yet | Corrected baseline: 118 tests; PR branch: 120 tests | Not applicable | Not applicable | Baseline recorded below | Authoring and skill jobs pass; iOS times out | Codex pass | Pending | Ready for review |
-| Bun and TypeScript toolchain | `codex/ts-toolchain`; [PR #25](https://github.com/expo/eval-experiments/pull/25) | None expected | Pass: 120 tests | Strict typecheck and 1 Bun smoke test pass from frozen lockfile | Not applicable | No runtime TS exists yet; smoke coverage is not meaningful | All four workflows validate with Bun 1.3.14 pinned; live provisioning pending | Codex pass | Pending | In progress |
+| Bun and TypeScript toolchain | `codex/ts-toolchain`; [PR #25](https://github.com/expo/eval-experiments/pull/25) | None expected | Pass: 120 tests | Strict typecheck and 1 Bun smoke test pass from frozen lockfile | Not applicable | No runtime TS exists yet; smoke coverage is not meaningful | All four workflows validate; Linux replay installs Bun 1.3.14 and passes with baseline-equivalent metrics | Codex pass | Pending | Ready for review |
 | Timeout and process helper | Planned `codex/ts-timeout`; PR pending | To be selected after contract review | Characterization and cleanup tests pending | Pending | Pending | Python module currently absent from coverage report | Authoring replay pending | Pending | Pending | Not started |
 | Telemetry parsers and emission | Branch/PR pending | To be selected per parser | Fixture and property tests pending | Pending | Pending | Script-style modules currently absent from coverage report | `author-app.yml` pending | Pending | Pending | Not started |
 | Deterministic skill evaluator | Branch/PR pending | To be selected | Existing core suite passes | Pending | Pending | Core mostly covered; CLI is 0% | Skill replay pending | Pending | Pending | Not started |
@@ -46,7 +46,7 @@ initially marked ready for Expo review.
 | --- | --- | --- | --- | --- |
 | Integration | `codex/migrate-to-ts` | `main` | Repository root | Umbrella draft not opened |
 | A | `codex/ts-migration-docs` | `codex/migrate-to-ts` | `.worktrees/ts-migration-docs` | [PR #24](https://github.com/expo/eval-experiments/pull/24); ready for Expo review |
-| B | `codex/ts-toolchain` | `codex/ts-migration-docs` | `.worktrees/ts-toolchain` | [PR #25](https://github.com/expo/eval-experiments/pull/25); draft pending live EAS and predecessor review |
+| B | `codex/ts-toolchain` | `codex/ts-migration-docs` | `.worktrees/ts-toolchain` | [PR #25](https://github.com/expo/eval-experiments/pull/25); draft with local, EAS, and Codex gates complete; predecessor and Expo review pending |
 | C | `codex/ts-timeout` | `codex/ts-toolchain` | Not created | Not opened |
 
 No fourth dependent PR may be opened until the bottom PR merges. After a
@@ -252,6 +252,18 @@ iOS replay must either use a deliberately bounded test surface or first address
 the separately reviewed runtime-budget issue; increasing a timeout silently is
 not a migration-equivalence change.
 
+## Toolchain EAS validation
+
+| Evidence | State |
+| --- | --- |
+| Commit | `e950f42` |
+| First replay | [Run `019fbbc0-efa2-7470-9927-3a6e16a3e293`](https://expo.dev/accounts/georgian-team/projects/adi-test-project/workflows/019fbbc0-efa2-7470-9927-3a6e16a3e293): failed before analysis because `eas/download_artifact` returned 404 for the historical displayed artifact ID. |
+| Bun provisioning in first replay | Pass: EAS logged `Installing bun@1.3.14` and completed `INSTALL_CUSTOM_TOOLS`. |
+| Controlled replay | [Run `019fbbc2-9ecd-78ec-b8e1-78876047633e`](https://expo.dev/accounts/georgian-team/projects/adi-test-project/workflows/019fbbc2-9ecd-78ec-b8e1-78876047633e): success using the same artifact through its fresh signed URL. |
+| Skill report artifact | `skill-eval-report`, ID `019fbbc2-e2a5-70a3-911d-51ffa97f29b7`; contains `metrics.json` and `report.html`. |
+| Deterministic comparison | Exact structural and value match to the original Python `metrics.json` after normalizing only the different temporary authored-root prefix. |
+| Artifact-size observation | Replay artifact is about 28 MB because it includes `skill-eval-report/unpacked/authored`; the original E2E skill report was about 9 KB. Recorded as a packaging risk, not changed in this PR. |
+
 ## Evidence log
 
 | Date | Commit | Slice | Command or workflow | Result | Notes |
@@ -271,6 +283,8 @@ not a migration-equivalence change.
 | 2026-08-01 | `e242545` | Shell compatibility | Parse every active `eval_harness/**/*.sh` with `bash -n` | Pass | Workflow-only tool pins did not alter shell behavior. |
 | 2026-08-01 | `a9db7ef` | Python test dependency isolation | Sync isolated environments with bare `uv sync --frozen` and `uv sync --frozen --group test` | Pass | Bare runtime sync contains neither Coverage nor Hypothesis; explicit test sync contains Coverage 7.15.2 and Hypothesis 6.164.0. |
 | 2026-08-01 | `a9db7ef` | Corrected toolchain | `bun run test:all` | Pass | The canonical command automatically selects the non-default Python `test` group; strict typecheck, 1 Bun test, and 120 Python tests pass. |
+| 2026-08-01 | `e950f42` | Live EAS Bun provisioning | Skill replay run `019fbbc0-efa2-7470-9927-3a6e16a3e293` | Partial: Bun pass; replay input failure | EAS installed Bun 1.3.14 successfully, then the historical artifact-ID lookup returned 404 before analysis. |
+| 2026-08-01 | `e950f42` | Controlled EAS skill replay | Skill replay run `019fbbc2-9ecd-78ec-b8e1-78876047633e` using the same artifact's fresh signed URL | Pass | Required report files present; normalized `metrics.json` exactly matches the Python baseline. |
 
 ## Discrepancies, defects, and risks
 
@@ -282,6 +296,8 @@ not a migration-equivalence change.
 | RISK-004 | Observability risk | `EVAL_STREAM_LOGS=1` pipes Python through `tee`, but normal Python output remained buffered until process exit. | Add a focused shell/CLI characterization and make live progress observable before relying on long migration replays. | Open |
 | RISK-005 | Artifact-integrity risk | The 630 MB iOS failure artifact has a valid gzip stream and recoverable high-value files, but a complete tar listing reports a malformed/truncated entry. | Inspect failure-package creation before using bundle byte integrity as a migration gate; retain stable EAS artifact IDs rather than expiring URLs. | Open |
 | RISK-006 | Dependency-isolation risk | The first toolchain commit placed Coverage and Hypothesis in uv's default `dev` group, so bare EAS `uv sync` would install them. | Move them to a non-default `test` group and select it centrally from `bun run test:python`; prove behavior in isolated environments. | Fixed in `a9db7ef` |
+| RISK-007 | Replay-input risk | `eas/download_artifact` returned 404 for the historical authored-app artifact's displayed ID even though the original run still listed it and a fresh signed URL worked. | Preserve both run IDs; use a fresh signed URL for current replay evidence and investigate artifact-ID replay semantics separately from language migration. | Open |
+| RISK-008 | Artifact-size risk | The standalone skill replay packaged its unpacked authored app, producing a roughly 28 MB report versus the original E2E report's roughly 9 KB. | Preserve current behavior during toolchain work; review report staging and cleanup during the skill-evaluator slice. | Open |
 
 No Python-to-TypeScript behavioral discrepancy exists yet because no runtime
 slice has been translated. Existing defects discovered later must be recorded
