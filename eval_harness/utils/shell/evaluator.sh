@@ -16,7 +16,7 @@ eval::run_evaluator() { # eval_dir test_plan prd out_json out_dir [extra args...
   local TO=""
   if command -v gtimeout >/dev/null 2>&1; then TO="gtimeout 1800";
   elif command -v timeout >/dev/null 2>&1; then TO="timeout 1800";
-  else TO="python3 $_EVAL_STAGES_DIR/timeout_exec.py 1800"; fi
+  else TO="bun $_EVAL_STAGES_DIR/timeout_exec.ts 1800"; fi
   # Branch on test_plan rather than expanding a possibly-empty array — macOS
   # ships bash 3.2, where "${arr[@]}" on an empty array trips `set -u`.
   local rc
