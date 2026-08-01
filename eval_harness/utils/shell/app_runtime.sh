@@ -54,7 +54,7 @@ eval::build_release_ios_app() { # app_dir out_dir device
   local app_dir="$1" out="$2" device="$3"
   echo "================= STAGE 6 (release app): expo run:ios --configuration Release ================="
   mkdir -p "$HOME/.expo"
-  ( cd "$app_dir" && python3 "$_EVAL_STAGES_DIR/timeout_exec.py" 1800 npx expo run:ios --configuration Release --device "$device" ) >"$out/s6-release.log" 2>&1
+  ( cd "$app_dir" && bun "$_EVAL_STAGES_DIR/timeout_exec.ts" 1800 npx expo run:ios --configuration Release --device "$device" ) >"$out/s6-release.log" 2>&1
   local rc=$?
   if [ "$rc" != 0 ] \
     && grep -q "Build Succeeded" "$out/s6-release.log" \
