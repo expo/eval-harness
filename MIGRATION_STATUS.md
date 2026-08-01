@@ -29,7 +29,7 @@ not be read as a failure or a pass.
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Baseline and migration documentation | `codex/ts-migration-docs`; [PR #24](https://github.com/expo/eval-experiments/pull/24) | None yet | Corrected baseline: 118 tests; PR branch: 120 tests | Not applicable | Not applicable | Baseline recorded below | Authoring and skill jobs pass; iOS times out | Codex pass | Pending | Ready for review |
 | Bun and TypeScript toolchain | `codex/ts-toolchain`; [PR #25](https://github.com/expo/eval-experiments/pull/25) | None expected | Pass: 120 tests | Strict typecheck and 1 Bun smoke test pass from frozen lockfile | Not applicable | No runtime TS exists yet; smoke coverage is not meaningful | All four workflows validate; Linux replay installs Bun 1.3.14 and passes with baseline-equivalent metrics | Codex pass | Pending | Ready for review |
-| Timeout and process helper | `codex/ts-timeout`; PR pending | None; process timing is unsuitable for useful PBT | 5 characterization tests pass; cleanup specification is expected-failing | Pending | Pending | Focused module coverage pending | Authoring replay pending | Pending | Pending | In progress |
+| Timeout and process helper | `codex/ts-timeout`; PR pending | None; process timing is unsuitable for useful PBT | 5 characterization tests pass; cleanup specification is expected-failing | 5 strict TypeScript tests committed at the verified red stage; implementation pending | Pending | Focused module coverage pending | Authoring replay pending | Pending | Pending | In progress |
 | Telemetry parsers and emission | Branch/PR pending | To be selected per parser | Fixture and property tests pending | Pending | Pending | Script-style modules currently absent from coverage report | `author-app.yml` pending | Pending | Pending | Not started |
 | Deterministic skill evaluator | Branch/PR pending | To be selected | Existing core suite passes | Pending | Pending | Core mostly covered; CLI is 0% | Skill replay pending | Pending | Pending | Not started |
 | iOS core, parsing, scoring, and reports | Branch/PR pending | To be selected | Existing report and resolution tests pass | Pending | Pending | Important modules range from 17% to 89% | iOS replay pending | Pending | Pending | Not started |
@@ -78,6 +78,7 @@ effect, and verification were presented in the task before it was modified.
 | `.eas/workflows/eval-ios-app.yml` | Toolchain | Pin the tested Bun version on the iOS-evaluator worker. | Explicitly approved before edit. | Codex re-review passed. | `e242545` | Expo validator passes |
 | `.eas/workflows/eval-e2e.yml` | Toolchain | Pin the tested Bun version for every job in the primary workflow. | Explicitly approved before edit. | Codex re-review passed. | `e242545` | Expo validator passes |
 | `eval_harness/utils/tests/test_timeout_exec.py` | Timeout helper | Characterize the Python CLI and expose incomplete descendant cleanup. | Explicitly approved before edit. | Pending. | `987de1b` | 5 pass; 1 expected failure |
+| `eval_harness/utils/tests/timeout_exec.test.ts` | Timeout helper | Define TypeScript parity behavior before implementation and retain a todo for `DEFECT-001`. | Explicitly approved before edit. | Pending. | `7ca8312` | Strict typecheck passes; 5 tests fail because implementation is absent; 1 todo |
 
 Generated files, renames, deletions, and workflow changes use the same ledger.
 A material rebase returns affected rows to a pending review state.
@@ -288,6 +289,7 @@ not a migration-equivalence change.
 | 2026-08-01 | `e950f42` | Controlled EAS skill replay | Skill replay run `019fbbc2-9ecd-78ec-b8e1-78876047633e` using the same artifact's fresh signed URL | Pass | Required report files present; normalized `metrics.json` exactly matches the Python baseline. |
 | 2026-08-01 | `987de1b` | Timeout Python characterization | `python -m unittest discover -s eval_harness/utils/tests -p 'test_timeout_exec.py' -v` | Pass: 5 tests; 1 expected failure | Expected failure is specifically `descendant process ... survived wrapper exit`. |
 | 2026-08-01 | `987de1b` | Timeout regression check | `bun run test:all` | Pass | Strict typecheck; 1 Bun test; 114 main Python tests; 12 utility tests including 1 expected failure. |
+| 2026-08-01 | `7ca8312` | Timeout TypeScript red stage | `bun test eval_harness/utils/tests/timeout_exec.test.ts` plus `bun run typecheck` | Expected red: 5 failures; 1 todo; typecheck passes | All five failures receive exit 1 because `timeout_exec.ts` does not exist; direct Bun invocation confirms module-not-found. |
 
 ## Migration defect backlog
 
