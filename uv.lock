@@ -387,7 +387,7 @@ dependencies = [
 ]
 
 [package.dev-dependencies]
-dev = [
+test = [
     { name = "coverage" },
     { name = "hypothesis" },
 ]
@@ -400,7 +400,7 @@ requires-dist = [
 ]
 
 [package.metadata.requires-dev]
-dev = [
+test = [
     { name = "coverage", specifier = ">=7,<8" },
     { name = "hypothesis", specifier = ">=6,<7" },
 ]
