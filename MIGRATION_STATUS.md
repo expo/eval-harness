@@ -28,7 +28,7 @@ not be read as a failure or a pass.
 | Slice | Branch/PR | Property IDs | Python evidence | TS evidence | Differential | Coverage | EAS | AI | Expo | Status |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Baseline and migration documentation | `codex/ts-migration-docs`; [PR #24](https://github.com/expo/eval-experiments/pull/24) | None yet | Corrected baseline: 118 tests; PR branch: 120 tests | Not applicable | Not applicable | Baseline recorded below | Authoring and skill jobs pass; iOS times out | Codex pass | Pending | Ready for review |
-| Bun and TypeScript toolchain | `codex/ts-toolchain`; PR pending | None expected | Pass: 120 tests | Strict typecheck and 1 Bun smoke test pass from frozen lockfile | Not applicable | No runtime TS exists yet; smoke coverage is not meaningful | All four workflows validate with Bun 1.3.14 pinned; live provisioning pending | Pending | Pending | In progress |
+| Bun and TypeScript toolchain | `codex/ts-toolchain`; PR pending | None expected | Pass: 120 tests | Strict typecheck and 1 Bun smoke test pass from frozen lockfile | Not applicable | No runtime TS exists yet; smoke coverage is not meaningful | All four workflows validate with Bun 1.3.14 pinned; live provisioning pending | Codex pass | Pending | In progress |
 | Timeout and process helper | Planned `codex/ts-timeout`; PR pending | To be selected after contract review | Characterization and cleanup tests pending | Pending | Pending | Python module currently absent from coverage report | Authoring replay pending | Pending | Pending | Not started |
 | Telemetry parsers and emission | Branch/PR pending | To be selected per parser | Fixture and property tests pending | Pending | Pending | Script-style modules currently absent from coverage report | `author-app.yml` pending | Pending | Pending | Not started |
 | Deterministic skill evaluator | Branch/PR pending | To be selected | Existing core suite passes | Pending | Pending | Core mostly covered; CLI is 0% | Skill replay pending | Pending | Pending | Not started |
@@ -67,16 +67,16 @@ effect, and verification were presented in the task before it was modified.
 | `test_properties.json` | Documentation | Hold reviewed language-independent properties. | Plan approved; proposed before edit. | Codex review: no issue. | `aa4d0af` | Empty draft in PR #24 |
 | `test_properties.schema.json` | Documentation | Validate property-record structure and safe source paths. | Explicitly approved before retaining review fix. | Codex re-review passed. | `aa4d0af`, `fd74f31` | Implemented in PR #24 |
 | `eval_harness/utils/tests/test_property_catalog.py` | Documentation | Enforce uniqueness of the stable property ID. | Explicitly approved before retaining review fix. | Codex re-review passed. | `fd74f31` | Implemented in PR #24 |
-| `package.json` | Toolchain | Define reproducible Bun, typecheck, and combined test commands. | Explicitly approved before edit. | Codex P2 fixed; re-review pending. | `e242545`, `a9db7ef` | Local tests explicitly request the non-default test group |
-| `tsconfig.json` | Toolchain | Apply strict TypeScript checks without emitting duplicate JavaScript. | Explicitly approved before edit. | Codex review: no issue. | `e242545` | Implemented locally |
-| `bun.lock` | Toolchain | Lock the complete Bun dependency graph. | Explicitly approved before retaining generated file. | Codex review: no issue. | `e242545` | Frozen install passes |
-| `eval_harness/utils/tests/toolchain_smoke.test.ts` | Toolchain | Prove Bun executes a typed test through the configured runner. | Explicitly approved before retaining file. | Codex review: no issue. | `e242545` | 1 test passes |
-| `pyproject.toml` | Toolchain | Declare Coverage.py and Hypothesis as development-only dependencies. | Explicitly approved before edit. | Codex P2 fixed; re-review pending. | `e242545`, `a9db7ef` | Non-default `test` group excludes tools from bare runtime sync |
-| `uv.lock` | Toolchain | Lock the new Python development dependencies exactly. | Explicitly approved before update. | Codex P2 fixed; re-review pending. | `e242545`, `a9db7ef` | Lock check and isolated runtime/test sync checks pass |
-| `.eas/workflows/author-app.yml` | Toolchain | Pin the tested Bun version on the authoring worker. | Explicitly approved before edit. | Codex review: no issue. | `e242545` | Expo validator passes |
-| `.eas/workflows/eval-skill-use.yml` | Toolchain | Pin the tested Bun version on the skill-evaluator worker. | Explicitly approved before edit. | Codex review: no issue. | `e242545` | Expo validator passes |
-| `.eas/workflows/eval-ios-app.yml` | Toolchain | Pin the tested Bun version on the iOS-evaluator worker. | Explicitly approved before edit. | Codex review: no issue. | `e242545` | Expo validator passes |
-| `.eas/workflows/eval-e2e.yml` | Toolchain | Pin the tested Bun version for every job in the primary workflow. | Explicitly approved before edit. | Codex review: no issue. | `e242545` | Expo validator passes |
+| `package.json` | Toolchain | Define reproducible Bun, typecheck, and combined test commands. | Explicitly approved before edit. | Codex P2 fixed; re-review passed. | `e242545`, `a9db7ef` | Local tests explicitly request the non-default test group |
+| `tsconfig.json` | Toolchain | Apply strict TypeScript checks without emitting duplicate JavaScript. | Explicitly approved before edit. | Codex re-review passed. | `e242545` | Implemented locally |
+| `bun.lock` | Toolchain | Lock the complete Bun dependency graph. | Explicitly approved before retaining generated file. | Codex re-review passed. | `e242545` | Frozen install passes |
+| `eval_harness/utils/tests/toolchain_smoke.test.ts` | Toolchain | Prove Bun executes a typed test through the configured runner. | Explicitly approved before retaining file. | Codex re-review passed. | `e242545` | 1 test passes |
+| `pyproject.toml` | Toolchain | Declare Coverage.py and Hypothesis as development-only dependencies. | Explicitly approved before edit. | Codex P2 fixed; re-review passed. | `e242545`, `a9db7ef` | Non-default `test` group excludes tools from bare runtime sync |
+| `uv.lock` | Toolchain | Lock the new Python development dependencies exactly. | Explicitly approved before update. | Codex P2 fixed; re-review passed. | `e242545`, `a9db7ef` | Lock check and isolated runtime/test sync checks pass |
+| `.eas/workflows/author-app.yml` | Toolchain | Pin the tested Bun version on the authoring worker. | Explicitly approved before edit. | Codex re-review passed. | `e242545` | Expo validator passes |
+| `.eas/workflows/eval-skill-use.yml` | Toolchain | Pin the tested Bun version on the skill-evaluator worker. | Explicitly approved before edit. | Codex re-review passed. | `e242545` | Expo validator passes |
+| `.eas/workflows/eval-ios-app.yml` | Toolchain | Pin the tested Bun version on the iOS-evaluator worker. | Explicitly approved before edit. | Codex re-review passed. | `e242545` | Expo validator passes |
+| `.eas/workflows/eval-e2e.yml` | Toolchain | Pin the tested Bun version for every job in the primary workflow. | Explicitly approved before edit. | Codex re-review passed. | `e242545` | Expo validator passes |
 
 Generated files, renames, deletions, and workflow changes use the same ledger.
 A material rebase returns affected rows to a pending review state.
@@ -294,6 +294,7 @@ without being silently fixed as part of syntax translation.
 | Author self-review | Pending | Pending | — |
 | Codex review | Independent Codex reviewer | Pass | Initial findings fixed; final re-review found no remaining issues and assessed the slice ready to merge. |
 | AI-assisted PR review | Independent Codex reviewer | Pass | User selected Codex review as sufficient; no Copilot or additional third-party review required. |
+| Toolchain Codex review | Independent Codex reviewer | Pass | One P2 dependency-isolation issue fixed in `a9db7ef`; re-review found no remaining issues. |
 | Expo collaborator review | Pending | Pending | — |
 | Umbrella approval | Pending | Pending | — |
 
