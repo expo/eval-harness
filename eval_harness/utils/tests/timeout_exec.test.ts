@@ -1,19 +1,10 @@
 import { expect, test } from "bun:test";
-import { resolve } from "node:path";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 
 const REPO_ROOT = resolve(import.meta.dir, "../../..");
 const TIMEOUT_EXEC = resolve(import.meta.dir, "../shell/timeout_exec.ts");
-const PYTHON_TIMEOUT_EXEC = resolve(import.meta.dir, "../shell/timeout_exec.py");
-
-function findPython(): string {
-  const python = Bun.which("python3");
-  if (python === null) {
-    throw new Error("python3 is required for transitional differential tests");
-  }
-  return python;
-}
-
-const PYTHON = findPython();
 
 type CliResult = {
   exitCode: number;
@@ -41,12 +32,24 @@ async function runTimeoutCli(...args: string[]): Promise<CliResult> {
   return runCli([process.execPath, TIMEOUT_EXEC, ...args]);
 }
 
-async function runPythonTimeoutCli(...args: string[]): Promise<CliResult> {
-  return runCli([PYTHON, PYTHON_TIMEOUT_EXEC, ...args]);
+function isMissingProcess(error: unknown): boolean {
+  return error instanceof Error && "code" in error && error.code === "ESRCH";
 }
 
-test("[CHAR] missing arguments preserve Python usage response", async () => {
-  // Characterization: preserve Python's observed exit code and stderr.
+function pidExists(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    if (isMissingProcess(error)) {
+      return false;
+    }
+    throw error;
+  }
+}
+
+test("[REGRESSION] missing arguments print stable usage response", async () => {
+  // Regression oracle: accepted compatibility exit code and stderr.
   const result = await runTimeoutCli();
 
   expect(result.exitCode).toBe(2);
@@ -56,8 +59,8 @@ test("[CHAR] missing arguments preserve Python usage response", async () => {
   );
 });
 
-test("[CHAR] non-numeric timeout preserves Python response", async () => {
-  // Characterization: preserve Python's observed exit code and stderr.
+test("[REGRESSION] non-numeric timeout returns stable response", async () => {
+  // Regression oracle: accepted compatibility exit code and stderr.
   const result = await runTimeoutCli("not-a-number", "true");
 
   expect(result.exitCode).toBe(2);
@@ -65,8 +68,8 @@ test("[CHAR] non-numeric timeout preserves Python response", async () => {
   expect(result.stderr).toBe("invalid timeout: not-a-number\n");
 });
 
-test("[CHAR] child exit code passes through", async () => {
-  // Characterization: the literal child exit code is the independent oracle.
+test("[REGRESSION] child exit code passes through", async () => {
+  // Regression oracle: the literal child exit code requested by the test.
   const result = await runTimeoutCli(
     "2",
     process.execPath,
@@ -77,8 +80,8 @@ test("[CHAR] child exit code passes through", async () => {
   expect(result.exitCode).toBe(7);
 });
 
-test("[CHAR] child stdout and stderr pass through", async () => {
-  // Characterization: literal child output is the independent oracle.
+test("[REGRESSION] child stdout and stderr pass through", async () => {
+  // Regression oracle: literal child output written by the test command.
   const result = await runTimeoutCli(
     "2",
     process.execPath,
@@ -91,8 +94,8 @@ test("[CHAR] child stdout and stderr pass through", async () => {
   expect(result.stderr).toBe("child-err\n");
 });
 
-test("[CHAR] timeout returns 124 and preserves Python diagnostic", async () => {
-  // Characterization: preserve Python's observed timeout exit and stderr.
+test("[REGRESSION] timeout returns 124 and stable diagnostic", async () => {
+  // Regression oracle: accepted compatibility timeout exit and diagnostic.
   const result = await runTimeoutCli(
     "0.05",
     process.execPath,
@@ -108,46 +111,62 @@ test("[CHAR] timeout returns 124 and preserves Python diagnostic", async () => {
   );
 }, 5_000);
 
-const DIFFERENTIAL_CASES: ReadonlyArray<{
-  name: string;
-  args: string[];
-}> = [
-  { name: "missing arguments", args: [] },
-  { name: "non-numeric timeout", args: ["not-a-number", "true"] },
-  {
-    name: "child exit code",
-    args: ["2", process.execPath, "-e", "process.exit(7)"],
-  },
-  {
-    name: "child stdout and stderr",
-    args: [
-      "2",
-      process.execPath,
-      "-e",
-      'console.log("child-out"); console.error("child-err");',
-    ],
-  },
-  {
-    name: "timeout response",
-    args: ["0.05", process.execPath, "-e", "await Bun.sleep(30_000)"],
-  },
-];
+test.failing("[SPEC DEFECT-001] timed-out descendants do not survive", async () => {
+  // Property: a timed-out process group leaves no descendant running.
+  // Oracle: the recorded descendant PID no longer exists after wrapper exit.
+  // Catches: orphaned processes and incomplete process-group cleanup.
+  const tempDir = await mkdtemp(join(tmpdir(), "timeout-exec-"));
+  const pidPath = join(tempDir, "descendant.pid");
+  const descendantCode = `
+    process.on("SIGTERM", () => {});
+    await Bun.sleep(30_000);
+  `;
+  const parentCode = `
+    const descendant = Bun.spawn(
+      [process.execPath, "-e", ${JSON.stringify(descendantCode)}],
+      { stdin: "ignore", stdout: "ignore", stderr: "ignore" },
+    );
+    await Bun.write(${JSON.stringify(pidPath)}, String(descendant.pid));
+    await Bun.sleep(30_000);
+  `;
 
-for (const { name, args } of DIFFERENTIAL_CASES) {
-  test(`[DIFF] ${name} matches Python`, async () => {
-    // Differential oracle: Python and TypeScript receive the same arguments
-    // and child command, then must return the same observable CLI result.
-    const [pythonResult, typeScriptResult] = await Promise.all([
-      runPythonTimeoutCli(...args),
-      runTimeoutCli(...args),
-    ]);
+  let descendantPid: number | undefined;
+  try {
+    let result: CliResult;
+    let pidText: string;
+    try {
+      result = await runTimeoutCli("1", process.execPath, "-e", parentCode);
+      pidText = await readFile(pidPath, "utf8");
+    } catch {
+      // Returning from test.failing is an unexpected pass, so a broken test
+      // setup fails the suite instead of masquerading as the known defect.
+      return;
+    }
 
-    expect(typeScriptResult).toEqual(pythonResult);
-  }, 5_000);
-}
+    const parsedPid = Number(pidText);
+    if (
+      result.exitCode !== 124 ||
+      !Number.isInteger(parsedPid) ||
+      parsedPid <= 0
+    ) {
+      return;
+    }
+    descendantPid = parsedPid;
 
-// DEFECT-001 remains executable as an expected failure in the Python suite.
-// Its TypeScript disposition must be decided explicitly before final cutover.
-test.todo("[SPEC DEFECT-001] timed-out descendants do not survive", () => {
-  throw new Error("DEFECT-001 has not been resolved for TypeScript");
-});
+    const deadline = performance.now() + 500;
+    while (pidExists(descendantPid) && performance.now() < deadline) {
+      await Bun.sleep(10);
+    }
+
+    expect(pidExists(descendantPid)).toBeFalse();
+  } finally {
+    if (descendantPid !== undefined && pidExists(descendantPid)) {
+      try {
+        process.kill(descendantPid, "SIGKILL");
+      } catch {
+        // Best-effort cleanup must not become the expected test failure.
+      }
+    }
+    await rm(tempDir, { recursive: true, force: true }).catch(() => {});
+  }
+}, 15_000);
