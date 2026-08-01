@@ -111,6 +111,100 @@ test("[REGRESSION] timeout returns 124 and stable diagnostic", async () => {
   );
 }, 5_000);
 
+test("[REGRESSION] signal-terminated child preserves Python status", async () => {
+  // Regression oracle: Python returned -SIGTERM through SystemExit, which the
+  // operating system exposed as status 241.
+  const result = await runTimeoutCli(
+    "2",
+    "/bin/sh",
+    "-c",
+    "kill -TERM $$",
+  );
+
+  expect(result.exitCode).toBe(241);
+  expect(result.stdout).toBe("");
+  expect(result.stderr).toBe("");
+});
+
+test("[REGRESSION] hexadecimal timeout text remains invalid", async () => {
+  // Regression oracle: Python float() rejects JavaScript-only hexadecimal text.
+  const result = await runTimeoutCli(
+    "0x1",
+    process.execPath,
+    "-e",
+    "process.exit(0)",
+  );
+
+  expect(result.exitCode).toBe(2);
+  expect(result.stdout).toBe("");
+  expect(result.stderr).toBe("invalid timeout: 0x1\n");
+});
+
+test("[REGRESSION] decimal underscores remain valid", async () => {
+  // Regression oracle: Python float() accepts underscores between digits.
+  const result = await runTimeoutCli(
+    "1_0",
+    process.execPath,
+    "-e",
+    "process.exit(0)",
+  );
+
+  expect(result.exitCode).toBe(0);
+  expect(result.stdout).toBe("");
+  expect(result.stderr).toBe("");
+});
+
+test("[REGRESSION] scientific timeout diagnostic uses Python formatting", async () => {
+  // Regression oracle: Python's general-number format pads exponent digits.
+  const result = await runTimeoutCli(
+    "1e-7",
+    process.execPath,
+    "-e",
+    "await Bun.sleep(30_000)",
+  );
+
+  expect(result.exitCode).toBe(124);
+  expect(result.stdout).toBe("");
+  expect(result.stderr).toBe(
+    "timeout_exec.py: command exceeded 1e-07s; " +
+      "terminating process group\n",
+  );
+}, 5_000);
+
+for (const timeoutText of ["nan", "inf", "Infinity", "1e20", "1e999"]) {
+  test(`[REGRESSION] ${timeoutText} does not become an immediate timeout`, async () => {
+    // Regression oracle: Python lets a short child finish for NaN, positive
+    // infinity, and positive timeouts beyond the JavaScript timer limit.
+    const result = await runTimeoutCli(
+      timeoutText,
+      process.execPath,
+      "-e",
+      "await Bun.sleep(25)",
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toBe("");
+  });
+}
+
+test("[REGRESSION] negative infinity times out immediately", async () => {
+  // Regression oracle: Python accepts -inf as an immediate timeout and uses
+  // its general-number spelling in the diagnostic.
+  const result = await runTimeoutCli(
+    "-inf",
+    process.execPath,
+    "-e",
+    "await Bun.sleep(30_000)",
+  );
+
+  expect(result.exitCode).toBe(124);
+  expect(result.stdout).toBe("");
+  expect(result.stderr).toBe(
+    "timeout_exec.py: command exceeded -infs; terminating process group\n",
+  );
+}, 5_000);
+
 test.failing("[SPEC DEFECT-001] timed-out descendants do not survive", async () => {
   // Property: a timed-out process group leaves no descendant running.
   // Oracle: the recorded descendant PID no longer exists after wrapper exit.
