@@ -1,14 +1,179 @@
-# Migration Testing Guide
+# Migration and Testing Guide
 
-This guide defines how we will test the migration from Python to TypeScript
-running on Bun. It is written for contributors who know Python but may be new
-to JavaScript, TypeScript, Bun, or property-based testing.
+This guide defines how we will carry out and test the migration from Python to
+TypeScript running on Bun. It is written for contributors who know Python but
+may be new to JavaScript, TypeScript, Bun, property-based testing, or stacked
+pull requests.
 
 The migration goal is behavioral preservation. Active Python runtime code will
 be replaced one bounded slice at a time while preserving observable behavior,
 project structure, workflow interfaces, artifact formats, and evaluator
 semantics. A language change is not an opportunity to silently redesign the
 product or fix unrelated defects.
+
+Although examples refer to this repository, the method is deliberately stated
+in language-independent terms where possible. That keeps the useful parts
+available for a future, generalized migration guide or reusable skill without
+adding skill-packaging work to the migration itself.
+
+## Migration shape
+
+Work in bounded slices with explicit public boundaries. A slice might be one
+helper, one parser, or one evaluator subsystem. It should be small enough that
+its inputs, outputs, callers, side effects, and failure behavior can be listed
+and compared, but large enough to represent a coherent behavior rather than an
+arbitrary group of lines.
+
+During a slice, Python is the **reference implementation**: it supplies the
+current behavior being preserved. TypeScript is the **candidate
+implementation**: it must first demonstrate compatibility before it replaces
+Python.
+
+```mermaid
+flowchart LR
+    I["Equivalent input"] --> PY["Python reference"]
+    I --> TS["TypeScript candidate"]
+    PY --> C["Compare observables"]
+    TS --> C
+    C --> V["Local and EAS validation"]
+    V --> R["Independent review"]
+    R --> X["Retire Python reference"]
+```
+
+Keep the Python implementation and transitional differential checks available
+through substantive independent review. Review findings often reveal an
+observable that the original characterization cases missed. Keeping the
+reference runnable lets us determine what Python really did and add an honest
+regression case before changing or deleting it.
+
+After the candidate passes local, differential, and EAS checks:
+
+1. Request independent review while both implementations and their comparison
+   evidence are still available.
+2. Turn valid review findings into regression cases, fix the candidate, and
+   request re-review.
+3. Remove Python and migration-only differential machinery only after no
+   substantive candidate findings remain.
+4. Rerun the complete gate after removal, then obtain independent review and
+   normal human PR approval for the complete post-retirement diff.
+
+The permanent TypeScript regression and specification tests remain after the
+reference implementation is retired.
+
+## Branch, commit, and merge discipline
+
+Detailed working history and clean project history serve different audiences.
+Working commits help reviewers understand how a slice developed. The
+integration branch and `main` should emphasize stable subsystem milestones.
+
+Prefer coherent, green working commits. A red test run is required evidence in
+test-driven work, but it does not require its own commit. Record the command and
+expected failure in the evolving `MIGRATION_STATUS.md` working copy. Once the
+logical change is green, commit the tests and implementation together. If a
+slice is large, use a few reviewable commits organized by purpose; do not
+create a commit for every status-line edit or command result.
+
+After fresh checks and review establish an exact green head commit, create at
+most one evidence/review roll-up commit for the slice. That roll-up changes
+only documentation or status records and names the immutable implementation
+commit that was actually tested and reviewed. It does not need to contain its
+own hash. The child PR and its eventual squash merge identify the roll-up
+itself. If the supposed roll-up changes runtime code or tests, it is not merely
+an evidence update: create a new implementation commit, rerun the gates, and
+record that new tested head instead.
+
+```text
+Working branch:
+    one or a few green implementation commits
+        -> fresh checks and review at an exact head
+        -> at most one evidence/review roll-up commit
+
+Integration and main:
+    approximately one stable commit per migrated subsystem
+```
+
+The Git terms used below mean:
+
+- **Squash merge:** GitHub combines all commits in one PR into one new commit
+  on its base branch.
+- **Rebase with `--onto`:** Git copies only the selected child-branch commits
+  from an old parent onto a new parent.
+- **Retarget:** Change a PR's base branch in GitHub.
+- **Force-push with lease:** Replace a rebased remote branch, but refuse if
+  someone else pushed work that the local repository has not seen.
+
+For the rolling PR stack in this repository, squash only the lowest PR whose
+base is `codex/migrate-to-ts`. Suppose the current stack is:
+
+```text
+codex/migrate-to-ts
+└── codex/ts-migration-docs       PR A
+    └── codex/ts-toolchain        PR B
+        └── codex/ts-timeout      PR C
+```
+
+When PR A is approved:
+
+1. Make every affected worktree clean, fetch the remote, and record the exact
+   old tips of PR A and PR B. Replace the placeholders below with those hashes;
+   they are the boundaries that prevent Git from replaying ancestor work.
+2. Squash-merge PR A into `codex/migrate-to-ts`. Do not delete PR A's remote
+   branch yet.
+3. After the squash merge completes, fetch the remote again. In PR B's
+   worktree, replay only B's own commits with:
+
+   ```bash
+   git fetch origin
+   git rebase --onto origin/codex/migrate-to-ts <old-PR-A-tip>
+   git push --force-with-lease origin codex/ts-toolchain
+   ```
+
+4. Retarget only PR B from `codex/ts-migration-docs` to
+   `codex/migrate-to-ts`. Once no open PR uses PR A as its base, its remote
+   branch may be deleted.
+5. In PR C's worktree, fetch the rewritten PR B and replay only C's own
+   commits onto it:
+
+   ```bash
+   git fetch origin
+   git rebase --onto origin/codex/ts-toolchain <old-PR-B-tip>
+   git push --force-with-lease origin codex/ts-timeout
+   ```
+
+6. Keep PR C based on its immediate parent, `codex/ts-toolchain`. Apply the
+   same old-parent-tip procedure to any deeper descendant in parent-to-child
+   order.
+7. Inspect every resulting PR diff, rerun affected checks, and request review
+   again when a rebase materially changes reviewed content.
+
+After PR A is integrated and the remaining branches are restacked:
+
+```text
+codex/migrate-to-ts              includes squashed PR A
+└── codex/ts-toolchain           PR B, retargeted
+    └── codex/ts-timeout         PR C, still based on PR B
+```
+
+A plain `git rebase codex/migrate-to-ts` is unsafe here because the new squash
+commit has a different identity from PR A's original commits. Git may try to
+replay those already-integrated commits. The old parent tips and `--onto`
+commands state exactly which commits belong to each child.
+
+When the migration is complete, merge the umbrella PR from
+`codex/migrate-to-ts` into `main` using GitHub's **Create a merge commit**
+strategy. Do not squash it again if the individual subsystem commits should
+remain visible.
+
+```mermaid
+flowchart LR
+    W["Detailed child-PR commits"] -->|"Squash child PR"| S["One subsystem commit on integration branch"]
+    S -->|"Normal final merge"| M["Subsystem commit remains visible on main"]
+```
+
+This gives child PRs detailed review history while keeping the permanent
+history readable. The PR conversation, checks, and `MIGRATION_STATUS.md` retain
+the audit trail even when intermediate commits are not copied individually to
+`main`.
 
 ## The evidence model
 
@@ -407,9 +572,35 @@ Normalization must not:
 Every normalization rule should be named and tested. Unexpected differences
 remain failures until explained and either fixed or explicitly approved.
 
-Differential checks are transitional. Once Python is removed, permanent
-TypeScript characterization regressions and specification tests remain, while
-cross-language harness code is removed unless it still has independent value.
+Differential checks are transitional. Keep them through substantive review so
+review-discovered compatibility questions can still be answered against the
+reference implementation. Once the candidate passes re-review and Python is
+removed, permanent TypeScript characterization regressions and specification
+tests remain, while cross-language harness code is removed unless it still has
+independent value.
+
+### Runtime semantic parity checklist
+
+A syntax translation can still change behavior because Python, JavaScript, and
+Bun standard libraries make different default choices. For code at a runtime
+boundary, inspect more than ordinary return values.
+
+| Boundary | Compatibility questions |
+| --- | --- |
+| Numbers | Do both languages accept the same text grammar, including signs, whitespace, exponents, separators, non-finite values, and overflow? Do they format values identically where text is observable? |
+| Processes | Are signal terminations distinguishable from explicit numeric exits? Are exit codes mapped the same way? Are process groups and descendants cleaned up? |
+| Timers | Do zero, negative, fractional, non-finite, and extremely large durations behave the same? Does the runtime cap timer sizes, and are scheduled timers cancelled after early completion? |
+| Streams | Are stdout and stderr kept separate? Are bytes, text encoding, buffering, ordering, and trailing newlines preserved? |
+| Environment | Are missing, empty, and inherited environment variables treated the same? Are the same variables passed to subprocesses? |
+| Filesystem | Are paths resolved against the same directory? Are file modes, atomic writes, symlinks, ordering, temporary paths, and cleanup effects compatible? |
+| Platform | Does behavior differ across Linux and macOS workers, shells, signal implementations, path rules, or available commands? |
+
+This checklist is not a demand to add speculative tests for every cell. Use it
+to discover relevant observables from the slice's callers and implementation,
+then add focused characterization or specification cases for credible risks.
+When review uncovers a missed observable, reproduce it against the reference,
+record the red and green evidence, and retain the minimized case as a permanent
+candidate regression test.
 
 ## EAS validation
 
@@ -568,8 +759,11 @@ file approval.
 
 Record each changed path in the file-level ledger in `MIGRATION_STATUS.md`.
 The ledger records its slice, change purpose, approval evidence, review state,
-evidence commit, and final state. If a rebase materially changes a reviewed
-file, move its review state back to pending and request review again.
+tested evidence revision, and final state. The evidence revision names the
+immutable implementation head that the recorded commands and review actually
+examined; it is not a self-reference to the status roll-up commit. If a rebase
+materially changes a reviewed file, move its review state back to pending and
+request review again.
 
 ## Per-slice migration checklist
 
@@ -587,7 +781,10 @@ flowchart TB
     H --> I["9. Run Python-TypeScript differential checks"]
     I --> J["10. Switch one caller at a time"]
     J --> K["11. Validate the relevant EAS workflow"]
-    K --> L["12. Record evidence and remove obsolete Python"]
+    K --> L["12. Request independent review"]
+    L --> M["13. Fix findings and obtain re-review"]
+    M --> N["14. Remove obsolete Python and transitional checks"]
+    N --> O["15. Verify cleanup and obtain final independent review"]
 ```
 
 In practical terms:
@@ -610,10 +807,19 @@ In practical terms:
 10. Update callers separately so a failure has a small debugging surface.
 11. Run the smallest relevant EAS replay and inspect its artifacts; use the
     full E2E workflow at the final gate.
-12. Record commands and results in `MIGRATION_STATUS.md`, remove obsolete
-    Python, and keep permanent TypeScript regressions and specifications.
+12. Request independent code review while Python and the differential evidence
+    remain available for answering compatibility questions.
+13. Add regression cases for valid findings, fix the candidate, rerun affected
+    gates, and obtain re-review before retiring the reference.
+14. Remove obsolete Python and migration-only comparison code while keeping
+    permanent TypeScript regressions and specifications.
+15. Rerun strict checking and all applicable local and EAS gates, finalize the
+    summarized evidence in `MIGRATION_STATUS.md`, and obtain independent review
+    plus normal human PR approval for the complete post-retirement diff. The
+    earlier review is a compatibility-discovery gate, not final merge approval.
 
 A slice is not complete merely because its TypeScript unit tests pass. It is
 complete when applicable specification, characterization, differential, and
-EAS evidence has no unexplained failure and the recorded public contracts are
+EAS evidence has no unexplained failure, substantive candidate review findings
+are resolved, the cleanup is verified, and the recorded public contracts are
 preserved.
