@@ -46,7 +46,7 @@ initially marked ready for Expo review.
 | --- | --- | --- | --- | --- |
 | Integration | `codex/migrate-to-ts` | `main` | Repository root | Umbrella draft not opened |
 | A | `codex/ts-migration-docs` | `codex/migrate-to-ts` | `.worktrees/ts-migration-docs` | [PR #24](https://github.com/expo/eval-experiments/pull/24); ready for Expo review |
-| B | `codex/ts-toolchain` | `codex/ts-migration-docs` | `.worktrees/ts-toolchain` | [PR #25](https://github.com/expo/eval-experiments/pull/25); draft with local, EAS, and Codex gates complete; predecessor and Expo review pending |
+| B | `codex/ts-toolchain` | `codex/ts-migration-docs` | `.worktrees/ts-toolchain` | [PR #25](https://github.com/expo/eval-experiments/pull/25); ready for Expo review |
 | C | `codex/ts-timeout` | `codex/ts-toolchain` | Not created | Not opened |
 
 No fourth dependent PR may be opened until the bottom PR merges. After a
