@@ -6,7 +6,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test:ts": "bun test",
-    "test:python": "PYTHONPATH=. uv run python -m unittest discover -s eval_harness -p 'test_*.py' && PYTHONPATH=. uv run python -m unittest discover -s eval_harness/utils/tests -p 'test_*.py'",
+    "test:python": "PYTHONPATH=. uv run --group test python -m unittest discover -s eval_harness -p 'test_*.py' && PYTHONPATH=. uv run --group test python -m unittest discover -s eval_harness/utils/tests -p 'test_*.py'",
     "test:all": "bun run typecheck && bun run test:ts && bun run test:python"
   },
   "dependencies": {
