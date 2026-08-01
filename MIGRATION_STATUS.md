@@ -29,7 +29,7 @@ not be read as a failure or a pass.
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Baseline and migration documentation | `codex/ts-migration-docs`; [PR #24](https://github.com/expo/eval-experiments/pull/24) | None yet | Corrected baseline: 118 tests; PR branch: 120 tests | Not applicable | Not applicable | Baseline recorded below | Authoring and skill jobs pass; iOS times out | Codex pass | Pending | Ready for review |
 | Bun and TypeScript toolchain | `codex/ts-toolchain`; [PR #25](https://github.com/expo/eval-experiments/pull/25) | None expected | Pass: 120 tests | Strict typecheck and 1 Bun smoke test pass from frozen lockfile | Not applicable | No runtime TS exists yet; smoke coverage is not meaningful | All four workflows validate; Linux replay installs Bun 1.3.14 and passes with baseline-equivalent metrics | Codex pass | Pending | Ready for review |
-| Timeout and process helper | `codex/ts-timeout`; PR pending | None; process timing is unsuitable for useful PBT | 5 characterization tests pass; cleanup specification is expected-failing | 5 strict TypeScript tests committed at the verified red stage; implementation pending | Pending | Focused module coverage pending | Authoring replay pending | Pending | Pending | In progress |
+| Timeout and process helper | `codex/ts-timeout`; PR pending | None; process timing is unsuitable for useful PBT | 5 characterization tests pass; cleanup specification is expected-failing | Strict typecheck and 5 TypeScript behavior tests pass; cleanup specification remains todo | Pending | Focused module coverage pending | Authoring replay pending | Pending | Pending | In progress |
 | Telemetry parsers and emission | Branch/PR pending | To be selected per parser | Fixture and property tests pending | Pending | Pending | Script-style modules currently absent from coverage report | `author-app.yml` pending | Pending | Pending | Not started |
 | Deterministic skill evaluator | Branch/PR pending | To be selected | Existing core suite passes | Pending | Pending | Core mostly covered; CLI is 0% | Skill replay pending | Pending | Pending | Not started |
 | iOS core, parsing, scoring, and reports | Branch/PR pending | To be selected | Existing report and resolution tests pass | Pending | Pending | Important modules range from 17% to 89% | iOS replay pending | Pending | Pending | Not started |
@@ -79,6 +79,7 @@ effect, and verification were presented in the task before it was modified.
 | `.eas/workflows/eval-e2e.yml` | Toolchain | Pin the tested Bun version for every job in the primary workflow. | Explicitly approved before edit. | Codex re-review passed. | `e242545` | Expo validator passes |
 | `eval_harness/utils/tests/test_timeout_exec.py` | Timeout helper | Characterize the Python CLI and expose incomplete descendant cleanup. | Explicitly approved before edit. | Pending. | `987de1b` | 5 pass; 1 expected failure |
 | `eval_harness/utils/tests/timeout_exec.test.ts` | Timeout helper | Define TypeScript parity behavior before implementation and retain a todo for `DEFECT-001`. | Explicitly approved before edit. | Pending. | `7ca8312` | Strict typecheck passes; 5 tests fail because implementation is absent; 1 todo |
+| `eval_harness/utils/shell/timeout_exec.ts` | Timeout helper | Translate the Python timeout CLI for direct execution by Bun. | Explicitly approved before edit. | Pending. | `e506682` | Strict typecheck and 5 TypeScript behavior tests pass; `DEFECT-001` is intentionally preserved pending disposition |
 
 Generated files, renames, deletions, and workflow changes use the same ledger.
 A material rebase returns affected rows to a pending review state.
@@ -290,6 +291,8 @@ not a migration-equivalence change.
 | 2026-08-01 | `987de1b` | Timeout Python characterization | `python -m unittest discover -s eval_harness/utils/tests -p 'test_timeout_exec.py' -v` | Pass: 5 tests; 1 expected failure | Expected failure is specifically `descendant process ... survived wrapper exit`. |
 | 2026-08-01 | `987de1b` | Timeout regression check | `bun run test:all` | Pass | Strict typecheck; 1 Bun test; 114 main Python tests; 12 utility tests including 1 expected failure. |
 | 2026-08-01 | `7ca8312` | Timeout TypeScript red stage | `bun test eval_harness/utils/tests/timeout_exec.test.ts` plus `bun run typecheck` | Expected red: 5 failures; 1 todo; typecheck passes | All five failures receive exit 1 because `timeout_exec.ts` does not exist; direct Bun invocation confirms module-not-found. |
+| 2026-08-01 | `e506682` | Timeout TypeScript green stage | `bun test eval_harness/utils/tests/timeout_exec.test.ts` plus `bun run typecheck` | Pass: 5 tests; 1 todo; strict typecheck passes | Bun implementation preserves the characterized CLI behavior; cleanup todo tracks `DEFECT-001`. |
+| 2026-08-01 | `e506682` | Timeout full local regression | `bun run test:all` | Pass | 6 TypeScript tests pass with 1 todo; 114 main-discovery Python tests and 12 utility-discovery Python tests pass with 1 expected failure. |
 
 ## Migration defect backlog
 
@@ -315,9 +318,11 @@ follow-up issue with a deferral decision, or marked out of scope with rationale.
 | RISK-007 | Replay-input risk | `eas/download_artifact` returned 404 for the historical authored-app artifact's displayed ID even though the original run still listed it and a fresh signed URL worked. | Preserve both run IDs; use a fresh signed URL for current replay evidence and investigate artifact-ID replay semantics separately from language migration. | Open |
 | RISK-008 | Artifact-size risk | The standalone skill replay packaged its unpacked authored app, producing a roughly 28 MB report versus the original E2E report's roughly 9 KB. | Preserve current behavior during toolchain work; review report staging and cleanup during the skill-evaluator slice. | Open |
 
-No Python-to-TypeScript behavioral discrepancy exists yet because no runtime
-slice has been translated. Existing defects discovered later must be recorded
-without being silently fixed as part of syntax translation.
+The first runtime helper now has both Python and TypeScript implementations.
+Their separate focused suites show no known behavioral discrepancy; a direct
+cross-implementation differential test remains pending. Existing defects
+discovered later must be recorded without being silently fixed as part of
+syntax translation.
 
 ## Review record
 
