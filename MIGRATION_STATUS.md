@@ -28,7 +28,7 @@ not be read as a failure or a pass.
 | Slice | Branch/PR | Property IDs | Python evidence | TS evidence | Differential | Coverage | EAS | AI | Expo | Status |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Baseline and migration documentation | `codex/ts-migration-docs`; [PR #24](https://github.com/expo/eval-experiments/pull/24) | None yet | Corrected baseline: 118 tests; PR branch: 120 tests | Not applicable | Not applicable | Baseline recorded below | Authoring and skill jobs pass; iOS times out | Codex pass | Pending | Ready for review |
-| Bun and TypeScript toolchain | `codex/ts-toolchain`; PR pending | None expected | Pass: 120 tests | Strict typecheck and 1 Bun smoke test pass from frozen lockfile | Not applicable | No runtime TS exists yet; smoke coverage is not meaningful | All four workflows validate with Bun 1.3.14 pinned; live provisioning pending | Codex pass | Pending | In progress |
+| Bun and TypeScript toolchain | `codex/ts-toolchain`; [PR #25](https://github.com/expo/eval-experiments/pull/25) | None expected | Pass: 120 tests | Strict typecheck and 1 Bun smoke test pass from frozen lockfile | Not applicable | No runtime TS exists yet; smoke coverage is not meaningful | All four workflows validate with Bun 1.3.14 pinned; live provisioning pending | Codex pass | Pending | In progress |
 | Timeout and process helper | Planned `codex/ts-timeout`; PR pending | To be selected after contract review | Characterization and cleanup tests pending | Pending | Pending | Python module currently absent from coverage report | Authoring replay pending | Pending | Pending | Not started |
 | Telemetry parsers and emission | Branch/PR pending | To be selected per parser | Fixture and property tests pending | Pending | Pending | Script-style modules currently absent from coverage report | `author-app.yml` pending | Pending | Pending | Not started |
 | Deterministic skill evaluator | Branch/PR pending | To be selected | Existing core suite passes | Pending | Pending | Core mostly covered; CLI is 0% | Skill replay pending | Pending | Pending | Not started |
@@ -46,7 +46,7 @@ initially marked ready for Expo review.
 | --- | --- | --- | --- | --- |
 | Integration | `codex/migrate-to-ts` | `main` | Repository root | Umbrella draft not opened |
 | A | `codex/ts-migration-docs` | `codex/migrate-to-ts` | `.worktrees/ts-migration-docs` | [PR #24](https://github.com/expo/eval-experiments/pull/24); ready for Expo review |
-| B | `codex/ts-toolchain` | `codex/ts-migration-docs` | `.worktrees/ts-toolchain` | Local work in progress; not opened |
+| B | `codex/ts-toolchain` | `codex/ts-migration-docs` | `.worktrees/ts-toolchain` | [PR #25](https://github.com/expo/eval-experiments/pull/25); draft pending live EAS and predecessor review |
 | C | `codex/ts-timeout` | `codex/ts-toolchain` | Not created | Not opened |
 
 No fourth dependent PR may be opened until the bottom PR merges. After a
