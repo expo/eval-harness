@@ -3,6 +3,17 @@ import { resolve } from "node:path";
 
 const REPO_ROOT = resolve(import.meta.dir, "../../..");
 const TIMEOUT_EXEC = resolve(import.meta.dir, "../shell/timeout_exec.ts");
+const PYTHON_TIMEOUT_EXEC = resolve(import.meta.dir, "../shell/timeout_exec.py");
+
+function findPython(): string {
+  const python = Bun.which("python3");
+  if (python === null) {
+    throw new Error("python3 is required for transitional differential tests");
+  }
+  return python;
+}
+
+const PYTHON = findPython();
 
 type CliResult = {
   exitCode: number;
@@ -10,8 +21,8 @@ type CliResult = {
   stderr: string;
 };
 
-async function runTimeoutCli(...args: string[]): Promise<CliResult> {
-  const child = Bun.spawn([process.execPath, TIMEOUT_EXEC, ...args], {
+async function runCli(command: string[]): Promise<CliResult> {
+  const child = Bun.spawn(command, {
     cwd: REPO_ROOT,
     stdout: "pipe",
     stderr: "pipe",
@@ -24,6 +35,14 @@ async function runTimeoutCli(...args: string[]): Promise<CliResult> {
   ]);
 
   return { exitCode, stdout, stderr };
+}
+
+async function runTimeoutCli(...args: string[]): Promise<CliResult> {
+  return runCli([process.execPath, TIMEOUT_EXEC, ...args]);
+}
+
+async function runPythonTimeoutCli(...args: string[]): Promise<CliResult> {
+  return runCli([PYTHON, PYTHON_TIMEOUT_EXEC, ...args]);
 }
 
 test("[CHAR] missing arguments preserve Python usage response", async () => {
@@ -88,6 +107,44 @@ test("[CHAR] timeout returns 124 and preserves Python diagnostic", async () => {
       "terminating process group\n",
   );
 }, 5_000);
+
+const DIFFERENTIAL_CASES: ReadonlyArray<{
+  name: string;
+  args: string[];
+}> = [
+  { name: "missing arguments", args: [] },
+  { name: "non-numeric timeout", args: ["not-a-number", "true"] },
+  {
+    name: "child exit code",
+    args: ["2", process.execPath, "-e", "process.exit(7)"],
+  },
+  {
+    name: "child stdout and stderr",
+    args: [
+      "2",
+      process.execPath,
+      "-e",
+      'console.log("child-out"); console.error("child-err");',
+    ],
+  },
+  {
+    name: "timeout response",
+    args: ["0.05", process.execPath, "-e", "await Bun.sleep(30_000)"],
+  },
+];
+
+for (const { name, args } of DIFFERENTIAL_CASES) {
+  test(`[DIFF] ${name} matches Python`, async () => {
+    // Differential oracle: Python and TypeScript receive the same arguments
+    // and child command, then must return the same observable CLI result.
+    const [pythonResult, typeScriptResult] = await Promise.all([
+      runPythonTimeoutCli(...args),
+      runTimeoutCli(...args),
+    ]);
+
+    expect(typeScriptResult).toEqual(pythonResult);
+  }, 5_000);
+}
 
 // DEFECT-001 remains executable as an expected failure in the Python suite.
 // Its TypeScript disposition must be decided explicitly before final cutover.
