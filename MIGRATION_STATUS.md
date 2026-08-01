@@ -29,7 +29,7 @@ not be read as a failure or a pass.
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Baseline and migration documentation | `codex/ts-migration-docs`; [PR #24](https://github.com/expo/eval-experiments/pull/24) | None yet | Corrected baseline: 118 tests; PR branch: 120 tests | Not applicable | Not applicable | Baseline recorded below | Authoring and skill jobs pass; iOS times out | Codex pass | Pending | Ready for review |
 | Bun and TypeScript toolchain | `codex/ts-toolchain`; [PR #25](https://github.com/expo/eval-experiments/pull/25) | None expected | Pass: 120 tests | Strict typecheck and 1 Bun smoke test pass from frozen lockfile | Not applicable | No runtime TS exists yet; smoke coverage is not meaningful | All four workflows validate; Linux replay installs Bun 1.3.14 and passes with baseline-equivalent metrics | Codex pass | Pending | Ready for review |
-| Timeout and process helper | `codex/ts-timeout`; PR pending | None; process timing is unsuitable for useful PBT | 5 characterization tests pass; cleanup specification is expected-failing | Strict typecheck and 5 TypeScript behavior tests pass; cleanup specification remains todo | 5 direct CLI cases match Python exactly | Focused module coverage pending | Authoring replay pending | Pending | Pending | In progress |
+| Timeout and process helper | `codex/ts-timeout`; PR pending | None; process timing is unsuitable for useful PBT | 5 characterization tests pass; cleanup specification is expected-failing | Strict typecheck and 5 TypeScript behavior tests pass; cleanup specification remains todo; 1 of 5 shell caller files switched | 5 direct CLI cases match Python exactly | Focused module coverage pending | Authoring replay pending | Pending | Pending | In progress |
 | Telemetry parsers and emission | Branch/PR pending | To be selected per parser | Fixture and property tests pending | Pending | Pending | Script-style modules currently absent from coverage report | `author-app.yml` pending | Pending | Pending | Not started |
 | Deterministic skill evaluator | Branch/PR pending | To be selected | Existing core suite passes | Pending | Pending | Core mostly covered; CLI is 0% | Skill replay pending | Pending | Pending | Not started |
 | iOS core, parsing, scoring, and reports | Branch/PR pending | To be selected | Existing report and resolution tests pass | Pending | Pending | Important modules range from 17% to 89% | iOS replay pending | Pending | Pending | Not started |
@@ -80,6 +80,7 @@ effect, and verification were presented in the task before it was modified.
 | `eval_harness/utils/tests/test_timeout_exec.py` | Timeout helper | Characterize the Python CLI and expose incomplete descendant cleanup. | Explicitly approved before edit. | Pending. | `987de1b` | 5 pass; 1 expected failure |
 | `eval_harness/utils/tests/timeout_exec.test.ts` | Timeout helper | Define TypeScript behavior, compare it directly with Python during migration, and retain a todo for `DEFECT-001`. | Explicitly approved before each edit. | Pending. | `7ca8312`, `0ae001a` | 5 characterization and 5 differential cases pass; 1 cleanup todo |
 | `eval_harness/utils/shell/timeout_exec.ts` | Timeout helper | Translate the Python timeout CLI for direct execution by Bun. | Explicitly approved before edit. | Pending. | `e506682` | Strict typecheck and 5 TypeScript behavior tests pass; `DEFECT-001` is intentionally preserved pending disposition |
+| `eval_harness/utils/shell/agents.sh` | Timeout helper | Use the Bun timeout helper when platform timeout commands are unavailable. | Explicitly approved before edit. | Pending. | `d260437` | Forced fallback selects Bun; all shell syntax and full local suites pass |
 
 Generated files, renames, deletions, and workflow changes use the same ledger.
 A material rebase returns affected rows to a pending review state.
@@ -295,6 +296,7 @@ not a migration-equivalence change.
 | 2026-08-01 | `e506682` | Timeout full local regression | `bun run test:all` | Pass | 6 TypeScript tests pass with 1 todo; 114 main-discovery Python tests and 12 utility-discovery Python tests pass with 1 expected failure. |
 | 2026-08-01 | `0ae001a` | Timeout differential comparison | Run both timeout CLIs with identical arguments and child commands | Pass: 5 exact comparisons | Missing arguments, invalid timeout, child exit, child output, and timeout observables match exactly. |
 | 2026-08-01 | `0ae001a` | Timeout post-differential regression | `bun run test:all` | Pass | Strict typecheck; 11 TypeScript tests with 1 todo; 114 main-discovery Python tests; 12 utility-discovery Python tests with 1 expected failure. |
+| 2026-08-01 | `d260437` | First timeout caller cutover | Force `eval::_agent_timeout` fallback; parse all active shell scripts; run `bun run test:all` | Pass | Fallback emits `bun .../timeout_exec.ts 2400`; strict typecheck and all TypeScript/Python suites pass. |
 
 ## Migration defect backlog
 
