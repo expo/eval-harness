@@ -67,16 +67,16 @@ effect, and verification were presented in the task before it was modified.
 | `test_properties.json` | Documentation | Hold reviewed language-independent properties. | Plan approved; proposed before edit. | Codex review: no issue. | `aa4d0af` | Empty draft in PR #24 |
 | `test_properties.schema.json` | Documentation | Validate property-record structure and safe source paths. | Explicitly approved before retaining review fix. | Codex re-review passed. | `aa4d0af`, `fd74f31` | Implemented in PR #24 |
 | `eval_harness/utils/tests/test_property_catalog.py` | Documentation | Enforce uniqueness of the stable property ID. | Explicitly approved before retaining review fix. | Codex re-review passed. | `fd74f31` | Implemented in PR #24 |
-| `package.json` | Toolchain | Define reproducible Bun, typecheck, and combined test commands. | Explicitly approved before edit. | Pending. | `e242545` | Implemented locally |
-| `tsconfig.json` | Toolchain | Apply strict TypeScript checks without emitting duplicate JavaScript. | Explicitly approved before edit. | Pending. | `e242545` | Implemented locally |
-| `bun.lock` | Toolchain | Lock the complete Bun dependency graph. | Explicitly approved before retaining generated file. | Pending. | `e242545` | Frozen install passes |
-| `eval_harness/utils/tests/toolchain_smoke.test.ts` | Toolchain | Prove Bun executes a typed test through the configured runner. | Explicitly approved before retaining file. | Pending. | `e242545` | 1 test passes |
-| `pyproject.toml` | Toolchain | Declare Coverage.py and Hypothesis as development-only dependencies. | Explicitly approved before edit. | Pending. | `e242545` | Implemented locally |
-| `uv.lock` | Toolchain | Lock the new Python development dependencies exactly. | Explicitly approved before update. | Pending. | `e242545` | Lock check and imports pass |
-| `.eas/workflows/author-app.yml` | Toolchain | Pin the tested Bun version on the authoring worker. | Explicitly approved before edit. | Pending. | `e242545` | Expo validator passes |
-| `.eas/workflows/eval-skill-use.yml` | Toolchain | Pin the tested Bun version on the skill-evaluator worker. | Explicitly approved before edit. | Pending. | `e242545` | Expo validator passes |
-| `.eas/workflows/eval-ios-app.yml` | Toolchain | Pin the tested Bun version on the iOS-evaluator worker. | Explicitly approved before edit. | Pending. | `e242545` | Expo validator passes |
-| `.eas/workflows/eval-e2e.yml` | Toolchain | Pin the tested Bun version for every job in the primary workflow. | Explicitly approved before edit. | Pending. | `e242545` | Expo validator passes |
+| `package.json` | Toolchain | Define reproducible Bun, typecheck, and combined test commands. | Explicitly approved before edit. | Codex P2 fixed; re-review pending. | `e242545`, `a9db7ef` | Local tests explicitly request the non-default test group |
+| `tsconfig.json` | Toolchain | Apply strict TypeScript checks without emitting duplicate JavaScript. | Explicitly approved before edit. | Codex review: no issue. | `e242545` | Implemented locally |
+| `bun.lock` | Toolchain | Lock the complete Bun dependency graph. | Explicitly approved before retaining generated file. | Codex review: no issue. | `e242545` | Frozen install passes |
+| `eval_harness/utils/tests/toolchain_smoke.test.ts` | Toolchain | Prove Bun executes a typed test through the configured runner. | Explicitly approved before retaining file. | Codex review: no issue. | `e242545` | 1 test passes |
+| `pyproject.toml` | Toolchain | Declare Coverage.py and Hypothesis as development-only dependencies. | Explicitly approved before edit. | Codex P2 fixed; re-review pending. | `e242545`, `a9db7ef` | Non-default `test` group excludes tools from bare runtime sync |
+| `uv.lock` | Toolchain | Lock the new Python development dependencies exactly. | Explicitly approved before update. | Codex P2 fixed; re-review pending. | `e242545`, `a9db7ef` | Lock check and isolated runtime/test sync checks pass |
+| `.eas/workflows/author-app.yml` | Toolchain | Pin the tested Bun version on the authoring worker. | Explicitly approved before edit. | Codex review: no issue. | `e242545` | Expo validator passes |
+| `.eas/workflows/eval-skill-use.yml` | Toolchain | Pin the tested Bun version on the skill-evaluator worker. | Explicitly approved before edit. | Codex review: no issue. | `e242545` | Expo validator passes |
+| `.eas/workflows/eval-ios-app.yml` | Toolchain | Pin the tested Bun version on the iOS-evaluator worker. | Explicitly approved before edit. | Codex review: no issue. | `e242545` | Expo validator passes |
+| `.eas/workflows/eval-e2e.yml` | Toolchain | Pin the tested Bun version for every job in the primary workflow. | Explicitly approved before edit. | Codex review: no issue. | `e242545` | Expo validator passes |
 
 Generated files, renames, deletions, and workflow changes use the same ledger.
 A material rebase returns affected rows to a pending review state.
@@ -269,6 +269,8 @@ not a migration-equivalence change.
 | 2026-08-01 | `e242545` | Python development tools | `uv lock --check`; start Coverage.py and import Hypothesis | Pass | Coverage.py 7.15.2; Hypothesis 6.164.0. |
 | 2026-08-01 | `e242545` | EAS Bun provisioning configuration | Official Expo workflow validator on `.eas/workflows/*.yml` | Pass: 4 workflows | Each active workflow pins Bun 1.3.14 under `defaults.tools`. Live EAS provisioning remains pending. |
 | 2026-08-01 | `e242545` | Shell compatibility | Parse every active `eval_harness/**/*.sh` with `bash -n` | Pass | Workflow-only tool pins did not alter shell behavior. |
+| 2026-08-01 | `a9db7ef` | Python test dependency isolation | Sync isolated environments with bare `uv sync --frozen` and `uv sync --frozen --group test` | Pass | Bare runtime sync contains neither Coverage nor Hypothesis; explicit test sync contains Coverage 7.15.2 and Hypothesis 6.164.0. |
+| 2026-08-01 | `a9db7ef` | Corrected toolchain | `bun run test:all` | Pass | The canonical command automatically selects the non-default Python `test` group; strict typecheck, 1 Bun test, and 120 Python tests pass. |
 
 ## Discrepancies, defects, and risks
 
@@ -279,6 +281,7 @@ not a migration-equivalence change.
 | RISK-003 | Runtime-budget risk | The full Notes iOS baseline completed two plans and timed out during the third of 11 after 1,800 seconds. | Preserve the failure as baseline evidence. Bound replay scope or change the budget only in a separate reviewed behavior/infrastructure decision. | Open |
 | RISK-004 | Observability risk | `EVAL_STREAM_LOGS=1` pipes Python through `tee`, but normal Python output remained buffered until process exit. | Add a focused shell/CLI characterization and make live progress observable before relying on long migration replays. | Open |
 | RISK-005 | Artifact-integrity risk | The 630 MB iOS failure artifact has a valid gzip stream and recoverable high-value files, but a complete tar listing reports a malformed/truncated entry. | Inspect failure-package creation before using bundle byte integrity as a migration gate; retain stable EAS artifact IDs rather than expiring URLs. | Open |
+| RISK-006 | Dependency-isolation risk | The first toolchain commit placed Coverage and Hypothesis in uv's default `dev` group, so bare EAS `uv sync` would install them. | Move them to a non-default `test` group and select it centrally from `bun run test:python`; prove behavior in isolated environments. | Fixed in `a9db7ef` |
 
 No Python-to-TypeScript behavioral discrepancy exists yet because no runtime
 slice has been translated. Existing defects discovered later must be recorded
