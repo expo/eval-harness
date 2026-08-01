@@ -29,7 +29,7 @@ not be read as a failure or a pass.
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Baseline and migration documentation | `codex/ts-migration-docs`; [PR #24](https://github.com/expo/eval-experiments/pull/24) | None yet | Corrected baseline: 118 tests; PR branch: 120 tests | Not applicable | Not applicable | Baseline recorded below | Authoring and skill jobs pass; iOS times out | Codex pass | Pending | Ready for review |
 | Bun and TypeScript toolchain | `codex/ts-toolchain`; [PR #25](https://github.com/expo/eval-experiments/pull/25) | None expected | Pass: 120 tests | Strict typecheck and 1 Bun smoke test pass from frozen lockfile | Not applicable | No runtime TS exists yet; smoke coverage is not meaningful | All four workflows validate; Linux replay installs Bun 1.3.14 and passes with baseline-equivalent metrics | Codex pass | Pending | Ready for review |
-| Timeout and process helper | `codex/ts-timeout`; PR pending | None; process timing is unsuitable for useful PBT | 5 characterization tests pass; cleanup specification is expected-failing | Strict typecheck and 5 TypeScript behavior tests pass; cleanup specification remains todo; all 5 shell caller files switched | 5 direct CLI cases match Python exactly | Focused module coverage pending | macOS helper smoke passes; bounded caller-integrated replay pending | Pending | Pending | In progress |
+| Timeout and process helper | `codex/ts-timeout`; PR pending | None; process timing is unsuitable for useful PBT | 5 characterization tests pass; cleanup specification is expected-failing | Strict typecheck and 5 TypeScript behavior tests pass; cleanup specification remains todo; all 5 shell caller files switched | 5 direct CLI cases match Python exactly | Focused module coverage pending | macOS helper smoke and bounded caller-integrated replay pass | Pending | Pending | In progress |
 | Telemetry parsers and emission | Branch/PR pending | To be selected per parser | Fixture and property tests pending | Pending | Pending | Script-style modules currently absent from coverage report | `author-app.yml` pending | Pending | Pending | Not started |
 | Deterministic skill evaluator | Branch/PR pending | To be selected | Existing core suite passes | Pending | Pending | Core mostly covered; CLI is 0% | Skill replay pending | Pending | Pending | Not started |
 | iOS core, parsing, scoring, and reports | Branch/PR pending | To be selected | Existing report and resolution tests pass | Pending | Pending | Important modules range from 17% to 89% | iOS replay pending | Pending | Pending | Not started |
@@ -279,7 +279,11 @@ not a migration-equivalence change.
 | Commit content | Clean `codex/ts-timeout` worktree at `4ce009e`, uploaded by EAS CLI for an untracked temporary workflow. |
 | macOS smoke | [Run `019fbbef-4ae3-7ed3-b24b-31c3a488e14c`](https://expo.dev/accounts/georgian-team/projects/adi-test-project/workflows/019fbbef-4ae3-7ed3-b24b-31c3a488e14c): success. |
 | Assertions | Bun 1.3.14 executes the helper; normal output passes through; timeout returns 124 with exact diagnostic; `agents.sh` fallback selects Bun. |
-| Scope boundary | This proves the helper on an EAS macOS worker, not a complete iOS evaluator replay. A bounded caller-integrated replay remains pending because the unbounded Notes baseline exceeds its 30-minute budget (`RISK-003`). |
+| Bounded caller replay | [Run `019fbbf2-5a5c-7d2a-b354-a91da38398c6`](https://expo.dev/accounts/georgian-team/projects/adi-test-project/workflows/019fbbf2-5a5c-7d2a-b354-a91da38398c6): success against commit `ce88766`. |
+| Replay scope | Fixed Notes artifact, release mode, and `test_insert.txt` only. The temporary workflow was not added to the repository and did not change active workflow inputs. |
+| Caller evidence | Bun-guarded simulator boot, `ios-runner` preparation, release build/install, launch probe, and evaluator all completed. Result: 6/6 points, 100% macro and micro scores. |
+| Replay artifact | `timeout-callers-replay-output`, ID `019fbc03-cf34-79ee-9432-4df537139fc7`, 717,715,469 bytes. |
+| Scope boundary | The bounded replay is the timeout-slice gate. The complete 11-plan Notes replay remains part of later iOS/final validation and retains the known 30-minute budget risk (`RISK-003`). |
 
 ## Evidence log
 
@@ -312,6 +316,7 @@ not a migration-equivalence change.
 | 2026-08-01 | `d260437` | First timeout caller cutover | Force `eval::_agent_timeout` fallback; parse all active shell scripts; run `bun run test:all` | Pass | Fallback emits `bun .../timeout_exec.ts 2400`; strict typecheck and all TypeScript/Python suites pass. |
 | 2026-08-01 | `fae5d05` | Complete timeout caller cutover | Search active callers; parse all active shell scripts; run focused parity/type checks and `bun run test:all` | Pass | All five caller files use Bun; 10 focused timeout tests and all repository TypeScript/Python suites pass. |
 | 2026-08-01 | `4ce009e` | EAS macOS timeout smoke | Temporary validated workflow run `019fbbef-4ae3-7ed3-b24b-31c3a488e14c` | Pass | Bun 1.3.14 executed normal and timed-out commands with expected observables; temporary workflow was not added to the repository. |
+| 2026-08-01 | `ce88766` | Bounded EAS timeout-caller replay | Temporary validated workflow run `019fbbf2-5a5c-7d2a-b354-a91da38398c6` | Pass | Real Notes release app and `test_insert.txt`; timeout callers completed; result 6/6; artifact `019fbc03-cf34-79ee-9432-4df537139fc7`. |
 
 ## Migration defect backlog
 
