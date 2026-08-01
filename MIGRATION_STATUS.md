@@ -28,7 +28,7 @@ not be read as a failure or a pass.
 | Slice | Branch/PR | Property IDs | Python evidence | TS evidence | Differential | Coverage | EAS | AI | Expo | Status |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Baseline and migration documentation | `codex/ts-migration-docs`; [PR #24](https://github.com/expo/eval-experiments/pull/24) | None yet | Corrected baseline: 118 tests; PR branch: 120 tests | Not applicable | Not applicable | Baseline recorded below | Authoring and skill jobs pass; iOS times out | Codex pass | Pending | Ready for review |
-| Bun and TypeScript toolchain | `codex/ts-toolchain`; PR pending | None expected | 120 tests must remain passing | Local files present; verification pending | Not applicable | TS baseline pending | EAS Bun provisioning pending | Pending | Pending | In progress |
+| Bun and TypeScript toolchain | `codex/ts-toolchain`; PR pending | None expected | Pass: 120 tests | Strict typecheck and 1 Bun smoke test pass from frozen lockfile | Not applicable | No runtime TS exists yet; smoke coverage is not meaningful | All four workflows validate with Bun 1.3.14 pinned; live provisioning pending | Pending | Pending | In progress |
 | Timeout and process helper | Planned `codex/ts-timeout`; PR pending | To be selected after contract review | Characterization and cleanup tests pending | Pending | Pending | Python module currently absent from coverage report | Authoring replay pending | Pending | Pending | Not started |
 | Telemetry parsers and emission | Branch/PR pending | To be selected per parser | Fixture and property tests pending | Pending | Pending | Script-style modules currently absent from coverage report | `author-app.yml` pending | Pending | Pending | Not started |
 | Deterministic skill evaluator | Branch/PR pending | To be selected | Existing core suite passes | Pending | Pending | Core mostly covered; CLI is 0% | Skill replay pending | Pending | Pending | Not started |
@@ -67,6 +67,16 @@ effect, and verification were presented in the task before it was modified.
 | `test_properties.json` | Documentation | Hold reviewed language-independent properties. | Plan approved; proposed before edit. | Codex review: no issue. | `aa4d0af` | Empty draft in PR #24 |
 | `test_properties.schema.json` | Documentation | Validate property-record structure and safe source paths. | Explicitly approved before retaining review fix. | Codex re-review passed. | `aa4d0af`, `fd74f31` | Implemented in PR #24 |
 | `eval_harness/utils/tests/test_property_catalog.py` | Documentation | Enforce uniqueness of the stable property ID. | Explicitly approved before retaining review fix. | Codex re-review passed. | `fd74f31` | Implemented in PR #24 |
+| `package.json` | Toolchain | Define reproducible Bun, typecheck, and combined test commands. | Explicitly approved before edit. | Pending. | Pending toolchain commit. | Implemented locally |
+| `tsconfig.json` | Toolchain | Apply strict TypeScript checks without emitting duplicate JavaScript. | Explicitly approved before edit. | Pending. | Pending toolchain commit. | Implemented locally |
+| `bun.lock` | Toolchain | Lock the complete Bun dependency graph. | Explicitly approved before retaining generated file. | Pending. | Pending toolchain commit. | Frozen install passes |
+| `eval_harness/utils/tests/toolchain_smoke.test.ts` | Toolchain | Prove Bun executes a typed test through the configured runner. | Explicitly approved before retaining file. | Pending. | Pending toolchain commit. | 1 test passes |
+| `pyproject.toml` | Toolchain | Declare Coverage.py and Hypothesis as development-only dependencies. | Explicitly approved before edit. | Pending. | Pending toolchain commit. | Implemented locally |
+| `uv.lock` | Toolchain | Lock the new Python development dependencies exactly. | Explicitly approved before update. | Pending. | Pending toolchain commit. | Lock check and imports pass |
+| `.eas/workflows/author-app.yml` | Toolchain | Pin the tested Bun version on the authoring worker. | Explicitly approved before edit. | Pending. | Pending toolchain commit. | Expo validator passes |
+| `.eas/workflows/eval-skill-use.yml` | Toolchain | Pin the tested Bun version on the skill-evaluator worker. | Explicitly approved before edit. | Pending. | Pending toolchain commit. | Expo validator passes |
+| `.eas/workflows/eval-ios-app.yml` | Toolchain | Pin the tested Bun version on the iOS-evaluator worker. | Explicitly approved before edit. | Pending. | Pending toolchain commit. | Expo validator passes |
+| `.eas/workflows/eval-e2e.yml` | Toolchain | Pin the tested Bun version for every job in the primary workflow. | Explicitly approved before edit. | Pending. | Pending toolchain commit. | Expo validator passes |
 
 Generated files, renames, deletions, and workflow changes use the same ledger.
 A material rebase returns affected rows to a pending review state.
@@ -254,6 +264,11 @@ not a migration-equivalence change.
 | 2026-07-31 | `fd74f31` | Documentation review fixes | Main and utility unittest discovery plus schema, catalog, and duplicate-ID validation | Pass: 120 tests | Independent Codex re-review found no remaining issues and assessed the slice ready to merge. |
 | 2026-07-31 | `555a83d` | Notes E2E baseline | `eas workflow:run .eas/workflows/eval-e2e.yml -F agent=claude-code -F prd=dataset/prds/notes/prd/mvp.txt -F run_eval_ios=true -F run_eval_skill=true -F skill_scenario=skills_available_unmentioned` | Partial: authoring and skill pass; iOS timeout | Run `019fb9e9-266b-7d99-9828-0e3ef9f11622`; timeout occurred during the third of 11 plans. |
 | 2026-07-31 | `555a83d` | EAS artifact inspection | Inspect authored app, skill report, and iOS failure bundle | Partial pass | Skill JSON/HTML valid; iOS logs and traces recoverable; no final iOS result; outer tar has a malformed trailing entry. |
+| 2026-08-01 | Working tree | Bun dependency lock | `bun install --frozen-lockfile` with Bun 1.3.14 | Pass: 481 packages checked, no changes | Confirms `package.json` and `bun.lock` agree. |
+| 2026-08-01 | Working tree | Toolchain | `bun run test:all` | Pass | Strict typecheck; 1 Bun test; 114 main-discovery Python tests; 6 utility-discovery Python tests. |
+| 2026-08-01 | Working tree | Python development tools | `uv lock --check`; start Coverage.py and import Hypothesis | Pass | Coverage.py 7.15.2; Hypothesis 6.164.0. |
+| 2026-08-01 | Working tree | EAS Bun provisioning configuration | Official Expo workflow validator on `.eas/workflows/*.yml` | Pass: 4 workflows | Each active workflow pins Bun 1.3.14 under `defaults.tools`. Live EAS provisioning remains pending. |
+| 2026-08-01 | Working tree | Shell compatibility | Parse every active `eval_harness/**/*.sh` with `bash -n` | Pass | Workflow-only tool pins did not alter shell behavior. |
 
 ## Discrepancies, defects, and risks
 
