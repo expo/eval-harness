@@ -8,6 +8,10 @@
 #     -F authored_app_url='https://wf-artifacts.eascdn.net/.../authored-app.tar.gz?...'
 name: eval-ios-app
 
+defaults:
+  tools:
+    bun: '1.3.14'
+
 on:
   workflow_dispatch:
     inputs:
