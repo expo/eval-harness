@@ -1,8 +1,11 @@
+import io
 import json
 import tarfile
 import tempfile
 import unittest
 from pathlib import Path
+
+from hypothesis import example, given, settings, strategies as st
 
 from eval_harness.evaluator.skill_invocation.analysis import (
     aggregate_skill_results,
@@ -13,6 +16,8 @@ from eval_harness.evaluator.skill_invocation.analysis import (
 )
 from eval_harness.evaluator.skill_invocation.uptake_checks.registry import (
     Check,
+    CheckResult,
+    UptakeResults,
     all_checks,
     load_checks_data,
     load_skill_map,
@@ -30,7 +35,7 @@ from eval_harness.evaluator.skill_invocation.build_health.bundle_check import (
     persist_bundle_result,
     read_bundle_result,
 )
-from eval_harness.evaluator.skill_invocation.utils import unpack_artifact
+from eval_harness.evaluator.skill_invocation.utils import dedupe, flatten_strings, unpack_artifact
 
 TEST_PRD = "dataset/prds/test-app/prd/mvp.txt"
 REAL_CHECKS_DIR = Path(__file__).parents[1] / "uptake_checks"
@@ -54,6 +59,211 @@ def _write_checks_dir(root: Path, checks: list[dict], skill_map: dict[str, list[
 
 
 class SkillEvalCoreTests(unittest.TestCase):
+    @given(
+        mapped_check_ids=st.lists(
+            st.sampled_from(["check-a", "check-b", "check-c"]),
+            unique=True,
+        ),
+        expected_skills=st.lists(
+            st.sampled_from(["mapped-skill", "unsupported-skill"]),
+            unique=True,
+        ),
+    )
+    @example(
+        mapped_check_ids=["check-c", "check-a"],
+        expected_skills=["mapped-skill", "unsupported-skill"],
+    )
+    def test_spec_skill_001_check_resolution_is_exact_per_skill(
+        self,
+        mapped_check_ids: list[str],
+        expected_skills: list[str],
+    ) -> None:
+        """Property: each skill resolves to exactly its declared checks.
+
+        Oracle: the generated skill map itself, read directly by this test.
+        Catches: cross-skill leakage, reordering, dropped checks, and treating
+        an unsupported skill as an empty supported skill.
+        """
+        with tempfile.TemporaryDirectory() as td:
+            checks_dir = _write_checks_dir(
+                Path(td),
+                checks=[
+                    {
+                        "id": check_id,
+                        "category": "structural",
+                        "kind": "path_exists",
+                        "target": [check_id],
+                    }
+                    for check_id in ["check-a", "check-b", "check-c"]
+                ],
+                skill_map={"mapped-skill": mapped_check_ids},
+            )
+
+            resolved, warnings = resolve_checks_by_skill(expected_skills, checks_dir)
+
+        expected_ids = {
+            skill_id: mapped_check_ids if skill_id == "mapped-skill" else None
+            for skill_id in expected_skills
+        }
+        actual_ids = {
+            skill_id: None if checks is None else [check.id for check in checks]
+            for skill_id, checks in resolved.items()
+        }
+        self.assertEqual(actual_ids, expected_ids)
+        self.assertEqual(
+            warnings,
+            [
+                "no uptake checks mapped for skill 'unsupported-skill'"
+                for skill_id in expected_skills
+                if skill_id == "unsupported-skill"
+            ],
+        )
+
+    @given(
+        records=st.lists(
+            st.tuples(
+                st.sampled_from(
+                    [
+                        ("passed", True),
+                        ("failed", False),
+                        ("not_applicable", None),
+                        ("unavailable", None),
+                    ]
+                ),
+                st.sampled_from(["lexical", "structural", "syntax-tree"]),
+            ),
+            max_size=50,
+        )
+    )
+    @example(
+        records=[
+            (("passed", True), "lexical"),
+            (("failed", False), "structural"),
+            (("not_applicable", None), "lexical"),
+            (("unavailable", None), "syntax-tree"),
+        ]
+    )
+    def test_spec_skill_002_only_scored_statuses_affect_uptake(
+        self,
+        records: list[tuple[tuple[str, bool | None], str]],
+    ) -> None:
+        """Property: only passed and failed results affect uptake metrics.
+
+        Oracle: direct counts over the generated status labels.
+        Catches: unavailable/not-applicable checks entering the denominator,
+        incorrect pass counts, and category totals that contradict the score.
+        """
+        results = UptakeResults(
+            [
+                CheckResult(
+                    id=f"check-{index}",
+                    category=category,
+                    kind="generated",
+                    target=None,
+                    passed=passed,
+                    evidence="generated",
+                    status=status,
+                )
+                for index, ((status, passed), category) in enumerate(records)
+            ]
+        )
+
+        scored = [record for record in records if record[0][0] in {"passed", "failed"}]
+        expected_passed = sum(1 for ((status, _), _) in scored if status == "passed")
+        expected_breakdown: dict[str, dict[str, int]] = {}
+        for ((status, _), category) in scored:
+            bucket = expected_breakdown.setdefault(category, {"passed": 0, "total": 0})
+            bucket["total"] += 1
+            if status == "passed":
+                bucket["passed"] += 1
+
+        self.assertEqual(results.passed, expected_passed)
+        self.assertEqual(results.total, len(scored))
+        self.assertEqual(results.category_breakdown(), expected_breakdown)
+        if scored:
+            self.assertEqual(results.uptake_rate, round(expected_passed / len(scored), 4))
+        else:
+            self.assertIsNone(results.uptake_rate)
+        self.assertEqual(len(results.checks), len(records))
+
+    @given(
+        expected=st.lists(st.sampled_from(["a", "b", "c", "d"]), max_size=12),
+        triggered=st.lists(st.sampled_from(["a", "b", "c", "d"]), max_size=12),
+    )
+    @example(expected=[], triggered=[])
+    @example(expected=["a", "a", "b"], triggered=["b", "c", "b"])
+    def test_spec_skill_003_trigger_quality_partitions_skill_sets(
+        self,
+        expected: list[str],
+        triggered: list[str],
+    ) -> None:
+        """Property: trigger scoring exactly partitions expected/observed skills.
+
+        Oracle: independent stable deduplication plus Python set arithmetic.
+        Catches: duplicate inflation, reversed precision/recall denominators,
+        missing extras, and results outside the probability interval.
+        """
+        expected_unique = list(dict.fromkeys(expected))
+        triggered_unique = list(dict.fromkeys(triggered))
+        expected_set = set(expected_unique)
+        triggered_set = set(triggered_unique)
+        expected_matched = [skill for skill in expected_unique if skill in triggered_set]
+        expected_missing = [skill for skill in expected_unique if skill not in triggered_set]
+        expected_extra = [skill for skill in triggered_unique if skill not in expected_set]
+        expected_recall = (
+            round(len(expected_matched) / len(expected_unique), 4) if expected_unique else 1.0
+        )
+        expected_precision = (
+            round(len(expected_matched) / len(triggered_unique), 4)
+            if triggered_unique
+            else (1.0 if not expected_unique else 0.0)
+        )
+
+        result = score_trigger_quality(expected, triggered)
+
+        self.assertEqual(result.expected_skills, expected_unique)
+        self.assertEqual(result.triggered_skills, triggered_unique)
+        self.assertEqual(result.matched_skills, expected_matched)
+        self.assertEqual(result.missing_skills, expected_missing)
+        self.assertEqual(result.extra_skills, expected_extra)
+        self.assertEqual(result.recall, expected_recall)
+        self.assertEqual(result.precision, expected_precision)
+        self.assertGreaterEqual(result.recall, 0.0)
+        self.assertLessEqual(result.recall, 1.0)
+        self.assertGreaterEqual(result.precision, 0.0)
+        self.assertLessEqual(result.precision, 1.0)
+
+    @given(values=st.lists(st.text(max_size=20), max_size=40))
+    def test_spec_stable_deduplication_preserves_first_occurrences(
+        self,
+        values: list[str],
+    ) -> None:
+        """Property: deduplication retains each value's first occurrence.
+
+        Oracle: Python's ordered dictionary-key construction.
+        Catches: unstable ordering and retaining later duplicates.
+        """
+        self.assertEqual(dedupe(values), list(dict.fromkeys(values)))
+
+    @given(
+        left=st.text(max_size=20),
+        right=st.text(max_size=20),
+        tail=st.text(max_size=20),
+    )
+    def test_spec_flatten_strings_preserves_nested_visit_order(
+        self,
+        left: str,
+        right: str,
+        tail: str,
+    ) -> None:
+        """Property: string leaves are flattened in stable visit order.
+
+        Oracle: the explicit expected sequence for a fixed nested shape.
+        Catches: dropped dictionary keys, reversed values, and reordered lists.
+        """
+        value = {"outer": [left, {"inner": right}], "tail": [tail]}
+        self.assertEqual(flatten_strings(value), ["outer", left, "inner", right, "tail", tail])
+
     def test_real_checks_data_loads(self):
         checks = load_checks_data(REAL_CHECKS_DIR)
         self.assertIn("router_navigation_api_used", checks)
@@ -785,6 +995,104 @@ class SkillEvalCoreTests(unittest.TestCase):
 
             with self.assertRaises(ValueError):
                 unpack_artifact(tar_path, root / "unpacked")
+
+    @settings(max_examples=25)
+    @given(
+        traversal_depth=st.integers(min_value=1, max_value=6),
+        filename=st.text(
+            alphabet=st.characters(
+                whitelist_categories=("Ll", "Lu", "Nd"),
+                whitelist_characters="-_",
+            ),
+            min_size=1,
+            max_size=24,
+        ),
+    )
+    @example(traversal_depth=1, filename="escape.txt")
+    def test_spec_skill_004_archive_member_paths_stay_within_destination(
+        self,
+        traversal_depth: int,
+        filename: str,
+    ) -> None:
+        """Property: archive extraction never writes outside its destination.
+
+        Oracle: resolve the generated member path independently and assert the
+        extractor rejects it before the external target exists.
+        Catches: parent-directory traversal, absolute-path confusion, and
+        validation performed only after a write.
+        """
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            tar_path = root / "unsafe.tar"
+            dest = root / "unpacked"
+            outside_name = f"{filename}.txt"
+            member_name = f"{'../' * traversal_depth}{outside_name}"
+            payload = b"must remain inside the archive"
+            member = tarfile.TarInfo(member_name)
+            member.size = len(payload)
+            with tarfile.open(tar_path, "w") as archive:
+                archive.addfile(member, io.BytesIO(payload))
+
+            independently_resolved = (dest.resolve() / member_name).resolve()
+            self.assertNotIn(dest.resolve(), independently_resolved.parents)
+            with self.assertRaises(ValueError):
+                unpack_artifact(tar_path, dest)
+            self.assertFalse(independently_resolved.exists())
+
+    def test_spec_skill_004_archive_link_targets_stay_within_destination(self):
+        """Property: archive extraction never writes outside its destination.
+
+        Oracle: an independently resolved symbolic-link target lies outside
+        the destination and must be rejected before extraction begins.
+        Catches: safe-looking member names that escape through symlinks and
+        validation that inspects member names but ignores link targets.
+        """
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            tar_path = root / "unsafe-link.tar"
+            dest = root / "unpacked"
+            outside = root / "outside"
+            outside.mkdir()
+            payload = b"must not escape"
+            link = tarfile.TarInfo("link")
+            link.type = tarfile.SYMTYPE
+            link.linkname = "../outside"
+            escaped_member = tarfile.TarInfo("link/escape.txt")
+            escaped_member.size = len(payload)
+            with tarfile.open(tar_path, "w") as archive:
+                archive.addfile(link)
+                archive.addfile(escaped_member, io.BytesIO(payload))
+
+            self.assertEqual(((dest / link.name).parent / link.linkname).resolve(), outside.resolve())
+            with self.assertRaises(ValueError):
+                unpack_artifact(tar_path, dest)
+            self.assertFalse((outside / "escape.txt").exists())
+
+    def test_spec_skill_004_archive_hard_link_targets_stay_within_destination(self):
+        """Property: archive extraction never writes outside its destination.
+
+        Oracle: resolve the hard-link target from the archive root and reject
+        it when that independent path escapes the destination.
+        Catches: validating hard-link member names without validating the
+        different archive-root-relative target stored in linkname.
+        """
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            tar_path = root / "unsafe-hard-link.tar"
+            dest = root / "unpacked"
+            outside = root / "outside"
+            outside.mkdir()
+            (outside / "source.txt").write_text("outside data")
+            link = tarfile.TarInfo("internal-link.txt")
+            link.type = tarfile.LNKTYPE
+            link.linkname = "../outside/source.txt"
+            with tarfile.open(tar_path, "w") as archive:
+                archive.addfile(link)
+
+            self.assertEqual((dest / link.linkname).resolve(), (outside / "source.txt").resolve())
+            with self.assertRaises(ValueError):
+                unpack_artifact(tar_path, dest)
+            self.assertFalse((dest / link.name).exists())
 
     def test_analyze_artifacts_reports_author_only_outcome_pending(self):
         with tempfile.TemporaryDirectory() as td:

@@ -60,9 +60,30 @@ def extract_tar(path: Path, dest_dir: Path) -> None:
     with tarfile.open(path) as archive:
         for member in archive.getmembers():
             target = (dest_root / member.name).resolve()
-            if target != dest_root and dest_root not in target.parents:
+            if not _path_is_within(target, dest_root):
                 raise ValueError(f"Refusing to extract unsafe tar member: {member.name}")
-        archive.extractall(dest_root)
+            if member.issym():
+                link_target = (target.parent / member.linkname).resolve()
+                if not _path_is_within(link_target, dest_root):
+                    raise ValueError(
+                        f"Refusing to extract unsafe tar link: {member.name} -> {member.linkname}"
+                    )
+            elif member.islnk():
+                link_target = (dest_root / member.linkname).resolve()
+                if not _path_is_within(link_target, dest_root):
+                    raise ValueError(
+                        f"Refusing to extract unsafe tar link: {member.name} -> {member.linkname}"
+                    )
+            elif member.isdev() or member.isfifo():
+                raise ValueError(f"Refusing to extract special tar member: {member.name}")
+        try:
+            archive.extractall(dest_root, filter="data")
+        except tarfile.FilterError as exc:
+            raise ValueError(f"Refusing to extract unsafe tar member: {exc}") from exc
+
+
+def _path_is_within(path: Path, root: Path) -> bool:
+    return path == root or root in path.parents
 
 
 def flatten_strings(value: Any) -> list[str]:
