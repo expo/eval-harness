@@ -31,9 +31,9 @@ eval_harness/
     skill_invocation/
       uptake_checks/          # atomic check registry + skill_map.json (skill -> checks)
       build_health/           # app-wide (not per-skill) syntax/bundle signals
-      main.py                 # analyze-artifacts CLI
-      analysis.py             # scoring, aggregation, metrics.json, report.html
-      utils.py                # artifact unpacking, prd_skills loading, small helpers
+      main.ts                 # Bun analyze-artifacts CLI
+      analysis.ts             # scoring, aggregation, metrics.json, report.html
+      utils.ts                # artifact unpacking, prd_skills loading, small helpers
       tests/                  # skill evaluator unit tests
       scripts/                # skill-use analysis entrypoint
   utils/                      # artifacts, iOS, shell, and telemetry helpers (shared)
@@ -226,7 +226,7 @@ For focused debugging, run the skill evaluator and iOS test-plan-resolution
 tests separately:
 
 ```bash
-PYTHONPATH=. uv run python -m unittest eval_harness.evaluator.skill_invocation.tests.test_skill_eval_core
+bun test eval_harness/evaluator/skill_invocation/tests
 PYTHONPATH=. uv run python -m unittest eval_harness.evaluator.ios_agentic.tests.test_test_plan_resolution
 ```
 

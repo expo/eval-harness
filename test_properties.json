@@ -105,9 +105,9 @@
     {
       "id": "SKILL-004",
       "title": "Artifact extraction remains inside its destination",
-      "discovery_source": "eval_harness/evaluator/skill_invocation/utils.py",
+      "discovery_source": "eval_harness/evaluator/skill_invocation/utils.ts",
       "references": [
-        "eval_harness/evaluator/skill_invocation/utils.py — unpack_artifact extracts authored-app archives into a caller-provided directory",
+        "eval_harness/evaluator/skill_invocation/utils.ts — unpackArtifact extracts authored-app archives into a caller-provided directory",
         "AGENTS.md — Artifact bundles are evaluator inputs and retain a stable manifest contract"
       ],
       "claim": "Extracting an artifact archive never creates or modifies a filesystem path outside the requested destination, including through parent-directory components, absolute paths, symbolic links, or hard links.",
