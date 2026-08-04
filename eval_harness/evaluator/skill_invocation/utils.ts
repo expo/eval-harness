@@ -259,6 +259,7 @@ function assertNoArchiveSymlinkParent(
   entryPath: string,
   archiveSymlinkPaths: ReadonlySet<string>,
 ): void {
+  if (path === root) return;
   let current = dirname(path);
   while (current !== root) {
     if (archiveSymlinkPaths.has(current)) {
@@ -275,6 +276,7 @@ function assertNoArchiveSymlinkParent(
 }
 
 function assertNoSymlinkParent(path: string, root: string, label: string): void {
+  if (path === root) return;
   let current = dirname(path);
   while (true) {
     if (existsSync(current) && lstatSync(current).isSymbolicLink()) {

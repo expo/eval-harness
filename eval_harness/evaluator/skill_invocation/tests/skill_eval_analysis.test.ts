@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -8,7 +9,8 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join, relative, resolve } from "node:path";
+import { c as createArchive } from "tar";
 
 import {
   aggregateSkillResults,
@@ -23,7 +25,8 @@ import { CheckResult, type Check } from "../uptake_checks/registry.ts";
 const CLI_PATH = resolve(import.meta.dir, "../main.ts");
 const SHELL_ENTRYPOINT = resolve(import.meta.dir, "../scripts/eval-skill-use.sh");
 const REPO_ROOT = resolve(import.meta.dir, "../../../..");
-const PYTHON = resolve(REPO_ROOT, ".venv/bin/python");
+const VENV_PYTHON = resolve(REPO_ROOT, ".venv/bin/python");
+const PYTHON = existsSync(VENV_PYTHON) ? VENV_PYTHON : Bun.which("python3");
 
 function withTempDir<T>(run: (root: string) => T): T {
   const root = mkdtempSync(join(tmpdir(), "skill-analysis-"));
@@ -285,7 +288,19 @@ test("[REGRESSION] HTML report escapes artifact-controlled values", () => {
     writeHtmlReport(
       {
         summary: "<script>alert(1)</script>",
-        runs: [],
+        runs: [
+          {
+            app: null,
+            scenario: "skills_available_unmentioned",
+            skill_id: "",
+            detected_skills: [],
+            trigger_exact_match: true,
+            trigger_recall: 1,
+            trigger_precision: 1,
+            uptake_rate: null,
+            evaluator_pct: null,
+          },
+        ],
         skills: {
           "<unsafe>": {
             trigger_status: "not_observed",
@@ -304,6 +319,8 @@ test("[REGRESSION] HTML report escapes artifact-controlled values", () => {
     expect(html).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");
     expect(html).toContain("&lt;unsafe&gt;");
     expect(html).not.toContain("<script>alert(1)</script>");
+    expect(html).toContain("<td></td>");
+    expect(html).not.toContain("<td>None</td>");
   });
 });
 
@@ -372,7 +389,36 @@ test("[CHAR] Bun CLI writes reports and the stable console summary", () => {
   });
 });
 
-test("[DIFF] complete skill metrics and report structure match Python", () => {
+test("[CHAR] Bun CLI accepts Python's unique long-option abbreviations", () => {
+  withTempDir((root) => {
+    const fixture = writeFixture(root);
+    const outDir = join(root, "abbreviated-out");
+    const spawned = Bun.spawnSync([
+      process.execPath,
+      CLI_PATH,
+      "analyze-artifacts",
+      "--authored",
+      fixture.authored,
+      "--scen",
+      "skills_available_unmentioned",
+      "--out",
+      outDir,
+      "--prd",
+      fixture.prdSkills,
+      "--checks",
+      fixture.checksDir,
+    ], { stdout: "pipe", stderr: "pipe" });
+
+    expect(spawned.exitCode).toBe(0);
+    expect(spawned.stderr.toString()).toBe("");
+    expect(JSON.parse(readFileSync(join(outDir, "metrics.json"), "utf8")))
+      .toMatchObject({ app: "test-app", expected_skills: ["expo-test"] });
+  });
+});
+
+test.skipIf(PYTHON === null)(
+  "[DIFF] complete skill metrics and report structure match Python",
+  () => {
   // Oracle: cross-implementation parity for the same authored artifact.
   // Catches: schema drift, aggregation differences, caller argument loss,
   // output formatting drift, and omitted report sections.
@@ -394,7 +440,7 @@ test("[DIFF] complete skill metrics and report structure match Python", () => {
       fixture.checksDir,
     ];
     const python = Bun.spawnSync([
-      PYTHON,
+      PYTHON ?? "python3",
       "-m",
       "eval_harness.evaluator.skill_invocation.main",
       ...shared,
@@ -425,7 +471,72 @@ test("[DIFF] complete skill metrics and report structure match Python", () => {
     expect(normalizeHtml(readFileSync(join(bunOut, "report.html"), "utf8")))
       .toBe(normalizeHtml(readFileSync(join(pythonOut, "report.html"), "utf8")));
   });
-});
+  },
+);
+
+test.skipIf(PYTHON === null)(
+  "[DIFF] archived relative inputs preserve every artifact path",
+  () => {
+    // Oracle: Python keeps relative CLI paths relative in metrics.json.
+    // Catches: resolve() leaking runner-specific absolute paths into artifacts.
+    withTempDir((root) => {
+      const fixture = writeFixture(root);
+      const archive = join(root, "authored.tar.gz");
+      createArchive(
+        { file: archive, cwd: fixture.authored, gzip: true, sync: true },
+        ["."],
+      );
+      const relativeArchive = relative(REPO_ROOT, archive);
+      const sharedOut = join(root, "relative-out");
+      const relativeOut = relative(REPO_ROOT, sharedOut);
+      const shared = [
+        "analyze-artifacts",
+        "--authored-artifact",
+        relativeArchive,
+        "--scenario",
+        "skills_available_unmentioned",
+        "--out-dir",
+        relativeOut,
+        "--prd-skills",
+        fixture.prdSkills,
+        "--checks-dir",
+        fixture.checksDir,
+      ];
+      const python = Bun.spawnSync([
+        PYTHON ?? "python3",
+        "-m",
+        "eval_harness.evaluator.skill_invocation.main",
+        ...shared,
+      ], {
+        cwd: REPO_ROOT,
+        env: { ...process.env, PYTHONPATH: REPO_ROOT },
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      expect(python.exitCode).toBe(0);
+      const pythonMetrics = JSON.parse(
+        readFileSync(join(sharedOut, "metrics.json"), "utf8"),
+      );
+      rmSync(sharedOut, { recursive: true, force: true });
+
+      const bun = Bun.spawnSync([process.execPath, CLI_PATH, ...shared], {
+        cwd: REPO_ROOT,
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      expect(bun.stderr.toString()).toBe("");
+      expect(bun.exitCode).toBe(0);
+      const bunMetrics = JSON.parse(
+        readFileSync(join(sharedOut, "metrics.json"), "utf8"),
+      );
+
+      expect(bun.stderr.toString()).toBe(python.stderr.toString());
+      expect(bun.stdout.toString()).toBe(python.stdout.toString());
+      expect(bunMetrics).toEqual(pythonMetrics);
+      expect(bunMetrics.artifacts.authored_root.startsWith("/")).toBe(false);
+    });
+  },
+);
 
 test("[REGRESSION] shell entrypoint runs with Bun and no Python executable", () => {
   // Catches: accidentally restoring the retired Python caller or dropping
