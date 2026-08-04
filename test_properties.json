@@ -4,5 +4,31 @@
   "source": "human",
   "status": "draft",
   "saturation_note": "",
-  "properties": []
+  "properties": [
+    {
+      "id": "TRACE-001",
+      "title": "Claude tool results attach only to matching tool calls",
+      "discovery_source": "eval_harness/utils/telemetry/tracing/cc_transcript.ts",
+      "references": [
+        "eval_harness/utils/telemetry/tracing/cc_transcript.ts — module contract for matching tool-result blocks to tool-use blocks by ID",
+        "eval_harness/utils/telemetry/tracing/bt_emit.py — normalized tool_calls output fields"
+      ],
+      "claim": "For every valid Claude transcript turn, a tool result affects only the normalized tool call whose call ID equals the result's tool-use ID.",
+      "given": [
+        "One human turn containing assistant tool-use blocks with unique, non-empty call IDs.",
+        "A generated collection of result blocks containing any subset of those IDs in any order, optionally mixed with unknown IDs.",
+        "Each result contains a string or structured JSON value and may be marked as an error."
+      ],
+      "when": [
+        "The transcript is reconstructed into normalized turns, steps, and tool calls."
+      ],
+      "then": [
+        "Each result for a known ID becomes the output only of the tool call with that same ID.",
+        "A known result marked as an error sets the error only on its matching tool call.",
+        "A tool call without a matching result remains without an output or error.",
+        "A result with an unknown ID neither creates a tool call nor changes any known tool call."
+      ],
+      "oracle": "Build a dictionary directly from the generated result blocks keyed by tool-use ID and compare each generated call ID with only its dictionary entry; compare string outputs exactly and compare structured JSON outputs after parsing them back into semantic JSON values, without consulting either parser implementation's association logic."
+    }
+  ]
 }
