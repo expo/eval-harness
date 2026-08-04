@@ -327,10 +327,14 @@ export function roundRatio(
   if (!Number.isSafeInteger(digits) || digits < 0 || digits > 15) {
     throw new RangeError("digits must be a safe integer between 0 and 15");
   }
-  return roundPythonFloat(numerator / denominator, digits);
+  return roundFloat(numerator / denominator, digits);
 }
 
-function roundPythonFloat(value: number, digits: number): number {
+export function roundFloat(value: number, digits = 4): number {
+  if (!Number.isFinite(value)) return value;
+  if (!Number.isSafeInteger(digits) || digits < 0 || digits > 15) {
+    throw new RangeError("digits must be a safe integer between 0 and 15");
+  }
   const bytes = new ArrayBuffer(8);
   const view = new DataView(bytes);
   view.setFloat64(0, value, false);
