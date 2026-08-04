@@ -541,8 +541,8 @@ test("[CHAR] discovery follows symlinks and keeps readable siblings", async () =
       mkdir(claudeTarget),
       mkdir(codexRoot),
       mkdir(codexTarget),
-      mkdir(blocked, { recursive: true }),
     ]);
+    await mkdir(blocked);
 
     const claudeFile = join(claudeTarget, "session.jsonl");
     const codexFile = join(codexTarget, "rollout-session.jsonl");
