@@ -162,6 +162,9 @@ function validateTarEntry(
   if (tarEntry.type === undefined || !SAFE_TAR_ENTRY_TYPES.has(tarEntry.type)) {
     throw new Error(`unsafe tar member type for ${entryPath}`);
   }
+  if (target === destRoot && tarEntry.type !== "Directory") {
+    throw new Error(`unsafe non-directory tar root member: ${entryPath}`);
+  }
   if (typeof tarEntry.linkpath !== "string") return true;
   if (tarEntry.type === "SymbolicLink") {
     const linkTarget = resolve(dirname(target), tarEntry.linkpath);
@@ -200,7 +203,12 @@ function assertNoArchiveSymlinkParent(
 }
 
 function assertNoSymlinkParent(path: string, root: string, label: string): void {
-  if (path === root) return;
+  if (path === root) {
+    if (existsSync(root) && lstatSync(root).isSymbolicLink()) {
+      throw new Error(`unsafe ${label}: symbolic-link destination ${root}`);
+    }
+    return;
+  }
   let current = dirname(path);
   while (true) {
     if (existsSync(current) && lstatSync(current).isSymbolicLink()) {
