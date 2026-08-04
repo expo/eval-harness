@@ -57,11 +57,35 @@ def first_archive(path: Path) -> Path | None:
 
 def extract_tar(path: Path, dest_dir: Path) -> None:
     dest_root = dest_dir.resolve()
+    dest_root.mkdir(parents=True, exist_ok=True)
+    if any(dest_root.iterdir()):
+        raise ValueError(
+            f"Refusing to extract into non-empty destination: {dest_root}"
+        )
     with tarfile.open(path) as archive:
-        for member in archive.getmembers():
+        members = archive.getmembers()
+        archive_symlink_paths = {
+            (dest_root / member.name).resolve()
+            for member in members
+            if member.issym()
+        }
+        for member in members:
+            if not (
+                member.isfile()
+                or member.isdir()
+                or member.issym()
+                or member.islnk()
+            ):
+                raise ValueError(
+                    f"Refusing to extract unsupported tar member: {member.name}"
+                )
             target = (dest_root / member.name).resolve()
             if not _path_is_within(target, dest_root):
                 raise ValueError(f"Refusing to extract unsafe tar member: {member.name}")
+            if any(parent in archive_symlink_paths for parent in target.parents):
+                raise ValueError(
+                    f"Refusing to extract through archive symlink: {member.name}"
+                )
             if member.issym():
                 link_target = (target.parent / member.linkname).resolve()
                 if not _path_is_within(link_target, dest_root):
@@ -74,8 +98,6 @@ def extract_tar(path: Path, dest_dir: Path) -> None:
                     raise ValueError(
                         f"Refusing to extract unsafe tar link: {member.name} -> {member.linkname}"
                     )
-            elif member.isdev() or member.isfifo():
-                raise ValueError(f"Refusing to extract special tar member: {member.name}")
         try:
             archive.extractall(dest_root, filter="data")
         except tarfile.FilterError as exc:
