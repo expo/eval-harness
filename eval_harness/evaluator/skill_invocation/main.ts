@@ -1,4 +1,4 @@
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 
 import { analyzeArtifacts, printSummary } from "./analysis.ts";
 import { unpackArtifact } from "./utils.ts";
@@ -62,15 +62,15 @@ export function runCli(argv: string[]): number {
   }
   const parsed = parseAnalyzeOptions(argv.slice(1));
   if (typeof parsed === "number") return parsed;
-  const unpackRoot = resolve(parsed.outDir, "unpacked");
+  const unpackRoot = join(parsed.outDir, "unpacked");
   const authored = unpackArtifact(
     parsed.authoredArtifact,
-    resolve(unpackRoot, "authored"),
+    join(unpackRoot, "authored"),
   );
   const evalArtifact = parsed.evalArtifact === null ||
       ["undefined", "null", ""].includes(parsed.evalArtifact)
     ? null
-    : unpackArtifact(parsed.evalArtifact, resolve(unpackRoot, "eval"));
+    : unpackArtifact(parsed.evalArtifact, join(unpackRoot, "eval"));
   const payload = analyzeArtifacts({
     authoredArtifact: authored,
     evalArtifact,
@@ -100,8 +100,21 @@ function parseAnalyzeOptions(argv: string[]): AnalyzeOptions | number {
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index] ?? "";
     const equal = token.indexOf("=");
-    const option = equal === -1 ? token : token.slice(0, equal);
-    if (!known.has(option)) {
+    const rawOption = equal === -1 ? token : token.slice(0, equal);
+    const matches = [...known].filter((candidate) =>
+      candidate.startsWith(rawOption)
+    );
+    const option = known.has(rawOption)
+      ? rawOption
+      : matches.length === 1
+        ? (matches[0] ?? null)
+        : null;
+    if (option === null) {
+      if (matches.length > 1) {
+        return analyzeUsageError(
+          `ambiguous option: ${rawOption} could match ${matches.join(", ")}`,
+        );
+      }
       return analyzeUsageError(`unrecognized arguments: ${token}`);
     }
     const value = equal === -1 ? argv[index + 1] : token.slice(equal + 1);
