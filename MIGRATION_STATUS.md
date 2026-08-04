@@ -55,7 +55,7 @@ but they merge strictly from the bottom of the stack upward.
 | C | `codex/ts-timeout` | `codex/ts-toolchain` | `.worktrees/ts-timeout` | [Draft PR #26](https://github.com/expo/eval-experiments/pull/26); internally complete |
 | D | `codex/ts-trace-parsers` | `codex/ts-timeout` | `.worktrees/ts-trace-parsers` | [Draft PR #28](https://github.com/expo/eval-experiments/pull/28); internally complete |
 | E | `codex/ts-skill-core` | `codex/ts-trace-parsers` | `.worktrees/ts-skill-core` | [Draft PR #29](https://github.com/expo/eval-experiments/pull/29); internally complete |
-| F | `codex/ts-skill-cli` | `codex/ts-skill-core` | `.worktrees/ts-skill-cli` | Draft PR pending; internally complete |
+| F | `codex/ts-skill-cli` | `codex/ts-skill-core` | `.worktrees/ts-skill-cli` | [Draft PR #30](https://github.com/expo/eval-experiments/pull/30); internally complete |
 
 After a bottom PR merges, every descendant is restacked in parent-to-child
 order using the recorded old parent tips and `git rebase --onto`. Affected
