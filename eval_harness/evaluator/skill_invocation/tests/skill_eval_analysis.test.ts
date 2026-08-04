@@ -1,6 +1,5 @@
 import { expect, test } from "bun:test";
 import {
-  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -25,8 +24,6 @@ import { CheckResult, type Check } from "../uptake_checks/registry.ts";
 const CLI_PATH = resolve(import.meta.dir, "../main.ts");
 const SHELL_ENTRYPOINT = resolve(import.meta.dir, "../scripts/eval-skill-use.sh");
 const REPO_ROOT = resolve(import.meta.dir, "../../../..");
-const VENV_PYTHON = resolve(REPO_ROOT, ".venv/bin/python");
-const PYTHON = existsSync(VENV_PYTHON) ? VENV_PYTHON : Bun.which("python3");
 
 function withTempDir<T>(run: (root: string) => T): T {
   const root = mkdtempSync(join(tmpdir(), "skill-analysis-"));
@@ -416,68 +413,8 @@ test("[CHAR] Bun CLI accepts Python's unique long-option abbreviations", () => {
   });
 });
 
-test.skipIf(PYTHON === null)(
-  "[DIFF] complete skill metrics and report structure match Python",
-  () => {
-  // Oracle: cross-implementation parity for the same authored artifact.
-  // Catches: schema drift, aggregation differences, caller argument loss,
-  // output formatting drift, and omitted report sections.
-  withTempDir((root) => {
-    const fixture = writeFixture(root);
-    const pythonOut = join(root, "python-out");
-    const bunOut = join(root, "bun-out");
-    const shared = [
-      "analyze-artifacts",
-      "--authored-artifact",
-      fixture.authored,
-      "--eval-artifact",
-      "null",
-      "--scenario",
-      "skills_available_unmentioned",
-      "--prd-skills",
-      fixture.prdSkills,
-      "--checks-dir",
-      fixture.checksDir,
-    ];
-    const python = Bun.spawnSync([
-      PYTHON ?? "python3",
-      "-m",
-      "eval_harness.evaluator.skill_invocation.main",
-      ...shared,
-      "--out-dir",
-      pythonOut,
-    ], {
-      cwd: REPO_ROOT,
-      env: { ...process.env, PYTHONPATH: REPO_ROOT },
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    const bun = Bun.spawnSync([
-      process.execPath,
-      CLI_PATH,
-      ...shared,
-      "--out-dir",
-      bunOut,
-    ], { cwd: REPO_ROOT, stdout: "pipe", stderr: "pipe" });
-
-    expect(python.exitCode).toBe(0);
-    expect(bun.exitCode).toBe(0);
-    expect(bun.stderr.toString()).toBe(python.stderr.toString());
-    expect(bun.stdout.toString()).toBe(python.stdout.toString());
-    expect(JSON.parse(readFileSync(join(bunOut, "metrics.json"), "utf8")))
-      .toEqual(JSON.parse(readFileSync(join(pythonOut, "metrics.json"), "utf8")));
-    const normalizeHtml = (value: string): string =>
-      value.replace(/\s+/gu, " ").trim();
-    expect(normalizeHtml(readFileSync(join(bunOut, "report.html"), "utf8")))
-      .toBe(normalizeHtml(readFileSync(join(pythonOut, "report.html"), "utf8")));
-  });
-  },
-);
-
-test.skipIf(PYTHON === null)(
-  "[DIFF] archived relative inputs preserve every artifact path",
-  () => {
-    // Oracle: Python keeps relative CLI paths relative in metrics.json.
+test("[REGRESSION] archived relative inputs preserve relative artifact paths", () => {
+    // Oracle: relative user inputs remain relative in the stable metrics schema.
     // Catches: resolve() leaking runner-specific absolute paths into artifacts.
     withTempDir((root) => {
       const fixture = writeFixture(root);
@@ -502,23 +439,6 @@ test.skipIf(PYTHON === null)(
         "--checks-dir",
         fixture.checksDir,
       ];
-      const python = Bun.spawnSync([
-        PYTHON ?? "python3",
-        "-m",
-        "eval_harness.evaluator.skill_invocation.main",
-        ...shared,
-      ], {
-        cwd: REPO_ROOT,
-        env: { ...process.env, PYTHONPATH: REPO_ROOT },
-        stdout: "pipe",
-        stderr: "pipe",
-      });
-      expect(python.exitCode).toBe(0);
-      const pythonMetrics = JSON.parse(
-        readFileSync(join(sharedOut, "metrics.json"), "utf8"),
-      );
-      rmSync(sharedOut, { recursive: true, force: true });
-
       const bun = Bun.spawnSync([process.execPath, CLI_PATH, ...shared], {
         cwd: REPO_ROOT,
         stdout: "pipe",
@@ -530,13 +450,12 @@ test.skipIf(PYTHON === null)(
         readFileSync(join(sharedOut, "metrics.json"), "utf8"),
       );
 
-      expect(bun.stderr.toString()).toBe(python.stderr.toString());
-      expect(bun.stdout.toString()).toBe(python.stdout.toString());
-      expect(bunMetrics).toEqual(pythonMetrics);
       expect(bunMetrics.artifacts.authored_root.startsWith("/")).toBe(false);
+      expect(bunMetrics.artifacts.author_trace.startsWith("/")).toBe(false);
+      expect(bunMetrics.artifacts.author_manifest.startsWith("/")).toBe(false);
+      expect(bunMetrics.artifacts.app_dir.startsWith("/")).toBe(false);
     });
-  },
-);
+});
 
 test("[REGRESSION] shell entrypoint runs with Bun and no Python executable", () => {
   // Catches: accidentally restoring the retired Python caller or dropping
