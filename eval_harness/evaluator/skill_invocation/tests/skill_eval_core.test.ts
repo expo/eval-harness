@@ -145,7 +145,7 @@ function writeRawTar(
   path: string,
   entries: Array<{
     path: string;
-    type: "File" | "Link" | "SymbolicLink" | "FIFO";
+    type: "File" | "Directory" | "Link" | "SymbolicLink" | "FIFO";
     linkpath?: string;
     contents?: string;
   }>,
@@ -739,6 +739,23 @@ test("[SPEC SKILL-004] pre-existing symbolic-link parents are rejected", () => {
 
     expect(() => extractTar(archive, destination)).toThrow();
     expect(existsSync(join(outside, "escaped.txt"))).toBe(false);
+  });
+});
+
+test("[SPEC SKILL-004] a symbolic-link destination root is rejected", () => {
+  // Property: extraction never changes filesystem state outside the requested
+  // destination, including metadata applied by a root entry named '.'.
+  // Oracle: destination is independently known to be a symlink to outside.
+  // Catches: root-entry shortcuts that validate children but skip the root.
+  withTempDir((root) => {
+    const archive = join(root, "root-directory.tar");
+    const destination = join(root, "destination");
+    const outside = join(root, "outside");
+    mkdirSync(outside);
+    symlinkSync(outside, destination);
+    writeRawTar(archive, [{ path: ".", type: "Directory" }]);
+
+    expect(() => extractTar(archive, destination)).toThrow();
   });
 });
 
