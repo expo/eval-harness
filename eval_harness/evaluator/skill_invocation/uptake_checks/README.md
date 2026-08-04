@@ -35,7 +35,7 @@ This status model matters because a check that vacuously passes when its precond
 
 `computeSkillResults` treats `unavailable` as outranking a mix of scored results: a skill with one passed check and one unavailable check reads `uptake_status="unavailable"`, not an unqualified "measured, 100%" — partial evidence shouldn't read as full confidence. `not_applicable` doesn't trigger this (it was successfully classified as irrelevant, not missing evidence).
 
-Every result (all four statuses) stays in the per-skill `checks` list the HTML report reads — nothing is silently dropped, even though only `passed`/`failed` count toward `passed`/`total`/`uptake_rate`/`category_breakdown()` (see `UptakeResults`, `analysis.compute_skill_results`).
+Every result (all four statuses) stays in the per-skill `checks` list the HTML report reads — nothing is silently dropped, even though only `passed`/`failed` count toward `passed`/`total`/`uptake_rate`/`categoryBreakdown()` (see `UptakeResults`, `analysis.computeSkillResults`).
 
 ### Engagement gating for negative checks
 

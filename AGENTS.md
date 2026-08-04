@@ -58,13 +58,13 @@ runner plus uploaded artifacts.
   `skill_mention` names a skill explicitly in the prompt for the
   `skills_available_mentioned` scenario.
 - Which skill(s) are expected for a given authored app, and how to verify
-  their uptake, is resolved automatically: `analyze_artifacts` reads the `prd`
+  their uptake, is resolved automatically: `analyzeArtifacts` reads the `prd`
   recorded in the artifact's `manifest.json`, looks up the app's expected
   skill set in `dataset/prd_skills.json`, and resolves each expected skill's
   uptake checks via `uptake_checks/skill_map.json` (skill id -> check ids)
   against the declarative lexical + structural checks in `checks_data.json`
   plus code-driven checks (including syntax-tree, see `uptake_checks/code_checks.ts`)
-  registered via `@register`; route-graph checks still don't exist -- see
+  registered via `register`; route-graph checks still don't exist -- see
   `uptake_checks/README.md`. 9 of 21 Expo skills are currently mapped; the
   rest are either CLI/cloud-ops skills with no source-tree footprint at all
   (deferred to a future trace-based checking axis, not this static-check
@@ -75,7 +75,7 @@ runner plus uploaded artifacts.
   file coupled to the current skill taxonomy, so a skill rename/merge/split
   only touches that one mapping. See `uptake_checks/README.md`. There is no
   manual case-spec selection anymore. Trigger and uptake are scored per
-  expected skill independently (`analysis.compute_skill_results`,
+  expected skill independently (`analysis.computeSkillResults`,
   `metrics.json`'s `skills` key) -- a shared check contributes its result to
   every skill it's mapped to without being re-run, but one skill triggering
   never affects another skill's own trigger/uptake numbers, and an expected
