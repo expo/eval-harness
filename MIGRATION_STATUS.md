@@ -33,7 +33,7 @@ not be read as a failure or a pass.
 | Agent trace parsers | `codex/ts-trace-parsers`; [PR #28](https://github.com/expo/eval-experiments/pull/28) | `TRACE-001` | 12 characterization/differential tests passed before retirement | Strict typecheck; 16 permanent parser tests; collector switched to Bun | Fixtures, CLI edges, and 30 real traces per agent match after approved normalization | Claude 80.49%; Codex 76.47% line coverage | Claude authoring replay passes with valid trace; parallel Codex worker was lost before collection | Codex re-review pass | Kudo's requested changes implemented; rereview pending | Ready for rereview |
 | Remaining telemetry conversion and emission | Branch/PR pending | To be selected per transformation | Existing Python behavior remains active | Pending | Pending | Not measured | Replay pending | Pending | Pending | Not started |
 | Deterministic skill evaluator — core | `codex/ts-skill-core`; [PR #29](https://github.com/expo/eval-experiments/pull/29) | `SKILL-001`–`SKILL-004` | 116 focused and 131 repository tests pass; safe artifact reruns preserve archive-extraction guarantees | Strict typecheck; 43 focused and 76 repository Bun tests pass; source loading, globbing, and check dispatch are asynchronous; bundle checks accept iOS or Android | Registry definitions/results, empty-directory globs, malformed UTF-8 handling, Python float rounding, and cross-plane Unicode ordering match | Focused TS: 94.20% functions, 92.61% lines; registry 100% | Deferred: no production caller changes in this additive core PR | Independent Codex review findings addressed | Kudo's requested changes implemented; rereview pending | Ready for rereview |
-| Deterministic skill evaluator — analysis, report, and CLI cutover | Branch/PR pending | Reuse accepted skill properties; add only if a new critical surface qualifies | Existing Python remains active | Pending | Pending | CLI is 0% in the baseline | Skill replay pending | Pending | Pending | Not started |
+| Deterministic skill evaluator — analysis, report, and CLI cutover | `codex/ts-skill-cli`; [PR #30](https://github.com/expo/eval-experiments/pull/30) | Reuses `SKILL-001`–`SKILL-004`; no additional PBT target qualified | 3 CLI characterization and 115 core tests passed before retirement | Strict typecheck; 52 focused and 82 repository Bun tests pass; Python implementation retired | Complete fixture/CLI parity and final EAS metrics/report parity pass | Focused TS: 99.15% functions, 94.63% lines; `analysis.ts` 92.64% lines | [Run `019fce60-1d65-72b9-8740-6b4cdf0dac96`](https://expo.dev/accounts/georgian-team/projects/adi-test-project/workflows/019fce60-1d65-72b9-8740-6b4cdf0dac96) passes | Codex re-review pass | Pending | Ready for review |
 | iOS core, parsing, scoring, and reports | Branch/PR pending | To be selected | Existing report and resolution tests pass | Pending | Pending | Important modules range from 17% to 89% | iOS replay pending | Pending | Pending | Not started |
 | iOS bridges and tools | Branch/PR pending | To be selected | Recorded-adapter tests pending | Pending | Pending | Tools are 6%; bridges are 13% and 20% | iOS replay pending | Pending | Pending | Not started |
 | iOS orchestration and CLI | Branch/PR pending | To be selected | Orchestration characterization pending | Pending | Pending | Main is 36%; evaluators are 19% and 22% | iOS replay pending | Pending | Pending | Not started |
@@ -55,6 +55,7 @@ but they merge strictly from the bottom of the stack upward.
 | C | `codex/ts-timeout` | `codex/ts-toolchain` | `.worktrees/ts-timeout` | [Draft PR #26](https://github.com/expo/eval-experiments/pull/26); internally complete |
 | D | `codex/ts-trace-parsers` | `codex/ts-timeout` | `.worktrees/ts-trace-parsers` | [Draft PR #28](https://github.com/expo/eval-experiments/pull/28); internally complete |
 | E | `codex/ts-skill-core` | `codex/ts-trace-parsers` | `.worktrees/ts-skill-core` | [Draft PR #29](https://github.com/expo/eval-experiments/pull/29); internally complete |
+| F | `codex/ts-skill-cli` | `codex/ts-skill-core` | `.worktrees/ts-skill-cli` | Draft PR pending; internally complete |
 
 After a bottom PR merges, every descendant is restacked in parent-to-child
 order using the recorded old parent tips and `git rebase --onto`. Affected
@@ -71,7 +72,7 @@ effect, and verification were presented in the task before it was modified.
 | Path | Slice | Purpose | Approval evidence | Review | Tested evidence revision | State |
 | --- | --- | --- | --- | --- | --- | --- |
 | `MIGRATION_TESTING.md` | Documentation | Define migration, testing, review, commit, and merge gates. | Explicitly approved before the original guide and the methodology expansion. | Codex re-review passed. | `aa4d0af`, `fd74f31`, `c627356` | Expanded on the timeout branch with lessons from the first runtime migration |
-| `MIGRATION_STATUS.md` | Documentation | Record branches, evidence, risks, reviews, and the evidence-attribution policy. | Standing approval for status updates. | Codex re-review passed. | Records reviewed implementation heads through trace-parser retirement `73df13c`; the roll-up does not self-reference | Updated with trace-parser evidence, EAS results, and remaining telemetry boundary |
+| `MIGRATION_STATUS.md` | Documentation | Record branches, evidence, risks, reviews, and the evidence-attribution policy. | Standing approval for status updates. | Codex re-review passed. | Records reviewed implementation heads through skill-evaluator retirement `41f09e8`; the roll-up does not self-reference | Updated with skill cutover, local/EAS parity, and remaining migration boundary |
 | `README.md` | Documentation | Link migration material without changing runtime guidance. | Plan approved; proposed before edit. | Codex review: no issue. | `aa4d0af` | Implemented in PR #24 |
 | `test_properties.json` | Documentation and trace parsers | Hold reviewed language-independent properties. | Plan approved; user later authorized autonomous completion of the parser PR. | Codex pass. | `aa4d0af`, `1b72240`, `89cb705` | Contains schema-valid `TRACE-001`, retained for the permanent Bun PBT |
 | `test_properties.schema.json` | Documentation | Validate property-record structure and safe source paths. | Explicitly approved before retaining review fix. | Codex re-review passed. | `aa4d0af`, `fd74f31` | Implemented in PR #24 |
@@ -105,12 +106,17 @@ effect, and verification were presented in the task before it was modified.
 | `eval_harness/utils/artifacts/collect_artifacts.sh` | Trace parsers | Invoke Claude, Codex, and evaluator trace reconstruction through Bun. | User authorized autonomous completion of this PR. | Codex re-review pass. | `1b72240` | Shell syntax, local collector smoke, and real Claude EAS collection pass |
 | `test_properties.json` (`SKILL-001`–`SKILL-004`) | Skill evaluator core | Define independent properties for check resolution, metric status handling, trigger partitions, and archive path safety. | User authorized autonomous completion of the skill PR. | Codex findings addressed. | Skill-core PR head | Schema-valid properties have permanent Python/TypeScript tests |
 | `package.json`, `bun.lock` | Skill evaluator core | Add the Babel parser, tar reader, and their locked transitive dependencies for syntax analysis and safe artifact handling. | User authorized autonomous completion of the skill PR. | Codex findings addressed. | `290753d` | Frozen install, strict typecheck, and all Bun tests pass |
-| `eval_harness/evaluator/skill_invocation/utils.py` | Skill evaluator core | Harden the Python differential oracle against archive traversal, links, unsupported entries, and partial extraction. | User authorized autonomous completion of the skill PR. | Codex findings addressed. | Skill-core PR head | Security regressions and all 116 focused Python tests pass |
-| `eval_harness/evaluator/skill_invocation/utils.ts` | Skill evaluator core | Translate shared helpers, preserve semantic JSON and Python rounding behavior, and preflight archives before extraction. | User authorized autonomous completion of the skill PR. | Codex findings addressed. | Skill-core PR head | Focused Bun tests and exact rounding/UTF-8 differential cases pass |
+| `eval_harness/evaluator/skill_invocation/utils.py` | Skill evaluator core | Harden the temporary Python differential oracle against archive traversal, links, unsupported entries, and partial extraction. | User authorized autonomous completion of the skill PR. | Codex findings addressed. | Skill-core head plus cutover | Removed after all 116 focused Python tests and the complete skill-evaluator cutover passed |
+| `eval_harness/evaluator/skill_invocation/utils.ts` | Skill evaluator core and cutover | Translate shared helpers, preserve Python-compatible JSON, numeric, Unicode-order, and archive behavior. | User authorized autonomous completion of the skill PR. | Codex and Expo findings addressed. | Skill-core head plus cutover | Permanent adversarial archive and cross-plane Unicode-order regressions pass |
 | `eval_harness/evaluator/skill_invocation/uptake_checks/*.ts` | Skill evaluator core | Translate trigger detection, declarative registry behavior, and code-driven uptake checks without changing the check taxonomy. | User authorized autonomous completion of the skill PR. | Codex findings addressed. | `290753d` plus skill-core PR head | Registry metadata and results match Python; registry and code checks have 100% focused line coverage |
 | `eval_harness/evaluator/skill_invocation/build_health/*.ts` | Skill evaluator core | Translate syntax parsing and build-bundle health helpers. | User authorized autonomous completion of the skill PR. | Codex findings addressed. | `290753d` plus skill-core PR head | Recorded valid, malformed, missing, and cleanup cases pass |
-| `eval_harness/evaluator/skill_invocation/tests/test_skill_eval_core.py` | Skill evaluator core | Protect Python behavior, execute accepted properties, and serve as the temporary differential oracle. | User authorized autonomous completion of the skill PR. | Codex findings addressed. | `7973803` plus skill-core PR head | 116 focused tests pass; retained until the skill CLI cutover PR |
-| `eval_harness/evaluator/skill_invocation/tests/skill_eval_core.test.ts` | Skill evaluator core | Permanently protect the translated core and compare modelable behavior with Python during migration. | User authorized autonomous completion of the skill PR. | Codex findings addressed. | `290753d` plus skill-core PR head | 43 tests pass; focused coverage is 94.20% functions and 92.61% lines |
+| `eval_harness/evaluator/skill_invocation/tests/test_skill_eval_core.py` | Skill evaluator core | Protect Python behavior, execute accepted properties, and serve as the temporary differential oracle. | User authorized autonomous completion of the skill PR. | Codex findings addressed. | Skill-core head plus cutover | Removed after 116 focused tests passed and useful cases were retained permanently in Bun |
+| `eval_harness/evaluator/skill_invocation/tests/skill_eval_core.test.ts` | Skill evaluator core and cutover | Permanently protect the translated core; previously hosted transitional parity checks. | User authorized autonomous completion of the skill PR. | Codex re-review pass. | Skill-core head plus cutover | Python subprocess comparisons were converted to fixed regressions or removed after cutover; permanent tests remain |
+| `eval_harness/evaluator/skill_invocation/analysis.ts`, `main.ts` | Skill evaluator cutover | Translate analysis, report generation, CLI parsing, output files, and console summary. | User authorized autonomous completion of this PR. | Codex findings fixed; final re-review pass. | `95e5a1f`, `dd264a2`, `41f09e8` | 17 permanent analysis/CLI tests pass, including full metrics and exact HTML goldens |
+| `eval_harness/evaluator/skill_invocation/tests/skill_eval_analysis.test.ts` | Skill evaluator cutover | Characterize CLI/analysis, compare Python and Bun during migration, and retain the accepted contract after retirement. | User authorized autonomous completion of this PR. | Codex final re-review pass. | `f7b36b9`, `a1a876e`, `41f09e8` | Evaluator merge, missing inputs, scenarios, warnings, CLI, relative paths, shell caller, full metrics, and exact HTML are covered |
+| `eval_harness/evaluator/skill_invocation/scripts/eval-skill-use.sh` | Skill evaluator cutover | Switch the replay and E2E skill-analysis entrypoint from Python to Bun. | User authorized autonomous completion of this PR. | Codex final re-review pass. | `4ee6ae2` | Runs successfully with no Python executable in `PATH`; final EAS replay passes |
+| `eval_harness/app_builder/scripts/author-app.sh` | Skill evaluator cutover | Switch authoring-time build-health persistence from Python to Bun. | User authorized autonomous completion of this PR. | Codex final re-review pass. | `9e8ed55` | Regression protects the Bun caller; shell parsing and local suites pass |
+| Retired `skill_invocation/**/*.py` and build-health `scripts/*.js` | Skill evaluator cutover | Remove the replaced Python runtime/tests and obsolete Node subprocess helpers after review. | User authorized autonomous completion of this PR. | Codex final re-review pass after permanent coverage restoration. | `98bda2d`, `41f09e8` | No active Python/obsolete-JS caller remains; remaining repository Python suites pass |
 
 Generated files, renames, deletions, and workflow changes use the same ledger.
 A material rebase returns affected rows to a pending review state.
@@ -129,7 +135,7 @@ A material rebase returns affected rows to a pending review state.
 | Corrected pre-migration baseline | 118 passing tests |
 | Documentation branch count | 120 passing tests, including 2 new catalog-integrity tests |
 | Active runtime Python physical lines | 7,482 |
-| Current active runtime Python physical lines | 6,822 after the timeout helper and 620 parser lines were retired; excludes tests, legacy code, and package-marker files |
+| Current active runtime Python physical lines | 4,721 after the timeout helper, trace parsers, and complete skill evaluator were retired; excludes tests, legacy code, and package-marker files |
 | Notes PRD | `dataset/prds/notes/prd/mvp.txt` |
 | Notes primitive plan | `dataset/test_plans/primitives/test_insert.txt` |
 
@@ -245,7 +251,7 @@ These are compatibility surfaces, not invitations to rename or redesign.
 | iOS evaluator replay | `.eas/workflows/eval-ios-app.yml` |
 | Skill evaluator replay | `.eas/workflows/eval-skill-use.yml` |
 | Python iOS CLI | `python -m eval_harness.evaluator.ios_agentic.main` |
-| Python skill CLI | `python -m eval_harness.evaluator.skill_invocation.main` |
+| Bun skill CLI | `bun eval_harness/evaluator/skill_invocation/main.ts` |
 | Authoring shell entrypoint | `eval_harness/app_builder/scripts/author-app.sh` |
 | iOS shell entrypoint | `eval_harness/evaluator/ios_agentic/scripts/eval-ios-app.sh` |
 | Skill shell entrypoint | `eval_harness/evaluator/skill_invocation/scripts/eval-skill-use.sh` |
@@ -298,6 +304,18 @@ not a migration-equivalence change.
 | Skill report artifact | `skill-eval-report`, ID `019fbbc2-e2a5-70a3-911d-51ffa97f29b7`; contains `metrics.json` and `report.html`. |
 | Deterministic comparison | Exact structural and value match to the original Python `metrics.json` after normalizing only the different temporary authored-root prefix. |
 | Artifact-size observation | Replay artifact is about 28 MB because it includes `skill-eval-report/unpacked/authored`; the original E2E skill report was about 9 KB. Recorded as a packaging risk, not changed in this PR. |
+
+## Skill-evaluator EAS validation
+
+| Evidence | State |
+| --- | --- |
+| Tested commit | `98bda2d`; later `41f09e8` adds permanent tests and documentation only |
+| Final replay | [Run `019fce60-1d65-72b9-8740-6b4cdf0dac96`](https://expo.dev/accounts/georgian-team/projects/adi-test-project/workflows/019fce60-1d65-72b9-8740-6b4cdf0dac96): success using the original Notes authored-app artifact through a fresh signed URL. |
+| Skill report artifact | `skill-eval-report`, ID `019fce60-5a12-700f-8ada-45600102ed06`; contains valid `metrics.json` and `report.html`. |
+| Deterministic comparison | Parsed metrics are identical to the original Python baseline after normalizing only the runner-specific artifact root and JSON's equivalent `0`/`0.0` spelling. Normalized HTML is byte-identical. |
+| Runtime cutover | The EAS job invoked `eval-skill-use.sh` → Bun `main.ts`; the Python skill package had already been removed from the uploaded commit. |
+| Artifact paths | Bun output records relative report-local artifact paths rather than leaking EAS worker absolute paths. |
+| Artifact-size observation | The report remains about 28 MB because the standalone replay includes its unpacked authored app. This preserved packaging behavior remains `RISK-008`, outside the syntax migration. |
 
 ## Timeout-helper EAS validation
 
@@ -366,6 +384,11 @@ not a migration-equivalence change.
 | 2026-08-07 | Review-feedback working tree | Safe staged artifact reruns; empty-directory glob parity; deterministic file and JSON ordering; corrupt-versus-unsafe archive errors; strict typecheck; `bun run test:all`; focused coverage | Pass | 71 Bun tests and 131 Python tests pass. The focused skill-core suite has 38 Bun tests and 116 Python tests; its profile is 97.72% functions and 94.93% lines, with registry at 100%. The expanded Python↔TypeScript registry fixture matches exactly. Broad async, Android-platform, and unrelated dependency/SDK changes remain out of this parity PR. |
 | 2026-08-07 | Expanded review-feedback working tree | Frozen install; concurrent source discovery/reads; async glob and check dispatch; `Promise.all` syntax checks; iOS/Android bundle selection; root dependency audit; strict typecheck; `bun run test:all`; focused coverage; EAS project resolution | Pass | 74 Bun tests and 131 Python tests pass; the 41-test focused profile is 94.15% functions and 92.63% lines, with registry and syntax checking at 100%. The unused root `expo` dependency and its lock entries were removed; `eas project:info` still resolves `@georgian-team/adi-test-project` with project ID `338f6455-57a3-49c9-a2e0-36e5a0577c77`. |
 | 2026-08-08 | Independent-review working tree | Cross-plane Unicode-order red/green regressions; explicit invalid bundle-CLI characterization; frozen install; strict typecheck; `bun run test:all`; focused coverage | Pass | 76 Bun tests and 131 Python tests pass; 43 focused Bun tests pass with 94.20% function and 92.61% line coverage. One shared Unicode-code-point comparator now preserves Python ordering for supplementary characters in source discovery, glob evidence, JSON keys, archive selection, and sorted check evidence. The bundle CLI's exit 2 for missing/unknown arguments is an intentional stricter normalization over Python's traceback/ignored extras. |
+| 2026-08-04 | `dd264a2` | Skill analysis/CLI differential gate | Python and Bun CLIs against identical directory and archived fixtures | Pass | Parsed metrics, console output, HTML structure, relative artifact paths, argparse-compatible abbreviations, and error behavior match. |
+| 2026-08-04 | `13b5488` | Skill cutover pre-deletion review | Independent Codex review, strict typecheck, and 47 focused tests | Pass | Four compatibility findings were fixed; a reviewer-discovered symlinked extraction-root escape was added to `SKILL-004` and fixed before Python deletion. |
+| 2026-08-04 | `98bda2d` | Skill evaluator Python retirement | Frozen install; `bun run test:all`; all shell parsing; reference audit; official Expo workflow validator | Pass | 75 Bun tests, 9 remaining main Python tests, and 6 utility Python tests pass; no active skill Python/obsolete-JS caller remains. |
+| 2026-08-04 | `98bda2d` | Final skill EAS replay | `eval-skill-use.yml` run `019fce60-1d65-72b9-8740-6b4cdf0dac96` | Pass | Artifact `019fce60-5a12-700f-8ada-45600102ed06`; semantic metrics and normalized HTML match the original Python EAS baseline. |
+| 2026-08-04 | `41f09e8` | Post-retirement coverage review | 52 focused Bun tests with coverage plus independent Codex re-review | Pass | Full metrics/HTML goldens and seven major analysis branches were retained; 99.15% functions, 94.63% overall lines, and 92.64% `analysis.ts` lines. |
 
 ## Migration defect backlog
 
@@ -377,7 +400,7 @@ follow-up issue with a deferral decision, or marked out of scope with rationale.
 | ID | Slice | Defect | Executable evidence | Follow-up gate | State |
 | --- | --- | --- | --- | --- | --- |
 | DEFECT-001 | Timeout helper | After a timeout, the direct child can exit on `SIGTERM` while a descendant that ignores `SIGTERM` remains alive in the managed process group. | Bun's `[SPEC DEFECT-001] timed-out descendants do not survive` uses `test.failing`, executes on every run, and forcibly kills the leaked descendant during cleanup. | Preserve during syntax migration and open an owned behavior-fix follow-up. Remove `test.failing` only when the cleanup contract passes normally. | Open |
-| DEFECT-002 | Skill evaluator core | Python artifact extraction could follow archive or pre-existing links, accept unsupported tar entries until extraction time, and leave partial output before rejecting a later unsafe member. | Python and Bun `SKILL-004` regressions cover traversal, symbolic/hard links, special entries, non-empty destinations, and safe-before-unsafe archives. | Fixed immediately because this was a filesystem security/data-integrity defect; keep the permanent regressions after Python retirement. | Fixed in skill-core PR |
+| DEFECT-002 | Skill evaluator core | Python artifact extraction could follow archive or pre-existing links, accept unsupported tar entries until extraction time, and leave partial output before rejecting a later unsafe member. | Permanent Bun `SKILL-004` regressions cover traversal, symbolic/hard links, a symlinked destination root, special entries, non-empty destinations, and safe-before-unsafe archives. | Fixed immediately because this was a filesystem security/data-integrity defect; the permanent regressions remain after Python retirement. | Fixed in skill cutover |
 
 ## Discrepancies, defects, and risks
 
@@ -390,15 +413,13 @@ follow-up issue with a deferral decision, or marked out of scope with rationale.
 | RISK-005 | Artifact-integrity risk | The 630 MB iOS failure artifact has a valid gzip stream and recoverable high-value files, but a complete tar listing reports a malformed/truncated entry. | Inspect failure-package creation before using bundle byte integrity as a migration gate; retain stable EAS artifact IDs rather than expiring URLs. | Open |
 | RISK-006 | Dependency-isolation risk | The first toolchain commit placed Coverage and Hypothesis in uv's default `dev` group, so bare EAS `uv sync` would install them. | Move them to a non-default `test` group and select it centrally from `bun run test:python`; prove behavior in isolated environments. | Fixed in `a9db7ef` |
 | RISK-007 | Replay-input risk | `eas/download_artifact` returned 404 for the historical authored-app artifact's displayed ID even though the original run still listed it and a fresh signed URL worked. | Preserve both run IDs; use a fresh signed URL for current replay evidence and investigate artifact-ID replay semantics separately from language migration. | Open |
-| RISK-008 | Artifact-size risk | The standalone skill replay packaged its unpacked authored app, producing a roughly 28 MB report versus the original E2E report's roughly 9 KB. | Preserve current behavior during toolchain work; review report staging and cleanup during the skill-evaluator slice. | Open |
+| RISK-008 | Artifact-size risk | The standalone skill replay packages its unpacked authored app, producing a roughly 28 MB report versus the original E2E report's roughly 9 KB. | Preserve behavior during language migration. Fix report staging/cleanup in a separate behavior-change PR so parity evidence and packaging changes are not conflated. | Open |
 | RISK-009 | EAS worker reliability | The parallel Codex authoring replay lost its Expo worker during agent execution before trace collection. | Do not infer parser behavior from the run. Retain local/real-session parity evidence and require a successful Codex EAS artifact when the next relevant authoring or end-to-end replay is run. | Open |
 
-The timeout helper and both agent trace parsers have completed TypeScript
-cutover. The skill evaluator's utilities, trigger/check registry, code-driven
-checks, and build-health helpers now have an additive TypeScript implementation;
-its Python caller remains active until the next PR migrates analysis, reporting,
-and the CLI and validates the complete EAS replay. Braintrust span conversion
-and emission still use Python behind a tested transitional bridge. Existing
+The timeout helper, both agent trace parsers, and the complete deterministic
+skill evaluator have completed TypeScript/Bun cutover. Braintrust span
+conversion and emission still use Python behind a tested transitional bridge.
+The iOS evaluator remains Python and is the next major runtime area. Existing
 defects discovered later must be recorded without being silently fixed as part
 of syntax translation, except serious security or data-loss defects such as
 `DEFECT-002`, which require an explicit immediate disposition.
@@ -414,6 +435,7 @@ of syntax translation, except serious security or data-loss defects such as
 | Timeout-helper Codex review | Independent Codex reviewer | Pass | No critical issues; two important signal-status and timeout numeric-text parity gaps were fixed, and re-review found no remaining issues. |
 | Trace-parser Codex review | Independent Codex reviewer | Pass | Five important compatibility gaps were fixed; focused re-review found no remaining critical or important issues and assessed the slice ready. |
 | Skill-core Codex review | Independent Codex reviewer | Pass | Registry initialization/metadata, float rounding, UTF-8 parity, bundle cleanup, JSON semantics, and archive preflight findings were fixed; final re-review reported no actionable regressions. |
+| Skill analysis/CLI Codex review | Independent Codex reviewer | Pass | Relative paths, portable parity tests, HTML null cells, CLI abbreviations, symlinked extraction roots, caller cutover, and lost permanent analysis coverage were fixed; final re-review found no Critical or Important findings. |
 | Migration-method Codex review | Independent Codex reviewer | Pass | Reference retention, evidence attribution, safe stack restacking, and final post-retirement review are internally consistent; re-review found no remaining issues. |
 | Expo collaborator review | Pending | Pending | — |
 | Umbrella approval | Pending | Pending | — |
