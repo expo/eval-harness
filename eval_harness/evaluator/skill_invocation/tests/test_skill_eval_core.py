@@ -1,5 +1,6 @@
 import io
 import json
+import os
 import tarfile
 import tempfile
 import unittest
@@ -1067,6 +1068,32 @@ class SkillEvalCoreTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 unpack_artifact(tar_path, dest)
             self.assertFalse((outside / "escape.txt").exists())
+            self.assertFalse((dest / "link").exists())
+
+    def test_spec_skill_004_unsupported_late_member_leaves_no_partial_extraction(self):
+        """Property: every archive member is validated before the first write.
+
+        Oracle: a FIFO is not artifact data, even when preceded by a valid file.
+        Catches: relying on extraction-time filtering that leaves earlier files
+        behind before rejecting a later unsupported member.
+        """
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            tar_path = root / "safe-then-unsupported.tar"
+            dest = root / "unpacked"
+            payload = b"safe"
+            regular = tarfile.TarInfo("safe.txt")
+            regular.size = len(payload)
+            fifo = tarfile.TarInfo("pipe")
+            fifo.type = tarfile.FIFOTYPE
+            with tarfile.open(tar_path, "w") as archive:
+                archive.addfile(regular, io.BytesIO(payload))
+                archive.addfile(fifo)
+
+            with self.assertRaises(ValueError):
+                unpack_artifact(tar_path, dest)
+            self.assertFalse((dest / "safe.txt").exists())
+            self.assertFalse((dest / "pipe").exists())
 
     def test_spec_skill_004_archive_hard_link_targets_stay_within_destination(self):
         """Property: archive extraction never writes outside its destination.
@@ -1093,6 +1120,31 @@ class SkillEvalCoreTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 unpack_artifact(tar_path, dest)
             self.assertFalse((dest / link.name).exists())
+
+    def test_spec_skill_004_preexisting_hard_link_cannot_alias_outside_file(self):
+        """Property: extraction never overwrites an outside inode.
+
+        Oracle: an os.link-created destination member aliases an independently
+        created outside file, whose contents must remain unchanged.
+        Catches: pathname-only checks that cannot see hard-link inode aliases.
+        """
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            tar_path = root / "regular.tar"
+            dest = root / "unpacked"
+            outside = root / "outside.txt"
+            dest.mkdir()
+            outside.write_text("outside remains unchanged")
+            os.link(outside, dest / "file.txt")
+            payload = b"replacement"
+            member = tarfile.TarInfo("file.txt")
+            member.size = len(payload)
+            with tarfile.open(tar_path, "w") as archive:
+                archive.addfile(member, io.BytesIO(payload))
+
+            with self.assertRaises(ValueError):
+                unpack_artifact(tar_path, dest)
+            self.assertEqual(outside.read_text(), "outside remains unchanged")
 
     def test_analyze_artifacts_reports_author_only_outcome_pending(self):
         with tempfile.TemporaryDirectory() as td:

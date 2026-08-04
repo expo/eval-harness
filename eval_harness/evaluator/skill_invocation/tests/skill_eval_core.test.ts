@@ -3,6 +3,7 @@ import fc from "fast-check";
 import {
   chmodSync,
   existsSync,
+  linkSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -12,7 +13,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { c as createArchive } from "tar";
+import { c as createArchive, Header } from "tar";
 
 import {
   appNameFromPrd,
@@ -42,6 +43,7 @@ import {
 } from "../uptake_checks/trigger.ts";
 import {
   CheckResult,
+  AppTree,
   UptakeResults,
   allChecks,
   loadChecksData,
@@ -51,7 +53,7 @@ import {
   runChecks,
   type CheckDefinition,
   type CheckStatus,
-} from "../uptake_checks/index.ts";
+} from "../uptake_checks/registry.ts";
 
 const REAL_CHECKS_DIR = resolve(import.meta.dir, "../uptake_checks");
 const REPO_ROOT = resolve(import.meta.dir, "../../../..");
@@ -107,6 +109,56 @@ function writeAppFiles(root: string, files: Record<string, string>): void {
     mkdirSync(resolve(path, ".."), { recursive: true });
     writeFileSync(path, contents);
   }
+}
+
+function roundRatioTiesToEven(
+  numerator: number,
+  denominator: number,
+  digits = 4,
+): number {
+  const scale = 10 ** digits;
+  const scaled = numerator * scale;
+  const quotient = Math.floor(scaled / denominator);
+  const remainder = scaled % denominator;
+  const roundsUp =
+    remainder * 2 > denominator ||
+    (remainder * 2 === denominator && quotient % 2 !== 0);
+  return (quotient + (roundsUp ? 1 : 0)) / scale;
+}
+
+function writeRawTar(
+  path: string,
+  entries: Array<{
+    path: string;
+    type: "File" | "Link" | "SymbolicLink" | "FIFO";
+    linkpath?: string;
+    contents?: string;
+  }>,
+): void {
+  const blocks: Buffer[] = [];
+  for (const entry of entries) {
+    const contents = Buffer.from(entry.contents ?? "");
+    const header = new Header({
+      path: entry.path,
+      type: entry.type,
+      linkpath: entry.linkpath,
+      size: entry.type === "File" ? contents.length : 0,
+      mode: 0o644,
+      uid: 0,
+      gid: 0,
+      mtime: new Date(0),
+    });
+    const headerBlock = Buffer.alloc(512);
+    header.encode(headerBlock);
+    blocks.push(headerBlock);
+    if (contents.length > 0) {
+      blocks.push(contents);
+      const padding = (512 - (contents.length % 512)) % 512;
+      if (padding > 0) blocks.push(Buffer.alloc(padding));
+    }
+  }
+  blocks.push(Buffer.alloc(1024));
+  writeFileSync(path, Buffer.concat(blocks));
 }
 
 function runRealChecks(
@@ -237,7 +289,7 @@ test("[SPEC SKILL-002] only scored statuses affect uptake", () => {
         expect(results.uptakeRate).toBe(
           scored.length === 0
             ? null
-            : Math.round((expectedPassed / scored.length) * 10_000) / 10_000,
+            : roundRatioTiesToEven(expectedPassed, scored.length),
         );
         expect(results.checks).toHaveLength(records.length);
       },
@@ -278,16 +330,14 @@ test("[SPEC SKILL-003] trigger quality partitions skill sets", () => {
         expect(result.recall).toBe(
           expectedUnique.length === 0
             ? 1
-            : Math.round((matched.length / expectedUnique.length) * 10_000) /
-                10_000,
+            : roundRatioTiesToEven(matched.length, expectedUnique.length),
         );
         expect(result.precision).toBe(
           triggeredUnique.length === 0
             ? expectedUnique.length === 0
               ? 1
               : 0
-            : Math.round((matched.length / triggeredUnique.length) * 10_000) /
-                10_000,
+            : roundRatioTiesToEven(matched.length, triggeredUnique.length),
         );
         expect(result.recall).toBeGreaterThanOrEqual(0);
         expect(result.recall).toBeLessThanOrEqual(1);
@@ -321,23 +371,28 @@ test("[REGRESSION] PRD app names preserve Python path behavior", () => {
   expect(appNameFromPrd("some/other/path.txt")).toBeNull();
 });
 
-test("[REGRESSION] JSON helpers preserve sorted output and PRD skill arrays", () => {
+test("[REGRESSION] JSON helpers preserve semantic values and PRD skill arrays", () => {
   withTempDir((root) => {
     const path = join(root, "prd_skills.json");
     writeJson(
       {
         zebra: ["expo-ui"],
         alpha: { nested_z: 2, nested_a: 1 },
+        Z: "é",
+        é: "😀",
+        numeric: { integerLikeFloat: 1, exponent: 1e-7 },
       },
       path,
     );
 
-    expect(readFileSync(path, "utf8")).toBe(
-      '{\n  "alpha": {\n    "nested_a": 1,\n    "nested_z": 2\n  },\n  "zebra": [\n    "expo-ui"\n  ]\n}\n',
-    );
+    // Oracle: parsed values. Python and JavaScript may use different but
+    // equivalent number spellings, Unicode escapes, and object-key order.
     expect(readJson<Record<string, unknown>>(path)).toEqual({
-      alpha: { nested_a: 1, nested_z: 2 },
       zebra: ["expo-ui"],
+      alpha: { nested_z: 2, nested_a: 1 },
+      Z: "é",
+      é: "😀",
+      numeric: { integerLikeFloat: 1, exponent: 1e-7 },
     });
     const skillsPath = join(root, "skills-only.json");
     writeFileSync(skillsPath, '{"notes":["expo-ui","expo-router"]}');
@@ -394,6 +449,13 @@ test("[REGRESSION] real check data and skill mappings remain internally valid", 
   for (const checkIds of Object.values(skillMap)) {
     for (const checkId of checkIds) expect(registry.has(checkId)).toBe(true);
   }
+});
+
+test("[REGRESSION] importing registry directly installs code-driven checks", () => {
+  const registry = allChecks(REAL_CHECKS_DIR);
+
+  expect(registry.has("dom_use_dom_directive_present")).toBe(true);
+  expect(registry.get("dom_use_dom_directive_present")?.run).not.toBeNull();
 });
 
 test("[REGRESSION] pooled resolution deduplicates shared checks", () => {
@@ -585,6 +647,197 @@ test("[SPEC SKILL-004] external symbolic-link targets are rejected", () => {
     expect(existsSync(join(destination, "link"))).toBe(false);
   });
 });
+
+test("[SPEC SKILL-004] external hard-link targets are rejected", () => {
+  // Property: an archive hard link cannot name a source outside the extraction
+  // root, even when the link's own destination path appears safe.
+  // Oracle: ../outside.txt is independently known to leave the destination.
+  // Catches: validating member names while ignoring hard-link source paths.
+  withTempDir((root) => {
+    const archive = join(root, "unsafe-hard-link.tar");
+    const destination = join(root, "destination");
+    writeFileSync(join(root, "outside.txt"), "outside remains unchanged");
+    writeRawTar(archive, [
+      { path: "inside-link", type: "Link", linkpath: "../outside.txt" },
+    ]);
+
+    expect(() => extractTar(archive, destination)).toThrow();
+    expect(readFileSync(join(root, "outside.txt"), "utf8")).toBe(
+      "outside remains unchanged",
+    );
+    expect(existsSync(join(destination, "inside-link"))).toBe(false);
+  });
+});
+
+test("[SPEC SKILL-004] special filesystem entries are rejected", () => {
+  // Property: artifacts contain data, directories, and links—not named pipes
+  // or device-like filesystem objects.
+  // Oracle: FIFO is a POSIX special-file entry rather than artifact data.
+  // Catches: unsafe extraction of active/special filesystem objects.
+  withTempDir((root) => {
+    const archive = join(root, "unsafe-fifo.tar");
+    const destination = join(root, "destination");
+    writeRawTar(archive, [{ path: "pipe", type: "FIFO" }]);
+
+    expect(() => extractTar(archive, destination)).toThrow();
+    expect(existsSync(join(destination, "pipe"))).toBe(false);
+  });
+});
+
+test("[SPEC SKILL-004] pre-existing symbolic-link parents are rejected", () => {
+  // Property: a safe-looking member cannot escape through a symlink that was
+  // already present beneath the requested destination.
+  // Oracle: destination/link resolves to the separately created outside dir.
+  // Catches: purely lexical checks that ignore filesystem path resolution.
+  withTempDir((root) => {
+    const archive = join(root, "unsafe-parent.tar");
+    const destination = join(root, "destination");
+    const outside = join(root, "outside");
+    mkdirSync(destination);
+    mkdirSync(outside);
+    symlinkSync(outside, join(destination, "link"));
+    writeRawTar(archive, [
+      { path: "link/escaped.txt", type: "File", contents: "escaped" },
+    ]);
+
+    expect(() => extractTar(archive, destination)).toThrow();
+    expect(existsSync(join(outside, "escaped.txt"))).toBe(false);
+  });
+});
+
+test("[SPEC SKILL-004] pre-existing hard-link aliases are rejected", () => {
+  // Property: extraction cannot overwrite an outside inode through a hard link
+  // that was already present at the destination member path.
+  // Oracle: the outside file is independently created and must remain intact.
+  // Catches: pathname-only validation that cannot see inode aliases.
+  withTempDir((root) => {
+    const archive = join(root, "regular.tar");
+    const destination = join(root, "destination");
+    const outside = join(root, "outside.txt");
+    mkdirSync(destination);
+    writeFileSync(outside, "outside remains unchanged");
+    linkSync(outside, join(destination, "file.txt"));
+    writeRawTar(archive, [
+      { path: "file.txt", type: "File", contents: "replacement" },
+    ]);
+
+    expect(() => extractTar(archive, destination)).toThrow();
+    expect(readFileSync(outside, "utf8")).toBe("outside remains unchanged");
+  });
+});
+
+test("[SPEC SKILL-004] unsafe later members leave no partial extraction", () => {
+  // Property: every archive member is validated before the first write.
+  // Oracle: safe.txt precedes a known escaping hard link but must not appear.
+  // Catches: streaming validation that leaves partial artifacts before failure.
+  withTempDir((root) => {
+    const archive = join(root, "safe-then-unsafe.tar");
+    const destination = join(root, "destination");
+    writeRawTar(archive, [
+      { path: "safe.txt", type: "File", contents: "safe" },
+      { path: "link", type: "Link", linkpath: "../outside.txt" },
+    ]);
+
+    expect(() => extractTar(archive, destination)).toThrow();
+    expect(existsSync(join(destination, "safe.txt"))).toBe(false);
+  });
+});
+
+test("[SPEC SKILL-004] archive-declared symlink parents are rejected before extraction", () => {
+  // Property: every archive member is validated before the first write.
+  // Oracle: child.txt is nested beneath a symlink declared in the same archive.
+  // Catches: preflights that inspect only symlinks already on the filesystem.
+  withTempDir((root) => {
+    const archive = join(root, "symlink-parent.tar");
+    const destination = join(root, "destination");
+    writeRawTar(archive, [
+      { path: "safe.txt", type: "File", contents: "safe" },
+      { path: "alias", type: "SymbolicLink", linkpath: "real" },
+      { path: "alias/child.txt", type: "File", contents: "child" },
+    ]);
+
+    expect(() => extractTar(archive, destination)).toThrow();
+    expect(existsSync(join(destination, "safe.txt"))).toBe(false);
+    expect(existsSync(join(destination, "alias"))).toBe(false);
+  });
+});
+
+test.skipIf(PYTHON === null)(
+  "[DIFF] score rates preserve Python float rounding",
+  () => {
+    const uptakeRate = (passed: number, total: number): number | null =>
+      new UptakeResults(
+        Array.from(
+          { length: total },
+          (_, index) =>
+            new CheckResult({
+              id: `check-${index}`,
+              category: "generated",
+              kind: "generated",
+              target: null,
+              passed: index < passed,
+              evidence: "generated",
+              status: index < passed ? "passed" : "failed",
+            }),
+        ),
+      ).uptakeRate;
+    const pythonScript =
+      "import json; print(json.dumps([round(1/32, 4), round(1/160, 4), round(3/160, 4)]))";
+    const python = Bun.spawnSync(
+      [PYTHON ?? "python3", "-c", pythonScript],
+      { stdout: "pipe", stderr: "pipe" },
+    );
+    expect(python.exitCode).toBe(0);
+    expect(new TextDecoder().decode(python.stderr)).toBe("");
+    const pythonRates = JSON.parse(
+      new TextDecoder().decode(python.stdout),
+    ) as [number, number, number];
+
+    expect(pythonRates).toEqual([0.0312, 0.0063, 0.0187]);
+    expect(uptakeRate(1, 32)).toBe(pythonRates[0]);
+    expect(uptakeRate(1, 160)).toBe(pythonRates[1]);
+    expect(uptakeRate(3, 160)).toBe(pythonRates[2]);
+    expect(
+      scoreTriggerQuality(
+        Array.from({ length: 160 }, (_, index) => `skill-${index}`),
+        ["skill-0", "skill-1", "skill-2"],
+      ).recall,
+    ).toBe(pythonRates[2]);
+  },
+);
+
+test.skipIf(PYTHON === null)(
+  "[DIFF] malformed UTF-8 source files are skipped",
+  () => {
+    withTempDir((root) => {
+      writeFileSync(join(root, "valid.ts"), "export const valid = true;\n");
+      writeFileSync(join(root, "invalid.ts"), Buffer.from([0xc3, 0x28]));
+      const typescriptFiles = [...new AppTree(root).files.keys()];
+      const pythonScript = `
+import json
+import sys
+from pathlib import Path
+from eval_harness.evaluator.skill_invocation.uptake_checks.registry import AppTree
+print(json.dumps([str(path) for path in AppTree(Path(sys.argv[1])).files]))
+`;
+      const python = Bun.spawnSync(
+        [PYTHON ?? "python3", "-c", pythonScript, root],
+        {
+          cwd: REPO_ROOT,
+          env: { ...process.env, PYTHONPATH: REPO_ROOT },
+          stdout: "pipe",
+          stderr: "pipe",
+        },
+      );
+      expect(python.exitCode).toBe(0);
+      expect(new TextDecoder().decode(python.stderr)).toBe("");
+      expect(typescriptFiles).toEqual(
+        JSON.parse(new TextDecoder().decode(python.stdout)),
+      );
+      expect(typescriptFiles).toEqual(["valid.ts"]);
+    });
+  },
+);
 
 test("[REGRESSION] valid compressed artifacts unpack into the destination", () => {
   withTempDir((root) => {
@@ -1012,6 +1265,9 @@ test.skipIf(PYTHON === null)(
       );
       const typescriptPayload = {
         check_ids: checks.map((check) => check.id),
+        descriptions: Object.fromEntries(
+          checks.map((check) => [check.id, check.description]),
+        ),
         warnings,
         results: runChecks(checks, root).map((result) => ({
           id: result.id,
@@ -1036,6 +1292,7 @@ checks, warnings = resolve_checks_for_skills(skills, checks_dir)
 results = run_checks(checks, app_dir)
 print(json.dumps({
     "check_ids": [check.id for check in checks],
+    "descriptions": {check.id: check.description for check in checks},
     "warnings": warnings,
     "results": [result.__dict__ for result in results],
 }, sort_keys=True))

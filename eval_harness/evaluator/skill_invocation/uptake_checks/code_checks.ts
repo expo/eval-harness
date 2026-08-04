@@ -4,16 +4,35 @@ import {
   extractAstFacts,
   type AstFacts,
 } from "../build_health/node_parser.ts";
-import {
-  STATUS_FAILED,
-  STATUS_NOT_APPLICABLE,
-  STATUS_PASSED,
-  STATUS_UNAVAILABLE,
+import type {
   AppTree,
   CheckResult,
-  register,
-  stripComments,
+  CheckRunner,
+  CheckStatus,
 } from "./registry.ts";
+
+type ResultFields = {
+  id: string;
+  category: string;
+  kind: string;
+  target: unknown;
+  passed: boolean | null;
+  evidence: string;
+  status: CheckStatus;
+};
+
+type CodeCheckBindings = {
+  register: (
+    checkId: string,
+    category: string,
+    description?: string,
+  ) => (runner: CheckRunner) => CheckRunner;
+  createResult: (fields: ResultFields) => CheckResult;
+  stripComments: (text: string) => string;
+};
+
+let createResult: CodeCheckBindings["createResult"];
+let stripComments: CodeCheckBindings["stripComments"];
 
 const USE_DOM_CANDIDATE = /['"]use dom['"]/u;
 const LAYOUT_FILENAME = /^_layout\.(t|j)sx?$/u;
@@ -53,27 +72,56 @@ const SAFE_AREA_CONTEXT_IMPORT = /from\s*['"]react-native-safe-area-context['"]/
 const EXPO_ROUTER_IMPORT = /from\s*['"]expo-router['"]|require\(['"]expo-router['"]\)/u;
 const REACT_NAVIGATION_IMPORT = /from\s*['"]@react-navigation\//u;
 
+const CODE_CHECK_DESCRIPTIONS = {
+  dom_use_dom_directive_present:
+    "expo-dom rule: a DOM component file must start with the 'use dom' directive. AST-backed (not a declarative regex check) because a directive is a specific JS-grammar position (a leading string-literal-expression-statement) -- a regex anchored to 'appears alone on its own line' still matches a `\"use dom\";` statement placed after other code, which is not a real directive and has no DOM-component effect. If the app has zero real 'use dom' files, this is the check that should read failed (this skill was expected but never engaged with at all) -- its sibling checks (dom_layout_excludes_use_dom, dom_single_default_export_and_no_native_jsx) read not_applicable in that case instead, since their own rules only make sense once at least one real DOM component exists.",
+  dom_layout_excludes_use_dom:
+    "expo-dom rule: a _layout file must never itself be a DOM component. AST-backed (uses the same confirmed-directive facts as dom_use_dom_directive_present) so an unrelated 'use dom'-shaped string inside a _layout file (a comment, an unrelated string constant) doesn't false-fail this check -- only a real, AST-confirmed directive counts as the violation. not_applicable if the app has no real confirmed DOM component at all (third review round: gating this only on 'no _layout files' let an ordinary app with zero DOM usage vacuously pass, since almost every expo-router app has _layout files -- this now matches dom_single_default_export_and_no_native_jsx's own not_applicable precondition), or if the app has a confirmed DOM component but no _layout files at all.",
+  dom_single_default_export_and_no_native_jsx:
+    "expo-dom rule: a 'use dom' file must have exactly one default export and must not render a react-native primitive as JSX (including namespace imports like `import * as RN` and JSXMemberExpression usages like <RN.Text>) -- both need real AST facts that regex can't verify without false positives/negatives. Aggregation across every confirmed 'use dom' file, in order: (1) any confirmed file with a real violation -> failed; (2) else, any candidate the parser couldn't resolve -> unavailable (a second file parsing cleanly must not hide a different file's parser failure); (3) else, if no file was ever confirmed as a real DOM component -> not_applicable; (4) else -> passed.",
+  hosting_no_banned_node_imports_in_api_routes:
+    "eas-hosting rule: +api.ts route files run on an edge runtime and must not import Node-only builtins (fs, node:crypto) or node-fetch. Code-driven because it must filter to just +api.* files, not the whole app. not_applicable if the app has no API routes at all (EAS Hosting also serves static sites with no API routes).",
+  hosting_api_routes_use_typescript:
+    "eas-hosting rule: use TypeScript for API routes -- a plain-JS +api.js/+api.jsx file is the anti-pattern. not_applicable if the app has no API routes at all.",
+  data_fetching_expo_public_env_prefix:
+    "expo-data-fetching rule: only EXPO_PUBLIC_-prefixed env vars are exposed client-side. Code-driven (not a bare presence-of-EXPO_PUBLIC_ regex) so it can verify the naming convention against whichever env vars the app actually reads, and return not_applicable rather than a scored fail when the app reads no client env var at all -- confirmed live: both real hot_chocolate and wiki_reader apps read zero client env vars (a self-contained app and a WebView wrapper respectively), so a presence-only check would always fail them regardless of true skill uptake. Excludes +api.* route files entirely: the skill explicitly endorses unprefixed server-only secrets there (e.g. an OpenAI API key read inside a +api.ts handler), which is the opposite of a violation. Strips comments before scanning, same as every declarative check, so a commented-out example doesn't count.",
+  expo_ui_no_host_from_subpackage:
+    "expo-ui rule: Host must always be imported from the '@expo/ui' root, never from a platform-specific subpackage. Converted from a declarative text_absent check (third review round): a bare absence check vacuously passed for apps that never imported @expo/ui at all, so this is now not_applicable unless the app actually imports @expo/ui somewhere.",
+  expo_ui_platform_specific_trees_not_in_app_dir:
+    "expo-ui rule: platform-specific @expo/ui trees must live in components/, never under app/ -- Expo Router doesn't support platform extensions for route files. Converted from a declarative path_absent check (third review round): same vacuous-pass problem as expo_ui_no_host_from_subpackage above.",
+  data_fetching_no_axios:
+    "expo-data-fetching rule: avoid axios, prefer the built-in fetch (or expo/fetch). Converted from a declarative text_absent check (third review round): a bare absence check vacuously passed for apps with no observable data-fetching behavior at all. Finding axios itself is always scored (importing it is proof the app engaged with data fetching, even if the wrong way); a clean pass additionally requires observable fetch/query-lib usage as independent proof of engagement -- otherwise not_applicable.",
+  native_ui_no_expo_av:
+    "expo-native-ui rule: expo-av is removed -- use expo-audio/expo-video instead. Fourth review round: gated on this feature's OWN positive replacement (expo-audio/expo-video usage), not a shared skill-wide signal -- using react-native-safe-area-context or useWindowDimensions says nothing about whether the app made a correct media choice. Finding expo-av itself is always scored regardless of gating, since importing it is proof this feature area was engaged.",
+  native_ui_no_dimensions_get:
+    "expo-native-ui rule: use useWindowDimensions, not Dimensions.get(). Fourth review round: gated on this feature's OWN positive replacement (useWindowDimensions usage), not a shared skill-wide signal -- see native_ui_no_expo_av above for why. Finding Dimensions.get() itself is always scored regardless of gating.",
+  native_ui_no_safe_area_view_from_react_native:
+    "expo-native-ui rule: use react-native-safe-area-context, not react-native's own SafeAreaView. Fourth review round: gated on this feature's OWN positive replacement (react-native-safe-area-context usage), not a shared skill-wide signal -- see native_ui_no_expo_av above for why. Anchored to the import statement (not a bare word match) to avoid flagging the correct import from react-native-safe-area-context. Finding SafeAreaView imported from react-native itself is always scored regardless of gating.",
+  router_no_direct_react_navigation_import:
+    "SDK 56+ rule: never import @react-navigation/* directly -- use expo-router/react-navigation instead. Converted from a declarative text_absent check (third review round): shared by expo-router and expo-native-ui, and a bare absence check vacuously passed for an app with zero navigation engagement of any kind. Gated on an expo-router import (virtually always present in a real expo-router app, so this rarely changes expo-router's own scoring) -- finding a direct @react-navigation import is itself scored regardless of gating, since importing it is proof of navigation engagement.",
+} as const;
+
 function passed(checkId: string, category: string, evidence: string): CheckResult {
-  return new CheckResult({
+  return createResult({
     id: checkId,
     category,
     kind: "code",
     target: null,
     passed: true,
     evidence,
-    status: STATUS_PASSED,
+    status: "passed",
   });
 }
 
 function failed(checkId: string, category: string, evidence: string): CheckResult {
-  return new CheckResult({
+  return createResult({
     id: checkId,
     category,
     kind: "code",
     target: null,
     passed: false,
     evidence,
-    status: STATUS_FAILED,
+    status: "failed",
   });
 }
 
@@ -82,14 +130,14 @@ function notApplicable(
   category: string,
   evidence: string,
 ): CheckResult {
-  return new CheckResult({
+  return createResult({
     id: checkId,
     category,
     kind: "code",
     target: null,
     passed: null,
     evidence,
-    status: STATUS_NOT_APPLICABLE,
+    status: "not_applicable",
   });
 }
 
@@ -98,14 +146,14 @@ function unavailable(
   category: string,
   evidence: string,
 ): CheckResult {
-  return new CheckResult({
+  return createResult({
     id: checkId,
     category,
     kind: "code",
     target: null,
     passed: null,
     evidence,
-    status: STATUS_UNAVAILABLE,
+    status: "unavailable",
   });
 }
 
@@ -137,7 +185,16 @@ function domCandidateFiles(appTree: AppTree): DomCandidates {
   return { confirmed, unavailablePaths };
 }
 
-register("dom_use_dom_directive_present", "syntax-tree")((appTree) => {
+export function registerCodeChecks(bindings: CodeCheckBindings): void {
+  createResult = bindings.createResult;
+  stripComments = bindings.stripComments;
+  const { register } = bindings;
+
+register(
+  "dom_use_dom_directive_present",
+  "syntax-tree",
+  CODE_CHECK_DESCRIPTIONS.dom_use_dom_directive_present,
+)((appTree) => {
   const { confirmed, unavailablePaths } = domCandidateFiles(appTree);
   const first = confirmed[0];
   if (first !== undefined) {
@@ -161,7 +218,11 @@ register("dom_use_dom_directive_present", "syntax-tree")((appTree) => {
   );
 });
 
-register("dom_layout_excludes_use_dom", "syntax-tree")((appTree) => {
+register(
+  "dom_layout_excludes_use_dom",
+  "syntax-tree",
+  CODE_CHECK_DESCRIPTIONS.dom_layout_excludes_use_dom,
+)((appTree) => {
   const { confirmed, unavailablePaths } = domCandidateFiles(appTree);
   const layoutPaths = new Set(
     [...appTree.files.keys()].filter((path) => LAYOUT_FILENAME.test(basename(path))),
@@ -211,6 +272,7 @@ register("dom_layout_excludes_use_dom", "syntax-tree")((appTree) => {
 register(
   "dom_single_default_export_and_no_native_jsx",
   "syntax-tree",
+  CODE_CHECK_DESCRIPTIONS.dom_single_default_export_and_no_native_jsx,
 )((appTree) => {
   const { confirmed, unavailablePaths } = domCandidateFiles(appTree);
   for (const [path, facts] of confirmed) {
@@ -253,6 +315,7 @@ register(
 register(
   "hosting_no_banned_node_imports_in_api_routes",
   "lexical",
+  CODE_CHECK_DESCRIPTIONS.hosting_no_banned_node_imports_in_api_routes,
 )((appTree) => {
   const apiPaths = [...appTree.files.keys()].filter((path) =>
     API_ROUTE_FILENAME.test(basename(path))
@@ -280,7 +343,11 @@ register(
   );
 });
 
-register("hosting_api_routes_use_typescript", "structural")((appTree) => {
+register(
+  "hosting_api_routes_use_typescript",
+  "structural",
+  CODE_CHECK_DESCRIPTIONS.hosting_api_routes_use_typescript,
+)((appTree) => {
   const apiPaths = [...appTree.files.keys()].filter((path) =>
     API_ROUTE_FILENAME.test(basename(path))
   );
@@ -308,7 +375,11 @@ register("hosting_api_routes_use_typescript", "structural")((appTree) => {
   );
 });
 
-register("data_fetching_expo_public_env_prefix", "lexical")((appTree) => {
+register(
+  "data_fetching_expo_public_env_prefix",
+  "lexical",
+  CODE_CHECK_DESCRIPTIONS.data_fetching_expo_public_env_prefix,
+)((appTree) => {
   const environmentNames = new Set<string>();
   for (const [path, text] of appTree.files) {
     if (API_ROUTE_FILENAME.test(basename(path))) continue;
@@ -341,7 +412,11 @@ register("data_fetching_expo_public_env_prefix", "lexical")((appTree) => {
   );
 });
 
-register("expo_ui_no_host_from_subpackage", "lexical")((appTree) => {
+register(
+  "expo_ui_no_host_from_subpackage",
+  "lexical",
+  CODE_CHECK_DESCRIPTIONS.expo_ui_no_host_from_subpackage,
+)((appTree) => {
   for (const [path, text] of appTree.files) {
     if (EXPO_UI_HOST_FROM_SUBPACKAGE.test(stripComments(text))) {
       return failed(
@@ -368,6 +443,7 @@ register("expo_ui_no_host_from_subpackage", "lexical")((appTree) => {
 register(
   "expo_ui_platform_specific_trees_not_in_app_dir",
   "structural",
+  CODE_CHECK_DESCRIPTIONS.expo_ui_platform_specific_trees_not_in_app_dir,
 )((appTree) => {
   const matches = appTree.globAny(EXPO_UI_PLATFORM_TREE_GLOBS);
   if (matches[0] !== undefined) {
@@ -391,7 +467,11 @@ register(
   );
 });
 
-register("data_fetching_no_axios", "lexical")((appTree) => {
+register(
+  "data_fetching_no_axios",
+  "lexical",
+  CODE_CHECK_DESCRIPTIONS.data_fetching_no_axios,
+)((appTree) => {
   for (const [path, text] of appTree.files) {
     if (AXIOS_IMPORT.test(stripComments(text))) {
       return failed("data_fetching_no_axios", "lexical", `${path}: imports axios`);
@@ -414,7 +494,11 @@ register("data_fetching_no_axios", "lexical")((appTree) => {
   );
 });
 
-register("native_ui_no_expo_av", "lexical")((appTree) => {
+register(
+  "native_ui_no_expo_av",
+  "lexical",
+  CODE_CHECK_DESCRIPTIONS.native_ui_no_expo_av,
+)((appTree) => {
   for (const [path, text] of appTree.files) {
     if (EXPO_AV_IMPORT.test(stripComments(text))) {
       return failed("native_ui_no_expo_av", "lexical", `${path}: imports expo-av`);
@@ -437,7 +521,11 @@ register("native_ui_no_expo_av", "lexical")((appTree) => {
   );
 });
 
-register("native_ui_no_dimensions_get", "lexical")((appTree) => {
+register(
+  "native_ui_no_dimensions_get",
+  "lexical",
+  CODE_CHECK_DESCRIPTIONS.native_ui_no_dimensions_get,
+)((appTree) => {
   for (const [path, text] of appTree.files) {
     if (DIMENSIONS_GET.test(stripComments(text))) {
       return failed(
@@ -467,6 +555,7 @@ register("native_ui_no_dimensions_get", "lexical")((appTree) => {
 register(
   "native_ui_no_safe_area_view_from_react_native",
   "lexical",
+  CODE_CHECK_DESCRIPTIONS.native_ui_no_safe_area_view_from_react_native,
 )((appTree) => {
   for (const [path, text] of appTree.files) {
     if (SAFE_AREA_VIEW_FROM_REACT_NATIVE.test(stripComments(text))) {
@@ -494,7 +583,11 @@ register(
   );
 });
 
-register("router_no_direct_react_navigation_import", "lexical")((appTree) => {
+register(
+  "router_no_direct_react_navigation_import",
+  "lexical",
+  CODE_CHECK_DESCRIPTIONS.router_no_direct_react_navigation_import,
+)((appTree) => {
   for (const [path, text] of appTree.files) {
     if (REACT_NAVIGATION_IMPORT.test(stripComments(text))) {
       return failed(
@@ -520,6 +613,8 @@ register("router_no_direct_react_navigation_import", "lexical")((appTree) => {
     "no file imports @react-navigation/* directly",
   );
 });
+
+}
 
 function pyList(values: string[]): string {
   return `[${values.map((value) => `'${value.replaceAll("'", "\\'")}'`).join(", ")}]`;
