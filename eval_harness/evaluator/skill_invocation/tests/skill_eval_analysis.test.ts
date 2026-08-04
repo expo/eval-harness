@@ -4,6 +4,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -20,6 +21,7 @@ import {
 import { CheckResult, type Check } from "../uptake_checks/registry.ts";
 
 const CLI_PATH = resolve(import.meta.dir, "../main.ts");
+const SHELL_ENTRYPOINT = resolve(import.meta.dir, "../scripts/eval-skill-use.sh");
 const REPO_ROOT = resolve(import.meta.dir, "../../../..");
 const PYTHON = resolve(REPO_ROOT, ".venv/bin/python");
 
@@ -422,5 +424,46 @@ test("[DIFF] complete skill metrics and report structure match Python", () => {
       value.replace(/\s+/gu, " ").trim();
     expect(normalizeHtml(readFileSync(join(bunOut, "report.html"), "utf8")))
       .toBe(normalizeHtml(readFileSync(join(pythonOut, "report.html"), "utf8")));
+  });
+});
+
+test("[REGRESSION] shell entrypoint runs with Bun and no Python executable", () => {
+  // Catches: accidentally restoring the retired Python caller or dropping
+  // environment-to-CLI argument propagation.
+  withTempDir((root) => {
+    const fixture = writeFixture(root);
+    const outDir = join(root, "shell-out");
+    const bin = join(root, "bin");
+    mkdirSync(bin);
+    const requiredCommands: Array<readonly [string, string]> = [
+      ["bun", process.execPath],
+      ["dirname", "/usr/bin/dirname"],
+      ["find", "/usr/bin/find"],
+      ["mkdir", "/bin/mkdir"],
+      ["sort", "/usr/bin/sort"],
+    ];
+    for (const [name, target] of requiredCommands) {
+      symlinkSync(target, join(bin, name));
+    }
+    const spawned = Bun.spawnSync(["/bin/bash", SHELL_ENTRYPOINT], {
+      cwd: REPO_ROOT,
+      env: {
+        PATH: bin,
+        AUTHORED_ARTIFACT: fixture.authored,
+        EVAL_ARTIFACT: "",
+        SCENARIO: "skills_available_unmentioned",
+        OUT_DIR: outDir,
+        PRD_SKILLS: fixture.prdSkills,
+        CHECKS_DIR: fixture.checksDir,
+      },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+
+    expect(spawned.exitCode).toBe(0);
+    expect(spawned.stderr.toString()).toBe("");
+    expect(spawned.stdout.toString()).toContain("app=test-app\n");
+    expect(JSON.parse(readFileSync(join(outDir, "metrics.json"), "utf8")))
+      .toMatchObject({ app: "test-app", expected_skills: ["expo-test"] });
   });
 });

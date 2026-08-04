@@ -37,6 +37,6 @@ if [ -n "$CHECKS_DIR" ]; then
   args+=(--checks-dir "$CHECKS_DIR")
 fi
 
-PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}" \
-  python3 -m eval_harness.evaluator.skill_invocation.main analyze-artifacts "${args[@]}"
+bun "$ROOT/eval_harness/evaluator/skill_invocation/main.ts" \
+  analyze-artifacts "${args[@]}"
 find "$OUT_DIR" -maxdepth 3 -type f -print | sort
