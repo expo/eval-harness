@@ -5,7 +5,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { basename, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, join, normalize, relative, sep } from "node:path";
 
 import {
   readBundleResult,
@@ -302,18 +302,18 @@ function resolveScenario(
 }
 
 export function discoverArtifactLayout(root: string): ArtifactLayout {
-  const absoluteRoot = resolve(root);
+  const normalizedRoot = normalize(root);
   return {
-    root: absoluteRoot,
-    appDir: findAppDir(absoluteRoot),
-    tracePath: findTrace(absoluteRoot),
+    root: normalizedRoot,
+    appDir: findAppDir(normalizedRoot),
+    tracePath: findTrace(normalizedRoot),
     manifestPath: firstExisting(
-      absoluteRoot,
+      normalizedRoot,
       ["bundle/manifest.json", "manifest.json"],
       "manifest.json",
     ),
     resultPath: firstExisting(
-      absoluteRoot,
+      normalizedRoot,
       ["bundle/eval/result.json", "eval/result.json", "result.json"],
       "result.json",
     ),
@@ -594,10 +594,10 @@ function findAppDir(root: string): string | null {
   const workspacePackages = filesNamed(root, "package.json")
     .filter((path) => relative(root, path).split(sep)[0] === "agent-workspace")
     .sort();
-  if (workspacePackages[0] !== undefined) return resolve(workspacePackages[0], "..");
+  if (workspacePackages[0] !== undefined) return dirname(workspacePackages[0]);
   const packages = filesNamed(root, "package.json").sort();
   for (const path of packages) {
-    if (!path.split(sep).includes("node_modules")) return resolve(path, "..");
+    if (!path.split(sep).includes("node_modules")) return dirname(path);
   }
   return null;
 }
@@ -734,7 +734,8 @@ function percent(value: unknown): string {
 }
 
 function escapeHtml(value: unknown): string {
-  return pythonDisplay(value)
+  const displayed = value === null || value === undefined ? "" : pythonDisplay(value);
+  return displayed
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
