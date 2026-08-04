@@ -1,14 +1,27 @@
 import { expect, test } from "bun:test";
 import fc from "fast-check";
-import { mkdtemp, mkdir, readFile, rm, utimes, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdtemp,
+  mkdir,
+  readFile,
+  rm,
+  symlink,
+  utimes,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 
 import {
+  emitBraintrustSession,
+  findTranscripts,
   parseTranscript,
   reconstructClaudeTranscripts,
+  stringifyPythonJson,
 } from "../telemetry/tracing/cc_transcript.ts";
 import {
+  findRollouts,
   parseRollout,
   reconstructCodexRollouts,
 } from "../telemetry/tracing/codex_rollout.ts";
@@ -172,6 +185,41 @@ test("[CHAR] Claude parser skips malformed lines and opens assistant-first turns
       user_input: null,
       final_output: "hello",
     });
+  });
+});
+
+test("[CHAR] trace parsers preserve Python JSON number semantics", async () => {
+  await withTempDir(async (directory) => {
+    const transcript = join(directory, "session.jsonl");
+    const numbers =
+      '{"whole":1.0,"negative":-0.0,"small":1e-7,"huge":1208925819614629174706176}';
+    await writeFile(
+      transcript,
+      [
+        JSON.stringify(claudePrompt("Keep numeric spellings")),
+        `{"type":"assistant","message":{"content":[{"type":"tool_use","id":"numbers","name":"Numbers","input":${numbers}}]}}`,
+        `{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"numbers","content":${numbers}}]}}`,
+      ].join("\n") + "\n",
+    );
+
+    const [turns] = await parseTranscript(transcript);
+    const call = turns[0]?.steps[0]?.tool_calls[0];
+    const expected =
+      '{"whole": 1.0, "negative": -0.0, "small": 1e-07, "huge": 1208925819614629174706176}';
+    expect(stringifyPythonJson(call?.args)).toBe(expected);
+    expect(call?.output).toBe(expected);
+  });
+});
+
+test("[CHAR] truthy malformed message and payload records reject their session", async () => {
+  await withTempDir(async (directory) => {
+    const claude = join(directory, "claude.jsonl");
+    const codex = join(directory, "rollout-malformed.jsonl");
+    await writeJsonl(claude, [{ type: "assistant", message: "not-an-object" }]);
+    await writeJsonl(codex, [{ type: "event_msg", payload: "not-an-object" }]);
+
+    await expect(parseTranscript(claude)).rejects.toThrow();
+    await expect(parseRollout(codex)).rejects.toThrow();
   });
 });
 
@@ -481,6 +529,96 @@ test("[CHAR] Codex reconstruction filters mtimes and writes its envelope", async
   });
 });
 
+test("[CHAR] discovery follows symlinks and keeps readable siblings", async () => {
+  await withTempDir(async (directory) => {
+    const claudeRoot = join(directory, "claude");
+    const claudeTarget = join(directory, "claude-target");
+    const codexRoot = join(directory, "codex");
+    const codexTarget = join(directory, "codex-target");
+    const blocked = join(claudeRoot, "blocked");
+    await Promise.all([
+      mkdir(claudeRoot),
+      mkdir(claudeTarget),
+      mkdir(codexRoot),
+      mkdir(codexTarget),
+      mkdir(blocked, { recursive: true }),
+    ]);
+
+    const claudeFile = join(claudeTarget, "session.jsonl");
+    const codexFile = join(codexTarget, "rollout-session.jsonl");
+    await writeJsonl(claudeFile, [claudePrompt("linked")]);
+    await writeJsonl(codexFile, [codexTaskStarted("linked")]);
+    await writeJsonl(join(blocked, "hidden.jsonl"), [claudePrompt("hidden")]);
+    await symlink(claudeFile, join(claudeRoot, "linked-file.jsonl"));
+    await symlink(claudeTarget, join(claudeRoot, "linked-directory"));
+    await symlink(codexFile, join(codexRoot, "rollout-linked-file.jsonl"));
+    await symlink(codexTarget, join(codexRoot, "linked-directory"));
+    await chmod(blocked, 0o000);
+
+    try {
+      const claude = await findTranscripts(claudeRoot);
+      const codex = await findRollouts(codexRoot);
+      expect(claude).toContain(join(claudeRoot, "linked-file.jsonl"));
+      expect(claude).toContain(join(claudeRoot, "linked-directory", "session.jsonl"));
+      expect(codex).toContain(join(codexRoot, "rollout-linked-file.jsonl"));
+      expect(codex).toContain(join(codexRoot, "linked-directory", "rollout-session.jsonl"));
+    } finally {
+      await chmod(blocked, 0o700);
+    }
+  });
+});
+
+test("[CHAR] Braintrust bridge forwards its payload and remains fail-open", async () => {
+  await withTempDir(async (directory) => {
+    const fakeUv = join(directory, "uv");
+    const capture = join(directory, "braintrust-input.json");
+    await writeFile(
+      fakeUv,
+      '#!/bin/sh\n/bin/cat > "$TRACE_BRIDGE_CAPTURE"\nexit "${TRACE_BRIDGE_EXIT:-0}"\n',
+    );
+    await chmod(fakeUv, 0o755);
+
+    const previousPath = process.env.PATH;
+    const previousCapture = process.env.TRACE_BRIDGE_CAPTURE;
+    const previousExit = process.env.TRACE_BRIDGE_EXIT;
+    const previousLog = console.log;
+    const logs: string[] = [];
+    process.env.PATH = directory;
+    process.env.TRACE_BRIDGE_CAPTURE = capture;
+    console.log = (...values: unknown[]) => logs.push(values.map(String).join(" "));
+    try {
+      await emitBraintrustSession(
+        [{ turn_id: "turn-1", turn_index: 1, user_input: "Build", steps: [] }],
+        { id: "session-1" },
+        "run-1",
+        "claude-code-authoring",
+        "Authoring",
+      );
+      expect(JSON.parse(await readFile(capture, "utf8"))).toEqual({
+        turns: [{ turn_id: "turn-1", turn_index: 1, user_input: "Build", steps: [] }],
+        session_meta: { id: "session-1" },
+        run_id: "run-1",
+        source: "claude-code-authoring",
+        name: "Authoring",
+      });
+
+      process.env.TRACE_BRIDGE_EXIT = "7";
+      await expect(
+        emitBraintrustSession([], {}, null, "codex-authoring", null, "codex_rollout"),
+      ).resolves.toBeUndefined();
+      expect(logs).toContain("[codex_rollout] braintrust push failed: exit 7");
+    } finally {
+      console.log = previousLog;
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+      if (previousCapture === undefined) delete process.env.TRACE_BRIDGE_CAPTURE;
+      else process.env.TRACE_BRIDGE_CAPTURE = previousCapture;
+      if (previousExit === undefined) delete process.env.TRACE_BRIDGE_EXIT;
+      else process.env.TRACE_BRIDGE_EXIT = previousExit;
+    }
+  });
+});
+
 test("[CHAR] both parse-only CLIs emit the stable session envelope", async () => {
   await withTempDir(async (directory) => {
     const cases = [
@@ -502,6 +640,50 @@ test("[CHAR] both parse-only CLIs emit the stable session envelope", async () =>
       expect(Object.keys(payload).sort()).toEqual(["session_meta", "turns"]);
       expect((payload.session_meta as JsonRecord).id).toBe(fixture.expectedId);
       expect((payload.turns as unknown[]).length).toBe(1);
+    }
+  });
+});
+
+test("[CHAR] both CLIs preserve argparse help and accepted option forms", async () => {
+  await withTempDir(async (directory) => {
+    const cases = [
+      {
+        script: CC_SCRIPT,
+        rootOption: `--proj=${directory}`,
+        usage: "usage: cc_transcript.py [-h] [--projects-dir PROJECTS_DIR] --out OUT",
+      },
+      {
+        script: CODEX_SCRIPT,
+        rootOption: `--sessions=${directory}`,
+        usage: "usage: codex_rollout.py [-h] [--sessions-dir SESSIONS_DIR] --out OUT",
+      },
+    ];
+
+    for (const [index, fixture] of cases.entries()) {
+      const help = await runCli([process.execPath, fixture.script, "--help"]);
+      expect(help.exitCode).toBe(0);
+      expect(help.stderr).toBe("");
+      expect(help.stdout).toStartWith(fixture.usage);
+
+      const out = join(directory, `out-${index}.json`);
+      const accepted = await runCli([
+        process.execPath,
+        fixture.script,
+        fixture.rootOption,
+        `--out=${out}`,
+        "--since=0_0",
+        "--before=inf",
+        "--run=run-cli",
+        "--source=source-cli",
+        "--session-n=Session CLI",
+      ]);
+      expect(accepted.exitCode).toBe(0);
+      expect(accepted.stderr).toBe("");
+      const output = await readFile(out, "utf8");
+      expect(output).toContain('"run_id": "run-cli"');
+      expect(output).toContain('"source": "source-cli"');
+      expect(output).toContain('"session_name": "Session CLI"');
+      expect(output).toContain('"before_mtime": Infinity');
     }
   });
 });

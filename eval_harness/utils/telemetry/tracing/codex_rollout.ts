@@ -5,12 +5,16 @@
  * turns -> steps -> tool_calls trace shape.
  */
 
-import { readdir, readFile, stat, writeFile, mkdir } from "node:fs/promises";
+import { readdir, readFile, realpath, stat, writeFile, mkdir } from "node:fs/promises";
+import type { Dirent } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
 import {
   emitBraintrustSession,
+  parsePythonFloat,
+  parsePythonJson,
+  stringifyPythonJson,
   type JsonRecord,
   type ToolCall,
   type TraceStep,
@@ -43,8 +47,23 @@ function optionalRecord(value: unknown): JsonRecord {
     : {};
 }
 
+function recordOrPythonFallback(value: unknown, field: string): JsonRecord {
+  if (!pythonTruthy(value)) return {};
+  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+    return value as JsonRecord;
+  }
+  throw new TypeError(`${field} must be an object when present`);
+}
+
 function pythonTruthy(value: unknown): boolean {
-  if (value === null || value === undefined || value === false || value === 0 || value === "") {
+  if (
+    value === null ||
+    value === undefined ||
+    value === false ||
+    value === 0 ||
+    value === 0n ||
+    value === ""
+  ) {
     return false;
   }
   if (Array.isArray(value)) return value.length > 0;
@@ -89,7 +108,7 @@ function maybeJson(value: unknown): unknown {
   if (typeof value === "object" && value !== null) return value;
   if (typeof value === "string") {
     try {
-      return JSON.parse(value);
+      return parsePythonJson(value);
     } catch {
       return value;
     }
@@ -146,7 +165,7 @@ async function readJsonl(path: string): Promise<JsonRecord[]> {
     const line = rawLine.trim();
     if (line === "") continue;
     try {
-      records.push(asRecord(JSON.parse(line)));
+      records.push(asRecord(parsePythonJson(line)));
     } catch (error) {
       if (error instanceof SyntaxError) continue;
       throw error;
@@ -206,7 +225,7 @@ export async function parseRollout(path: string): Promise<[TraceTurn[], JsonReco
 
   for (const record of records) {
     const type = record.type;
-    const payload = optionalRecord(record.payload);
+    const payload = recordOrPythonFallback(record.payload, "payload");
 
     if (type === "session_meta") {
       sessionMeta = payload;
@@ -241,7 +260,7 @@ export async function parseRollout(path: string): Promise<[TraceTurn[], JsonReco
         const toolCall: ToolCall = {
           call_id: payload.call_id ?? null,
           name: payload.name ?? null,
-          args: maybeJson(argumentSource),
+          args: maybeJson(argumentSource ?? null),
         };
         currentStep.tool_calls.push(toolCall);
         if (pythonTruthy(toolCall.call_id)) {
@@ -249,7 +268,7 @@ export async function parseRollout(path: string): Promise<[TraceTurn[], JsonReco
           attachPending(toolCall);
         }
       } else if (payloadType === "web_search_call") {
-        const action = optionalRecord(payload.action);
+        const action = recordOrPythonFallback(payload.action, "action");
         const toolCall: ToolCall = {
           call_id: payload.id ?? null,
           name: "web_search",
@@ -290,7 +309,7 @@ export async function parseRollout(path: string): Promise<[TraceTurn[], JsonReco
     } else if (payloadType === "agent_message" && current !== undefined) {
       current.final_output = payload.message ?? null;
     } else if (payloadType === "token_count" && current !== undefined) {
-      const info = optionalRecord(payload.info);
+      const info = recordOrPythonFallback(payload.info, "info");
       current.total_usage = usage(info.total_token_usage);
       if (currentStep !== undefined) currentStep.usage = usage(info.last_token_usage);
       finishStep();
@@ -322,13 +341,36 @@ export async function parseRollout(path: string): Promise<[TraceTurn[], JsonReco
   return [turns, sessionMeta];
 }
 
-async function walkRollouts(directory: string): Promise<string[]> {
+async function walkRollouts(
+  directory: string,
+  ancestorDirectories: ReadonlySet<string> = new Set(),
+): Promise<string[]> {
   const paths: string[] = [];
-  for (const entry of await readdir(directory, { withFileTypes: true })) {
+  let resolvedDirectory: string;
+  let entries: Dirent<string>[];
+  try {
+    resolvedDirectory = await realpath(directory);
+    if (ancestorDirectories.has(resolvedDirectory)) return [];
+    entries = await readdir(directory, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const nextAncestors = new Set(ancestorDirectories);
+  nextAncestors.add(resolvedDirectory);
+  for (const entry of entries) {
     const path = join(directory, entry.name);
-    if (entry.isDirectory()) paths.push(...(await walkRollouts(path)));
-    else if (entry.isFile() && entry.name.startsWith("rollout-") && entry.name.endsWith(".jsonl")) {
-      paths.push(path);
+    try {
+      const target = await stat(path);
+      if (target.isDirectory()) paths.push(...(await walkRollouts(path, nextAncestors)));
+      else if (
+        target.isFile() &&
+        entry.name.startsWith("rollout-") &&
+        entry.name.endsWith(".jsonl")
+      ) {
+        paths.push(path);
+      }
+    } catch {
+      // A broken/inaccessible entry does not discard readable siblings.
     }
   }
   return paths;
@@ -400,7 +442,7 @@ export async function reconstructCodexRollouts(
     sessions,
   };
   await mkdir(dirname(options.outPath), { recursive: true });
-  await writeFile(options.outPath, JSON.stringify(payload, null, 2));
+  await writeFile(options.outPath, stringifyPythonJson(payload, 2));
   console.log(`[codex_rollout] ${sessions.length} session(s) -> ${options.outPath}`);
   return payload;
 }
@@ -416,7 +458,56 @@ type ParsedArguments = {
   sessionName: string | null;
 };
 
-function parseArguments(args: string[]): ParsedArguments {
+const CODEX_HELP = `usage: codex_rollout.py [-h] [--sessions-dir SESSIONS_DIR] --out OUT
+                        [--since-mtime SINCE_MTIME]
+                        [--before-mtime BEFORE_MTIME] [--braintrust]
+                        [--run-id RUN_ID] [--source SOURCE]
+                        [--session-name SESSION_NAME]
+
+Reconstruct Codex agent traces from rollouts.
+
+options:
+  -h, --help            show this help message and exit
+  --sessions-dir SESSIONS_DIR
+  --out OUT
+  --since-mtime SINCE_MTIME
+                        epoch seconds; only rollouts modified at/after are
+                        included
+  --before-mtime BEFORE_MTIME
+                        epoch seconds; only rollouts modified before this time
+                        are included
+  --braintrust
+  --run-id RUN_ID
+  --source SOURCE
+  --session-name SESSION_NAME`;
+
+const CODEX_OPTIONS = [
+  "--help",
+  "--sessions-dir",
+  "--out",
+  "--since-mtime",
+  "--before-mtime",
+  "--braintrust",
+  "--run-id",
+  "--source",
+  "--session-name",
+] as const;
+
+function resolveOption(name: string): (typeof CODEX_OPTIONS)[number] {
+  const candidates = CODEX_OPTIONS.filter(
+    (option) => option === name || option.startsWith(name),
+  );
+  if (candidates.length !== 1) {
+    throw new Error(
+      candidates.length === 0
+        ? `unrecognized argument: ${name}`
+        : `ambiguous option: ${name} could match ${candidates.join(", ")}`,
+    );
+  }
+  return candidates[0] as (typeof CODEX_OPTIONS)[number];
+}
+
+function parseArguments(args: string[]): ParsedArguments | "help" {
   const codexHome = process.env.CODEX_HOME ?? join(homedir(), ".codex");
   const parsed: ParsedArguments = {
     sessionsDir: join(codexHome, "sessions"),
@@ -428,27 +519,35 @@ function parseArguments(args: string[]): ParsedArguments {
   };
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
-    if (argument === "--braintrust") {
+    if (argument === "-h") return "help";
+    if (argument === undefined || !argument.startsWith("--")) {
+      throw new Error(`unrecognized argument: ${argument ?? ""}`);
+    }
+    const equalsIndex = argument.indexOf("=");
+    const optionText = equalsIndex === -1 ? argument : argument.slice(0, equalsIndex);
+    const attachedValue = equalsIndex === -1 ? undefined : argument.slice(equalsIndex + 1);
+    const option = resolveOption(optionText);
+    if (option === "--help") return "help";
+    if (option === "--braintrust") {
+      if (attachedValue !== undefined) throw new Error("argument --braintrust: ignored explicit argument");
       parsed.braintrust = true;
       continue;
     }
-    const value = args[index + 1];
-    if (argument === undefined || value === undefined) {
-      throw new Error(`unrecognized or incomplete argument: ${argument ?? ""}`);
+    const value = attachedValue ?? args[index + 1];
+    if (value === undefined) {
+      throw new Error(`argument ${option}: expected one argument`);
     }
-    if (argument === "--sessions-dir") parsed.sessionsDir = value;
-    else if (argument === "--out") parsed.outPath = value;
-    else if (argument === "--since-mtime") {
-      parsed.sinceMtime = Number(value);
-      if (Number.isNaN(parsed.sinceMtime)) throw new Error(`invalid number for ${argument}: ${value}`);
-    } else if (argument === "--before-mtime") {
-      parsed.beforeMtime = Number(value);
-      if (Number.isNaN(parsed.beforeMtime)) throw new Error(`invalid number for ${argument}: ${value}`);
-    } else if (argument === "--run-id") parsed.runId = value;
-    else if (argument === "--source") parsed.source = value;
-    else if (argument === "--session-name") parsed.sessionName = value;
-    else throw new Error(`unrecognized argument: ${argument}`);
-    index += 1;
+    if (option === "--sessions-dir") parsed.sessionsDir = value;
+    else if (option === "--out") parsed.outPath = value;
+    else if (option === "--since-mtime" || option === "--before-mtime") {
+      const numeric = parsePythonFloat(value);
+      if (numeric === undefined) throw new Error(`argument ${option}: invalid float value: '${value}'`);
+      if (option === "--since-mtime") parsed.sinceMtime = numeric;
+      else parsed.beforeMtime = numeric;
+    } else if (option === "--run-id") parsed.runId = value;
+    else if (option === "--source") parsed.source = value;
+    else if (option === "--session-name") parsed.sessionName = value;
+    if (attachedValue === undefined) index += 1;
   }
   return parsed;
 }
@@ -456,11 +555,15 @@ function parseArguments(args: string[]): ParsedArguments {
 export async function main(args: string[] = process.argv.slice(2)): Promise<number> {
   if (args[0] === "--parse-only" && args[1] !== undefined) {
     const [turns, metadata] = await parseRollout(args[1]);
-    console.log(JSON.stringify({ session_meta: metadata, turns }, null, 2));
+    console.log(stringifyPythonJson({ session_meta: metadata, turns }, 2));
     return 0;
   }
   try {
     const parsed = parseArguments(args);
+    if (parsed === "help") {
+      console.log(CODEX_HELP);
+      return 0;
+    }
     if (parsed.outPath === undefined) throw new Error("the following arguments are required: --out");
     await reconstructCodexRollouts(parsed as CodexReconstructionOptions & { outPath: string });
     return 0;

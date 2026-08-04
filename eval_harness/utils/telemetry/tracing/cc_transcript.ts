@@ -6,7 +6,8 @@
  * tool-result blocks attach to tool-use blocks only through their matching ID.
  */
 
-import { readdir, readFile, stat, writeFile, mkdir } from "node:fs/promises";
+import { readdir, readFile, realpath, stat, writeFile, mkdir } from "node:fs/promises";
+import type { Dirent } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
@@ -52,6 +53,30 @@ function optionalRecord(value: unknown): JsonRecord {
     : {};
 }
 
+function pythonTruthy(value: unknown): boolean {
+  if (
+    value === null ||
+    value === undefined ||
+    value === false ||
+    value === 0 ||
+    value === 0n ||
+    value === ""
+  ) {
+    return false;
+  }
+  if (Array.isArray(value)) return value.length > 0;
+  if (typeof value === "object") return Object.keys(value).length > 0;
+  return true;
+}
+
+function recordOrPythonFallback(value: unknown, field: string): JsonRecord {
+  if (!pythonTruthy(value)) return {};
+  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+    return value as JsonRecord;
+  }
+  throw new TypeError(`${field} must be an object when present`);
+}
+
 function blocks(content: unknown): unknown[] {
   if (typeof content === "string") {
     return [{ type: "text", text: content }];
@@ -87,6 +112,15 @@ function addTokenValues(left: unknown, right: unknown): unknown {
   }
   if (typeof left === "string" && typeof right === "string") {
     return left + right;
+  }
+  if (typeof left === "bigint" && typeof right === "bigint") {
+    return left + right;
+  }
+  if (typeof left === "bigint" && typeof right === "number") {
+    return Number(left) + right;
+  }
+  if (typeof left === "number" && typeof right === "bigint") {
+    return left + Number(right);
   }
   throw new TypeError("token values cannot be added");
 }
@@ -148,26 +182,119 @@ function pythonString(value: string): string {
   return `${result}"`;
 }
 
-function pythonJsonDumps(value: unknown): string {
+const NUMBER_SOURCES = new WeakMap<object, Map<string, string>>();
+
+function parseJsonWithNumberSources(text: string): unknown {
+  const parse = JSON.parse as unknown as (
+    source: string,
+    reviver: (
+      this: unknown,
+      key: string,
+      value: unknown,
+      context: { source?: string },
+    ) => unknown,
+  ) => unknown;
+  return parse(text, function rememberNumberSource(key, value, context) {
+    if (
+      typeof value === "number" &&
+      typeof this === "object" &&
+      this !== null &&
+      context.source !== undefined
+    ) {
+      if (/^-?[0-9]+$/.test(context.source) && !Number.isSafeInteger(value)) {
+        return BigInt(context.source);
+      }
+      const holder = this as object;
+      const sources = NUMBER_SOURCES.get(holder) ?? new Map<string, string>();
+      sources.set(key, context.source);
+      NUMBER_SOURCES.set(holder, sources);
+    }
+    return value;
+  });
+}
+
+export function parsePythonJson(text: string): unknown {
+  return parseJsonWithNumberSources(text);
+}
+
+function formatPythonFloat(value: number): string {
+  if (Number.isNaN(value)) return "NaN";
+  if (value === Infinity) return "Infinity";
+  if (value === -Infinity) return "-Infinity";
+  if (Object.is(value, -0)) return "-0.0";
+  const absolute = Math.abs(value);
+  if (absolute !== 0 && (absolute < 1e-4 || absolute >= 1e16)) {
+    const [mantissa = "0", rawExponent = "+0"] = value.toExponential().split("e");
+    const exponent = Number(rawExponent);
+    const sign = exponent < 0 ? "-" : "+";
+    return `${mantissa}e${sign}${String(Math.abs(exponent)).padStart(2, "0")}`;
+  }
+  const decimal = String(value);
+  return Number.isInteger(value) ? `${decimal}.0` : decimal;
+}
+
+function pythonJsonDumps(
+  value: unknown,
+  holder?: object,
+  key?: string,
+  indent?: number,
+  level = 0,
+): string {
   if (value === null) return "null";
   if (value === true) return "true";
   if (value === false) return "false";
   if (typeof value === "string") return pythonString(value);
   if (typeof value === "number") {
-    if (Number.isNaN(value)) return "NaN";
-    if (value === Infinity) return "Infinity";
-    if (value === -Infinity) return "-Infinity";
+    const source = holder === undefined || key === undefined ? undefined : NUMBER_SOURCES.get(holder)?.get(key);
+    if (source !== undefined && /[.eE]/.test(source)) return formatPythonFloat(value);
     return String(value);
   }
+  if (typeof value === "bigint") return String(value);
   if (Array.isArray(value)) {
-    return `[${value.map((item) => pythonJsonDumps(item)).join(", ")}]`;
+    if (value.length === 0) return "[]";
+    if (indent === undefined) {
+      return `[${value
+        .map((item, index) => pythonJsonDumps(item, value, String(index)))
+        .join(", ")}]`;
+    }
+    const itemIndent = " ".repeat((level + 1) * indent);
+    const closingIndent = " ".repeat(level * indent);
+    const items = value.map(
+      (item, index) =>
+        `${itemIndent}${pythonJsonDumps(item, value, String(index), indent, level + 1)}`,
+    );
+    return `[\n${items.join(",\n")}\n${closingIndent}]`;
   }
   if (typeof value === "object" && value !== null) {
-    return `{${Object.entries(value)
-      .map(([key, item]) => `${pythonString(key)}: ${pythonJsonDumps(item)}`)
-      .join(", ")}}`;
+    const entries = Object.entries(value).filter(([, item]) => item !== undefined);
+    if (entries.length === 0) return "{}";
+    if (indent === undefined) {
+      return `{${entries
+        .map(
+          ([itemKey, item]) =>
+            `${pythonString(itemKey)}: ${pythonJsonDumps(item, value, itemKey)}`,
+        )
+        .join(", ")}}`;
+    }
+    const itemIndent = " ".repeat((level + 1) * indent);
+    const closingIndent = " ".repeat(level * indent);
+    const items = entries.map(
+      ([itemKey, item]) =>
+        `${itemIndent}${pythonString(itemKey)}: ${pythonJsonDumps(
+          item,
+          value,
+          itemKey,
+          indent,
+          level + 1,
+        )}`,
+    );
+    return `{\n${items.join(",\n")}\n${closingIndent}}`;
   }
   return pythonString(String(value));
+}
+
+export function stringifyPythonJson(value: unknown, indent?: number): string {
+  return pythonJsonDumps(value, undefined, undefined, indent);
 }
 
 async function readJsonl(path: string): Promise<JsonRecord[]> {
@@ -176,7 +303,7 @@ async function readJsonl(path: string): Promise<JsonRecord[]> {
     const line = rawLine.trim();
     if (line === "") continue;
     try {
-      records.push(asRecord(JSON.parse(line)));
+      records.push(asRecord(parseJsonWithNumberSources(line)));
     } catch (error) {
       if (error instanceof SyntaxError) continue;
       throw error;
@@ -218,7 +345,7 @@ export async function parseTranscript(path: string): Promise<[TraceTurn[], JsonR
         git_branch: record.gitBranch ?? null,
       };
     }
-    const message = optionalRecord(record.message);
+    const message = recordOrPythonFallback(record.message, "message");
 
     if (type === "user") {
       if (isRealUser(message)) {
@@ -238,7 +365,8 @@ export async function parseTranscript(path: string): Promise<[TraceTurn[], JsonR
           const toolCall = toolsById.get(result.tool_use_id);
           if (toolCall === undefined) continue;
           const content = result.content;
-          toolCall.output = typeof content === "string" ? content : pythonJsonDumps(content);
+          toolCall.output =
+            typeof content === "string" ? content : pythonJsonDumps(content, result, "content");
           if (result.is_error) toolCall.error = toolCall.output;
         }
       }
@@ -283,9 +411,19 @@ export async function parseTranscript(path: string): Promise<[TraceTurn[], JsonR
     const totalUsage = optionalRecord(current.total_usage);
     current.total_usage = totalUsage;
     for (const [key, value] of Object.entries(optionalRecord(step.usage))) {
-      if (typeof value === "number") {
+      if (typeof value === "number" || typeof value === "bigint") {
         const previous = totalUsage[key];
-        totalUsage[key] = (typeof previous === "number" ? previous : 0) + value;
+        if (typeof value === "bigint") {
+          totalUsage[key] =
+            typeof previous === "number"
+              ? previous + Number(value)
+              : (typeof previous === "bigint" ? previous : 0n) + value;
+        } else {
+          totalUsage[key] =
+            typeof previous === "bigint"
+              ? Number(previous) + value
+              : (typeof previous === "number" ? previous : 0) + value;
+        }
       }
     }
   }
@@ -294,12 +432,31 @@ export async function parseTranscript(path: string): Promise<[TraceTurn[], JsonR
   return [turns, sessionMeta];
 }
 
-async function walkJsonl(directory: string): Promise<string[]> {
+async function walkJsonl(
+  directory: string,
+  ancestorDirectories: ReadonlySet<string> = new Set(),
+): Promise<string[]> {
   const paths: string[] = [];
-  for (const entry of await readdir(directory, { withFileTypes: true })) {
+  let resolvedDirectory: string;
+  let entries: Dirent<string>[];
+  try {
+    resolvedDirectory = await realpath(directory);
+    if (ancestorDirectories.has(resolvedDirectory)) return [];
+    entries = await readdir(directory, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const nextAncestors = new Set(ancestorDirectories);
+  nextAncestors.add(resolvedDirectory);
+  for (const entry of entries) {
     const path = join(directory, entry.name);
-    if (entry.isDirectory()) paths.push(...(await walkJsonl(path)));
-    else if (entry.isFile() && entry.name.endsWith(".jsonl")) paths.push(path);
+    try {
+      const target = await stat(path);
+      if (target.isDirectory()) paths.push(...(await walkJsonl(path, nextAncestors)));
+      else if (target.isFile() && entry.name.endsWith(".jsonl")) paths.push(path);
+    } catch {
+      // A broken/inaccessible entry does not discard readable siblings.
+    }
   }
   return paths;
 }
@@ -346,8 +503,10 @@ export async function emitBraintrustSession(
   name: string | null,
   caller = "cc_transcript",
 ): Promise<void> {
-  const uv = Bun.which("uv");
-  const python = Bun.which("python3") ?? Bun.which("python");
+  const searchOptions = { PATH: process.env.PATH };
+  const uv = Bun.which("uv", searchOptions);
+  const python =
+    Bun.which("python3", searchOptions) ?? Bun.which("python", searchOptions);
   const command = uv
     ? [uv, "run", "python", "-c", BRAINTRUST_BRIDGE]
     : python
@@ -365,7 +524,9 @@ export async function emitBraintrustSession(
       stderr: "pipe",
       env: process.env,
     });
-    child.stdin.write(JSON.stringify({ turns, session_meta: metadata, run_id: runId, source, name }));
+    child.stdin.write(
+      stringifyPythonJson({ turns, session_meta: metadata, run_id: runId, source, name }),
+    );
     child.stdin.end();
     const [exitCode, stdout, stderr] = await Promise.all([
       child.exited,
@@ -414,7 +575,7 @@ export async function reconstructClaudeTranscripts(
     sessions,
   };
   await mkdir(dirname(options.outPath), { recursive: true });
-  await writeFile(options.outPath, JSON.stringify(payload, null, 2));
+  await writeFile(options.outPath, stringifyPythonJson(payload, 2));
   console.log(`[cc_transcript] ${sessions.length} session(s) -> ${options.outPath}`);
   return payload;
 }
@@ -430,7 +591,72 @@ type ParsedArguments = {
   sessionName: string | null;
 };
 
-function parseArguments(args: string[]): ParsedArguments {
+const DIGIT_PART = String.raw`[0-9](?:_?[0-9])*`;
+const FINITE_FLOAT_PATTERN = new RegExp(
+  String.raw`^[+-]?(?:(?:${DIGIT_PART}(?:\.(?:${DIGIT_PART})?)?)|(?:\.${DIGIT_PART}))(?:[eE][+-]?${DIGIT_PART})?$`,
+);
+const NON_FINITE_FLOAT_PATTERN = /^[+-]?(?:inf(?:inity)?|nan)$/i;
+
+export function parsePythonFloat(text: string): number | undefined {
+  const stripped = text.trim();
+  if (stripped === "") return undefined;
+  if (NON_FINITE_FLOAT_PATTERN.test(stripped)) {
+    const unsigned = stripped.replace(/^[+-]/, "").toLowerCase();
+    if (unsigned === "nan") return Number.NaN;
+    return stripped.startsWith("-") ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY;
+  }
+  if (!FINITE_FLOAT_PATTERN.test(stripped)) return undefined;
+  return Number(stripped.replaceAll("_", ""));
+}
+
+const CC_HELP = `usage: cc_transcript.py [-h] [--projects-dir PROJECTS_DIR] --out OUT
+                        [--since-mtime SINCE_MTIME]
+                        [--before-mtime BEFORE_MTIME] [--braintrust]
+                        [--run-id RUN_ID] [--source SOURCE]
+                        [--session-name SESSION_NAME]
+
+Reconstruct Claude Code agent traces from transcripts.
+
+options:
+  -h, --help            show this help message and exit
+  --projects-dir PROJECTS_DIR
+  --out OUT
+  --since-mtime SINCE_MTIME
+                        epoch seconds; only transcripts modified at/after are
+                        included
+  --before-mtime BEFORE_MTIME
+                        epoch seconds; only transcripts modified before this
+                        time are included
+  --braintrust
+  --run-id RUN_ID
+  --source SOURCE
+  --session-name SESSION_NAME`;
+
+const CC_OPTIONS = [
+  "--help",
+  "--projects-dir",
+  "--out",
+  "--since-mtime",
+  "--before-mtime",
+  "--braintrust",
+  "--run-id",
+  "--source",
+  "--session-name",
+] as const;
+
+function resolveOption(name: string): (typeof CC_OPTIONS)[number] {
+  const candidates = CC_OPTIONS.filter((option) => option === name || option.startsWith(name));
+  if (candidates.length !== 1) {
+    throw new Error(
+      candidates.length === 0
+        ? `unrecognized argument: ${name}`
+        : `ambiguous option: ${name} could match ${candidates.join(", ")}`,
+    );
+  }
+  return candidates[0] as (typeof CC_OPTIONS)[number];
+}
+
+function parseArguments(args: string[]): ParsedArguments | "help" {
   const parsed: ParsedArguments = {
     projectsDir: join(homedir(), ".claude", "projects"),
     sinceMtime: 0,
@@ -441,27 +667,35 @@ function parseArguments(args: string[]): ParsedArguments {
   };
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
-    if (argument === "--braintrust") {
+    if (argument === "-h") return "help";
+    if (argument === undefined || !argument.startsWith("--")) {
+      throw new Error(`unrecognized argument: ${argument ?? ""}`);
+    }
+    const equalsIndex = argument.indexOf("=");
+    const optionText = equalsIndex === -1 ? argument : argument.slice(0, equalsIndex);
+    const attachedValue = equalsIndex === -1 ? undefined : argument.slice(equalsIndex + 1);
+    const option = resolveOption(optionText);
+    if (option === "--help") return "help";
+    if (option === "--braintrust") {
+      if (attachedValue !== undefined) throw new Error("argument --braintrust: ignored explicit argument");
       parsed.braintrust = true;
       continue;
     }
-    const value = args[index + 1];
-    if (argument === undefined || value === undefined) {
-      throw new Error(`unrecognized or incomplete argument: ${argument ?? ""}`);
+    const value = attachedValue ?? args[index + 1];
+    if (value === undefined) {
+      throw new Error(`argument ${option}: expected one argument`);
     }
-    if (argument === "--projects-dir") parsed.projectsDir = value;
-    else if (argument === "--out") parsed.outPath = value;
-    else if (argument === "--since-mtime") {
-      parsed.sinceMtime = Number(value);
-      if (Number.isNaN(parsed.sinceMtime)) throw new Error(`invalid number for ${argument}: ${value}`);
-    } else if (argument === "--before-mtime") {
-      parsed.beforeMtime = Number(value);
-      if (Number.isNaN(parsed.beforeMtime)) throw new Error(`invalid number for ${argument}: ${value}`);
-    } else if (argument === "--run-id") parsed.runId = value;
-    else if (argument === "--source") parsed.source = value;
-    else if (argument === "--session-name") parsed.sessionName = value;
-    else throw new Error(`unrecognized argument: ${argument}`);
-    index += 1;
+    if (option === "--projects-dir") parsed.projectsDir = value;
+    else if (option === "--out") parsed.outPath = value;
+    else if (option === "--since-mtime" || option === "--before-mtime") {
+      const numeric = parsePythonFloat(value);
+      if (numeric === undefined) throw new Error(`argument ${option}: invalid float value: '${value}'`);
+      if (option === "--since-mtime") parsed.sinceMtime = numeric;
+      else parsed.beforeMtime = numeric;
+    } else if (option === "--run-id") parsed.runId = value;
+    else if (option === "--source") parsed.source = value;
+    else if (option === "--session-name") parsed.sessionName = value;
+    if (attachedValue === undefined) index += 1;
   }
   return parsed;
 }
@@ -469,11 +703,15 @@ function parseArguments(args: string[]): ParsedArguments {
 export async function main(args: string[] = process.argv.slice(2)): Promise<number> {
   if (args[0] === "--parse-only" && args[1] !== undefined) {
     const [turns, metadata] = await parseTranscript(args[1]);
-    console.log(JSON.stringify({ session_meta: metadata, turns }, null, 2));
+    console.log(stringifyPythonJson({ session_meta: metadata, turns }, 2));
     return 0;
   }
   try {
     const parsed = parseArguments(args);
+    if (parsed === "help") {
+      console.log(CC_HELP);
+      return 0;
+    }
     if (parsed.outPath === undefined) throw new Error("the following arguments are required: --out");
     await reconstructClaudeTranscripts(parsed as ClaudeReconstructionOptions & { outPath: string });
     return 0;
