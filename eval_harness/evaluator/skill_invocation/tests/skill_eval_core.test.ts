@@ -1440,6 +1440,24 @@ test("[CHAR] bundle CLI reports invalid invocations instead of crashing", () => 
   expect(new TextDecoder().decode(unknown.stderr)).toContain("usage:");
 });
 
+test("[REGRESSION] authoring invokes the Bun build-health helper", () => {
+  // Contract: once the build-health helper is migrated, authoring must not
+  // retain a hidden Python runtime dependency for that helper.
+  // Oracle: the checked-in authoring entrypoint names the Bun module directly.
+  // Catches: incomplete caller cutover and accidental Python reintroduction.
+  const authoringScript = readFileSync(
+    join(REPO_ROOT, "eval_harness/app_builder/scripts/author-app.sh"),
+    "utf8",
+  );
+
+  expect(authoringScript).toContain(
+    "bun eval_harness/evaluator/skill_invocation/build_health/bundle_check.ts",
+  );
+  expect(authoringScript).not.toContain(
+    "python -m eval_harness.evaluator.skill_invocation.build_health.bundle_check",
+  );
+});
+
 test.skipIf(PYTHON === null)(
   "[DIFF] registry and code-check results match Python",
   async () => {
