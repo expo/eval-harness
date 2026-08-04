@@ -18,6 +18,8 @@ import {
   discoverArtifactLayout,
   scoreCaseRun,
   writeHtmlReport,
+  type SkillEvalPayload,
+  type SkillResult,
 } from "../analysis.ts";
 import { CheckResult, type Check } from "../uptake_checks/registry.ts";
 
@@ -64,6 +66,10 @@ function writeFixture(root: string): {
   authored: string;
   prdSkills: string;
   checksDir: string;
+  app: string;
+  bundle: string;
+  trace: string;
+  manifest: string;
 } {
   const authored = join(root, "authored");
   const app = join(authored, "agent-workspace", "run-1");
@@ -73,12 +79,14 @@ function writeFixture(root: string): {
   mkdirSync(traces, { recursive: true });
   writeFileSync(join(app, "package.json"), "{}");
   writeFileSync(join(app, "ready"), "yes\n");
+  const manifest = join(bundle, "manifest.json");
   writeFileSync(
-    join(bundle, "manifest.json"),
+    manifest,
     JSON.stringify({ prd: "dataset/prds/test-app/prd/mvp.txt" }),
   );
+  const trace = join(traces, "claude-code-authoring.json");
   writeFileSync(
-    join(traces, "claude-code-authoring.json"),
+    trace,
     JSON.stringify({
       agent: "claude-code",
       sessions: [
@@ -119,8 +127,44 @@ function writeFixture(root: string): {
     join(checksDir, "skill_map.json"),
     JSON.stringify({ "expo-test": ["ready-file"] }),
   );
-  return { authored, prdSkills, checksDir };
+  return { authored, prdSkills, checksDir, app, bundle, trace, manifest };
 }
+
+const EXPECTED_HAPPY_REPORT = `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Expo Skill Eval</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; margin: 24px; }
+    table { border-collapse: collapse; width: 100%; margin-bottom: 32px; }
+    th, td { border-bottom: 1px solid #ddd; padding: 8px; text-align: left; }
+    .note { color: #555; max-width: 760px; }
+  </style>
+</head>
+<body>
+  <h1>Expo Skill Eval</h1>
+  <p>Skill eval artifact analysis for test-app</p>
+  <p class="note">Initial v0 signal: trace trigger detection, static code uptake checks, and optional evaluator score. No LLM judge or screenshot evidence is used.</p>
+  <table>
+    <thead><tr><th>App</th><th>Scenario</th><th>Expected</th><th>Detected</th><th>Exact match</th><th>Recall</th><th>Precision</th><th>Uptake (pooled, legacy)</th><th>Evaluator</th></tr></thead>
+    <tbody><tr><td>test-app</td><td>skills_available_unmentioned</td><td>expo-test</td><td>expo-test</td><td>True</td><td>100.0%</td><td>100.0%</td><td>100.0%</td><td>n/a</td></tr></tbody>
+  </table>
+  <h2>Per-skill results</h2>
+  <p class="note">Each expected skill's own trigger status and uptake, measured independently -- not the pooled number above.</p>
+  <table>
+    <thead><tr><th>Skill</th><th>Trigger</th><th>Uptake status</th><th>Passed/Total</th><th>Uptake rate</th></tr></thead>
+    <tbody><tr><td>expo-test</td><td>observed</td><td>measured</td><td>1/1</td><td>100.0%</td></tr></tbody>
+  </table>
+  <h2>Per-check detail</h2>
+  <p class="note">Every check run per skill, including not_applicable (its precondition didn't hold for this app) and unavailable (evidence couldn't be collected, e.g. a parser didn't run) -- neither counts toward Passed/Total or Uptake rate above, but both are shown here rather than silently dropped.</p>
+  <table>
+    <thead><tr><th>Skill</th><th>Check</th><th>Status</th><th>Evidence</th></tr></thead>
+    <tbody><tr><td>expo-test</td><td>ready-file</td><td>passed</td><td>found ready</td></tr></tbody>
+  </table>
+</body>
+</html>
+`;
 
 test("[REGRESSION] case scoring gates pooled uptake on a relevant trigger", () => {
   const skipped = scoreCaseRun({
@@ -258,24 +302,279 @@ test("[REGRESSION] artifact discovery and analysis preserve the metrics contract
       checksDir: fixture.checksDir,
     });
 
-    expect(payload).toMatchObject({
+    const checkResult = {
+      id: "ready-file",
+      category: "structural",
+      kind: "path_exists",
+      target: ["ready"],
+      passed: true,
+      evidence: "found ready",
+      status: "passed",
+    };
+    const skillResult: SkillResult = {
+      expected: true,
+      triggered: true,
+      trigger_status: "observed",
+      uptake_status: "measured",
+      passed: 1,
+      total: 1,
+      uptake_rate: 1,
+      checks: [checkResult],
+    };
+    const expectedPayload = {
+      summary: "Skill eval artifact analysis for test-app",
       app: "test-app",
       expected_skills: ["expo-test"],
       scenario: "skills_available_unmentioned",
       outcome_status: "pending",
       warnings: [],
-      skills: {
-        "expo-test": {
-          triggered: true,
-          uptake_status: "measured",
-          uptake_rate: 1,
+      score: {
+        trigger_quality: {
+          expected_skills: ["expo-test"],
+          triggered_skills: ["expo-test"],
+          matched_skills: ["expo-test"],
+          extra_skills: [],
+          missing_skills: [],
+          recall: 1,
+          precision: 1,
+          any_expo_skill_triggered: true,
         },
+        context_uptake: {
+          passed: 1,
+          total: 1,
+          uptake_rate: 1,
+          skipped_reason: null,
+        },
+        outcome_delta: { evaluator_pct: null, build_success: null },
       },
-    });
+      static_checks: [checkResult],
+      check_category_breakdown: { structural: { passed: 1, total: 1 } },
+      build_health: {
+        syntax: {
+          total_files: 0,
+          checked_files: 0,
+          skipped_unavailable: 0,
+          failed_files: [],
+          ok: null,
+        },
+        bundle: null,
+      },
+      runs: [{
+        app: "test-app",
+        scenario: "skills_available_unmentioned",
+        skill_id: "expo-test",
+        trigger_recall: 1,
+        trigger_precision: 1,
+        trigger_exact_match: true,
+        detected_skills: ["expo-test"],
+        uptake_rate: 1,
+        evaluator_pct: null,
+        build_success: null,
+        skills: { "expo-test": skillResult },
+      }],
+      skills: { "expo-test": skillResult },
+      artifacts: {
+        authored_root: fixture.authored,
+        app_dir: fixture.app,
+        author_trace: fixture.trace,
+        author_manifest: fixture.manifest,
+        eval_root: null,
+        eval_result: null,
+        eval_manifest: null,
+      },
+      braintrust_refs: [],
+    } satisfies SkillEvalPayload;
+    expect(payload).toEqual(expectedPayload);
     expect(JSON.parse(readFileSync(join(outDir, "metrics.json"), "utf8")))
-      .toEqual(payload);
+      .toEqual(expectedPayload);
     expect(readFileSync(join(outDir, "report.html"), "utf8"))
-      .toStartWith("<!doctype html>");
+      .toBe(EXPECTED_HAPPY_REPORT);
+  });
+});
+
+test("[REGRESSION] evaluator results produce a complete outcome", () => {
+  withTempDir((root) => {
+    const fixture = writeFixture(root);
+    const evalArtifact = join(root, "eval");
+    const resultDir = join(evalArtifact, "eval-out", "run-1", "bundle", "eval");
+    mkdirSync(resultDir, { recursive: true });
+    writeFileSync(
+      join(resultDir, "result.json"),
+      JSON.stringify({ macro_avg_pct: 87.5 }),
+    );
+
+    const payload = analyzeArtifacts({
+      authoredArtifact: fixture.authored,
+      evalArtifact,
+      scenario: "skills_available_mentioned",
+      outDir: join(root, "out"),
+      prdSkillsPath: fixture.prdSkills,
+      checksDir: fixture.checksDir,
+    });
+
+    expect(payload.outcome_status).toBe("complete");
+    expect(payload.runs[0]).toMatchObject({
+      evaluator_pct: 87.5,
+      build_success: true,
+    });
+    expect(payload.skills["expo-test"]).toMatchObject({
+      triggered: true,
+      trigger_status: "observed",
+      uptake_status: "measured",
+      uptake_rate: 1,
+    });
+    expect(payload.artifacts.eval_result).toBe(join(resultDir, "result.json"));
+  });
+});
+
+test("[REGRESSION] a missing author trace degrades to warnings", () => {
+  withTempDir((root) => {
+    const fixture = writeFixture(root);
+    rmSync(fixture.trace);
+
+    const payload = analyzeArtifacts({
+      authoredArtifact: fixture.authored,
+      evalArtifact: null,
+      scenario: "skills_available_unmentioned",
+      outDir: join(root, "out"),
+      prdSkillsPath: fixture.prdSkills,
+      checksDir: fixture.checksDir,
+    });
+
+    expect(payload.warnings).toContain("author trace not found");
+    expect(payload.runs[0]?.trigger_recall).toBe(0);
+    expect(payload.runs[0]?.uptake_rate).toBeNull();
+  });
+});
+
+test("[REGRESSION] a missing app tree degrades to warnings", () => {
+  withTempDir((root) => {
+    const fixture = writeFixture(root);
+    rmSync(fixture.app, { recursive: true });
+
+    const payload = analyzeArtifacts({
+      authoredArtifact: fixture.authored,
+      evalArtifact: null,
+      scenario: "skills_available_unmentioned",
+      outDir: join(root, "out"),
+      prdSkillsPath: fixture.prdSkills,
+      checksDir: fixture.checksDir,
+    });
+
+    expect(payload.warnings).toContain("app tree not found");
+    expect(payload.static_checks).toEqual([]);
+    expect(payload.runs[0]?.uptake_rate).toBe(0);
+    expect(payload.skills["expo-test"]?.uptake_status).toBe("missing_app");
+  });
+});
+
+test("[REGRESSION] expected skills without mappings remain unsupported", () => {
+  withTempDir((root) => {
+    const fixture = writeFixture(root);
+    writeFileSync(join(fixture.checksDir, "skill_map.json"), "{}");
+
+    const payload = analyzeArtifacts({
+      authoredArtifact: fixture.authored,
+      evalArtifact: null,
+      scenario: "skills_available_unmentioned",
+      outDir: join(root, "out"),
+      prdSkillsPath: fixture.prdSkills,
+      checksDir: fixture.checksDir,
+    });
+
+    expect(payload.warnings).toContain(
+      "no uptake checks mapped for skill 'expo-test'",
+    );
+    expect(payload.skills["expo-test"]).toMatchObject({
+      uptake_status: "unsupported",
+      passed: null,
+      total: null,
+      uptake_rate: null,
+      checks: [],
+    });
+  });
+});
+
+test("[REGRESSION] unavailable scenarios expect no skill triggers", () => {
+  withTempDir((root) => {
+    const fixture = writeFixture(root);
+    writeFileSync(
+      fixture.trace,
+      JSON.stringify({
+        agent: "claude-code",
+        sessions: [{
+          turns: [{ steps: [{ tool_calls: [{ name: "Bash", args: { command: "ls" } }] }] }],
+        }],
+      }),
+    );
+
+    const payload = analyzeArtifacts({
+      authoredArtifact: fixture.authored,
+      evalArtifact: null,
+      scenario: "skills_unavailable",
+      outDir: join(root, "out"),
+      prdSkillsPath: fixture.prdSkills,
+      checksDir: fixture.checksDir,
+    });
+
+    expect(payload.expected_skills).toEqual([]);
+    expect(payload.runs[0]).toMatchObject({
+      skill_id: "",
+      trigger_recall: 1,
+      trigger_precision: 1,
+      trigger_exact_match: true,
+    });
+  });
+});
+
+test("[REGRESSION] manifest scenario overrides mismatched CLI input", () => {
+  withTempDir((root) => {
+    const fixture = writeFixture(root);
+    writeFileSync(
+      fixture.manifest,
+      JSON.stringify({
+        prd: "dataset/prds/test-app/prd/mvp.txt",
+        scenario: "skills_unavailable",
+      }),
+    );
+
+    const payload = analyzeArtifacts({
+      authoredArtifact: fixture.authored,
+      evalArtifact: null,
+      scenario: "skills_available_mentioned",
+      outDir: join(root, "out"),
+      prdSkillsPath: fixture.prdSkills,
+      checksDir: fixture.checksDir,
+    });
+
+    expect(payload.scenario).toBe("skills_unavailable");
+    expect(payload.expected_skills).toEqual([]);
+    expect(payload.warnings.some((warning) => warning.includes("scenario mismatch")))
+      .toBe(true);
+  });
+});
+
+test("[REGRESSION] unmapped PRDs produce an empty expected-skill set", () => {
+  withTempDir((root) => {
+    const fixture = writeFixture(root);
+    writeFileSync(
+      fixture.manifest,
+      JSON.stringify({ prd: "dataset/prds/unmapped-app/prd/mvp.txt" }),
+    );
+
+    const payload = analyzeArtifacts({
+      authoredArtifact: fixture.authored,
+      evalArtifact: null,
+      scenario: "skills_available_unmentioned",
+      outDir: join(root, "out"),
+      prdSkillsPath: fixture.prdSkills,
+      checksDir: fixture.checksDir,
+    });
+
+    expect(payload.expected_skills).toEqual([]);
+    expect(payload.warnings.some((warning) =>
+      warning.includes("no ground-truth skill set for app 'unmapped-app'")
+    )).toBe(true);
   });
 });
 
