@@ -57,10 +57,6 @@ import {
 
 const REAL_CHECKS_DIR = resolve(import.meta.dir, "../uptake_checks");
 const REPO_ROOT = resolve(import.meta.dir, "../../../..");
-const PYTHON = existsSync(join(REPO_ROOT, ".venv", "bin", "python"))
-  ? join(REPO_ROOT, ".venv", "bin", "python")
-  : Bun.which("python3");
-
 function withTempDir<T>(run: (root: string) => T): T {
   const root = mkdtempSync(join(tmpdir(), "skill-core-"));
   try {
@@ -779,9 +775,7 @@ test("[SPEC SKILL-004] archive-declared symlink parents are rejected before extr
   });
 });
 
-test.skipIf(PYTHON === null)(
-  "[DIFF] score rates preserve Python float rounding",
-  () => {
+test("[REGRESSION] score rates preserve the accepted migration baseline", () => {
     const uptakeRate = (passed: number, total: number): number | null =>
       new UptakeResults(
         Array.from(
@@ -798,63 +792,25 @@ test.skipIf(PYTHON === null)(
             }),
         ),
       ).uptakeRate;
-    const pythonScript =
-      "import json; print(json.dumps([round(1/32, 4), round(1/160, 4), round(3/160, 4)]))";
-    const python = Bun.spawnSync(
-      [PYTHON ?? "python3", "-c", pythonScript],
-      { stdout: "pipe", stderr: "pipe" },
-    );
-    expect(python.exitCode).toBe(0);
-    expect(new TextDecoder().decode(python.stderr)).toBe("");
-    const pythonRates = JSON.parse(
-      new TextDecoder().decode(python.stdout),
-    ) as [number, number, number];
-
-    expect(pythonRates).toEqual([0.0312, 0.0063, 0.0187]);
-    expect(uptakeRate(1, 32)).toBe(pythonRates[0]);
-    expect(uptakeRate(1, 160)).toBe(pythonRates[1]);
-    expect(uptakeRate(3, 160)).toBe(pythonRates[2]);
+    expect(uptakeRate(1, 32)).toBe(0.0312);
+    expect(uptakeRate(1, 160)).toBe(0.0063);
+    expect(uptakeRate(3, 160)).toBe(0.0187);
     expect(
       scoreTriggerQuality(
         Array.from({ length: 160 }, (_, index) => `skill-${index}`),
         ["skill-0", "skill-1", "skill-2"],
       ).recall,
-    ).toBe(pythonRates[2]);
-  },
-);
+    ).toBe(0.0187);
+});
 
-test.skipIf(PYTHON === null)(
-  "[DIFF] malformed UTF-8 source files are skipped",
-  () => {
+test("[REGRESSION] malformed UTF-8 source files are skipped", () => {
     withTempDir((root) => {
       writeFileSync(join(root, "valid.ts"), "export const valid = true;\n");
       writeFileSync(join(root, "invalid.ts"), Buffer.from([0xc3, 0x28]));
       const typescriptFiles = [...new AppTree(root).files.keys()];
-      const pythonScript = `
-import json
-import sys
-from pathlib import Path
-from eval_harness.evaluator.skill_invocation.uptake_checks.registry import AppTree
-print(json.dumps([str(path) for path in AppTree(Path(sys.argv[1])).files]))
-`;
-      const python = Bun.spawnSync(
-        [PYTHON ?? "python3", "-c", pythonScript, root],
-        {
-          cwd: REPO_ROOT,
-          env: { ...process.env, PYTHONPATH: REPO_ROOT },
-          stdout: "pipe",
-          stderr: "pipe",
-        },
-      );
-      expect(python.exitCode).toBe(0);
-      expect(new TextDecoder().decode(python.stderr)).toBe("");
-      expect(typescriptFiles).toEqual(
-        JSON.parse(new TextDecoder().decode(python.stdout)),
-      );
       expect(typescriptFiles).toEqual(["valid.ts"]);
     });
-  },
-);
+});
 
 test("[REGRESSION] valid compressed artifacts unpack into the destination", () => {
   withTempDir((root) => {
@@ -1243,118 +1199,3 @@ test("[REGRESSION] authoring invokes the Bun build-health helper", () => {
     "python -m eval_harness.evaluator.skill_invocation.build_health.bundle_check",
   );
 });
-
-test.skipIf(PYTHON === null)(
-  "[DIFF] registry and code-check results match Python",
-  () => {
-    // Differential oracle: Python and TypeScript receive the same authored-app
-    // tree, real registry, and expected skills; every observable check result
-    // must match exactly while both implementations coexist.
-    withTempDir((root) => {
-      mkdirSync(join(root, "app", "api"), { recursive: true });
-      mkdirSync(join(root, "components"));
-      mkdirSync(join(root, "targets", "clip"), { recursive: true });
-      mkdirSync(join(root, "public", ".well-known"), { recursive: true });
-      writeFileSync(
-        join(root, "package.json"),
-        JSON.stringify({
-          dependencies: {
-            "@expo/ui": "1.0.0",
-            "expo-router": "1.0.0",
-          },
-        }),
-      );
-      writeFileSync(
-        join(root, "app", "_layout.tsx"),
-        "import { Stack } from 'expo-router';\n" +
-          "export default function Layout(){ return <Stack />; }\n",
-      );
-      writeFileSync(
-        join(root, "app", "index.tsx"),
-        "import { Host } from '@expo/ui';\n" +
-          "import { useWindowDimensions } from 'react-native';\n" +
-          "const url = process.env.EXPO_PUBLIC_API_URL;\n" +
-          "export default function App(){ useWindowDimensions(); fetch(url); return <Host />; }\n",
-      );
-      writeFileSync(
-        join(root, "app", "api", "users+api.ts"),
-        "export function GET(){ return Response.json({ ok: true }); }\n",
-      );
-      writeFileSync(
-        join(root, "public", ".well-known", "apple-app-site-association"),
-        "{}",
-      );
-
-      const expectedSkills = [
-        "expo-router",
-        "expo-project-structure",
-        "expo-native-ui",
-        "expo-ui",
-        "expo-data-fetching",
-        "eas-hosting",
-        "expo-app-clip",
-      ];
-      const { checks, warnings } = resolveChecksForSkills(
-        expectedSkills,
-        REAL_CHECKS_DIR,
-      );
-      const typescriptPayload = {
-        check_ids: checks.map((check) => check.id),
-        descriptions: Object.fromEntries(
-          checks.map((check) => [check.id, check.description]),
-        ),
-        warnings,
-        results: runChecks(checks, root).map((result) => ({
-          id: result.id,
-          category: result.category,
-          kind: result.kind,
-          target: result.target,
-          passed: result.passed,
-          evidence: result.evidence,
-          status: result.status,
-        })),
-      };
-      const pythonScript = `
-import json
-import sys
-from pathlib import Path
-from eval_harness.evaluator.skill_invocation.uptake_checks.registry import resolve_checks_for_skills, run_checks
-
-app_dir = Path(sys.argv[1])
-checks_dir = Path(sys.argv[2])
-skills = json.loads(sys.argv[3])
-checks, warnings = resolve_checks_for_skills(skills, checks_dir)
-results = run_checks(checks, app_dir)
-print(json.dumps({
-    "check_ids": [check.id for check in checks],
-    "descriptions": {check.id: check.description for check in checks},
-    "warnings": warnings,
-    "results": [result.__dict__ for result in results],
-}, sort_keys=True))
-`;
-      const processResult = Bun.spawnSync(
-        [
-          PYTHON ?? "python3",
-          "-c",
-          pythonScript,
-          root,
-          REAL_CHECKS_DIR,
-          JSON.stringify(expectedSkills),
-        ],
-        {
-          cwd: REPO_ROOT,
-          env: { ...process.env, PYTHONPATH: REPO_ROOT },
-          stdout: "pipe",
-          stderr: "pipe",
-        },
-      );
-      expect(new TextDecoder().decode(processResult.stderr)).toBe("");
-      expect(processResult.exitCode).toBe(0);
-      const pythonPayload = JSON.parse(
-        new TextDecoder().decode(processResult.stdout),
-      ) as typeof typescriptPayload;
-
-      expect(typescriptPayload).toEqual(pythonPayload);
-    });
-  },
-);

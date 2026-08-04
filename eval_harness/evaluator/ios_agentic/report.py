@@ -1,6 +1,6 @@
 """HTML report generation for the agentic evaluator's result.json output.
 
-Mirrors skill_invocation/analysis.py's write_html_report -- same plain-table,
+Mirrors skill_invocation/analysis.ts's writeHtmlReport -- same plain-table,
 no-JS style, so both eval-e2e.yml artifacts (skill-eval-report and, with this
 module, the eval_ios output) are consistent to skim. Consumes exactly the
 `output` dict main.py already assembles and writes to result.json -- see

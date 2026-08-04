@@ -33,7 +33,8 @@ runner plus uploaded artifacts.
 - `eval-e2e.yml` is the front door. The smaller workflows are replay/debug
   entrypoints, not the primary user journey.
 - The app evaluator CLI is `python -m eval_harness.evaluator.ios_agentic.main`.
-- The skill evaluator CLI is `python -m eval_harness.evaluator.skill_invocation.main`.
+- The skill evaluator CLI is
+  `bun eval_harness/evaluator/skill_invocation/main.ts`.
 - Notes canonical input paths (the small, known-good target used first when
   proving harness changes):
   - PRD: `dataset/prds/notes/prd/mvp.txt`
@@ -62,7 +63,7 @@ runner plus uploaded artifacts.
   skill set in `dataset/prd_skills.json`, and resolves each expected skill's
   uptake checks via `uptake_checks/skill_map.json` (skill id -> check ids)
   against the declarative lexical + structural checks in `checks_data.json`
-  plus code-driven checks (including syntax-tree, see `uptake_checks/code_checks.py`)
+  plus code-driven checks (including syntax-tree, see `uptake_checks/code_checks.ts`)
   registered via `@register`; route-graph checks still don't exist -- see
   `uptake_checks/README.md`. 9 of 21 Expo skills are currently mapped; the
   rest are either CLI/cloud-ops skills with no source-tree footprint at all
@@ -133,7 +134,7 @@ runner plus uploaded artifacts.
 
 ```bash
 find eval_harness -name '*.sh' -print0 | xargs -0 bash -n
-PYTHONPATH=. uv run python -m unittest eval_harness.evaluator.skill_invocation.tests.test_skill_eval_core
+bun test eval_harness/evaluator/skill_invocation/tests
 PYTHONPATH=. uv run python -m unittest eval_harness.evaluator.ios_agentic.tests.test_test_plan_resolution
 node /Users/adityashukla/.codex/plugins/cache/openai-curated-remote/expo/1.0.2/skills/expo-cicd-workflows/scripts/validate.js .eas/workflows/*.yml
 ```
