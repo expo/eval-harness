@@ -614,6 +614,171 @@ class TraceParserCliCharacterizationTests(unittest.TestCase):
 
 
 class TraceParserDifferentialTests(unittest.TestCase):
+    def test_differential_help_and_accepted_argument_forms_match_python(self) -> None:
+        """Differential: Bun preserves argparse help and accepted option forms.
+
+        Oracle: exact help output plus semantic reconstruction equality against
+        the Python CLI for abbreviations, --flag=value, and Python float text.
+        Catches: migration-only CLI rejection and JavaScript numeric parsing.
+        """
+        bun = shutil.which("bun")
+        self.assertIsNotNone(bun, "Bun must be on PATH for migration parity tests")
+        cases = [
+            (CC_SCRIPT, CC_TS_SCRIPT, "--projects", "session.jsonl", [_claude_prompt("same")]),
+            (
+                CODEX_SCRIPT,
+                CODEX_TS_SCRIPT,
+                "--sessions",
+                "rollout-session.jsonl",
+                [{"type": "session_meta", "payload": {"id": "codex-1"}}, _codex_task_started()],
+            ),
+        ]
+
+        for python_script, typescript_script, directory_flag, filename, records in cases:
+            with self.subTest(script=python_script.name), tempfile.TemporaryDirectory() as td:
+                python_help = subprocess.run(
+                    [sys.executable, str(python_script), "--help"],
+                    cwd=REPO_ROOT,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                typescript_help = subprocess.run(
+                    [bun, str(typescript_script), "--help"],
+                    cwd=REPO_ROOT,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(typescript_help.returncode, python_help.returncode)
+                self.assertEqual(typescript_help.stdout, python_help.stdout)
+                self.assertEqual(typescript_help.stderr, python_help.stderr)
+
+                root = Path(td)
+                source = root / "source"
+                source.mkdir()
+                _write_jsonl(source / filename, records)
+                python_out = root / "python.json"
+                typescript_out = root / "typescript.json"
+                common_args = [
+                    f"{directory_flag}={source}",
+                    "--since=0_0",
+                    "--before=inf",
+                    "--run=run-cli",
+                    "--source=cli-diff",
+                    "--session-n=CLI Differential",
+                ]
+                python_result = subprocess.run(
+                    [sys.executable, str(python_script), *common_args, f"--out={python_out}"],
+                    cwd=REPO_ROOT,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                typescript_result = subprocess.run(
+                    [bun, str(typescript_script), *common_args, f"--out={typescript_out}"],
+                    cwd=REPO_ROOT,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(typescript_result.returncode, python_result.returncode)
+                self.assertEqual(json.loads(typescript_out.read_text()), json.loads(python_out.read_text()))
+
+                invalid_python = subprocess.run(
+                    [sys.executable, str(python_script), "--since=0x1", f"--out={python_out}"],
+                    cwd=REPO_ROOT,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                invalid_typescript = subprocess.run(
+                    [bun, str(typescript_script), "--since=0x1", f"--out={typescript_out}"],
+                    cwd=REPO_ROOT,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(invalid_typescript.returncode, invalid_python.returncode)
+
+    def test_differential_truthy_malformed_records_fail_the_same_session(self) -> None:
+        """Differential: malformed truthy message/payload shapes are not fabricated.
+
+        Oracle: both parse-only CLIs fail and both reconstruction CLIs skip the
+        malformed session while retaining a valid sibling session.
+        Catches: silently replacing truthy non-object fields with empty objects.
+        """
+        bun = shutil.which("bun")
+        self.assertIsNotNone(bun, "Bun must be on PATH for migration parity tests")
+        cases = [
+            (
+                CC_SCRIPT,
+                CC_TS_SCRIPT,
+                "--projects-dir",
+                "bad.jsonl",
+                {"type": "user", "message": "not-an-object"},
+                "good.jsonl",
+                _claude_prompt("valid"),
+            ),
+            (
+                CODEX_SCRIPT,
+                CODEX_TS_SCRIPT,
+                "--sessions-dir",
+                "rollout-bad.jsonl",
+                {"type": "event_msg", "payload": "not-an-object"},
+                "rollout-good.jsonl",
+                _codex_task_started("valid"),
+            ),
+        ]
+
+        for python_script, typescript_script, directory_flag, bad_name, bad_record, good_name, good_record in cases:
+            with self.subTest(script=python_script.name), tempfile.TemporaryDirectory() as td:
+                root = Path(td)
+                source = root / "source"
+                source.mkdir()
+                bad = source / bad_name
+                good = source / good_name
+                _write_jsonl(bad, [bad_record])
+                _write_jsonl(good, [good_record])
+                os.utime(bad, (10, 10))
+                os.utime(good, (20, 20))
+
+                python_parse = subprocess.run(
+                    [sys.executable, str(python_script), "--parse-only", str(bad)],
+                    cwd=REPO_ROOT,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                typescript_parse = subprocess.run(
+                    [bun, str(typescript_script), "--parse-only", str(bad)],
+                    cwd=REPO_ROOT,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertNotEqual(python_parse.returncode, 0)
+                self.assertNotEqual(typescript_parse.returncode, 0)
+
+                python_out = root / "python.json"
+                typescript_out = root / "typescript.json"
+                python_result = subprocess.run(
+                    [sys.executable, str(python_script), directory_flag, str(source), "--out", str(python_out)],
+                    cwd=REPO_ROOT,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                typescript_result = subprocess.run(
+                    [bun, str(typescript_script), directory_flag, str(source), "--out", str(typescript_out)],
+                    cwd=REPO_ROOT,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(typescript_result.returncode, python_result.returncode)
+                self.assertEqual(json.loads(typescript_out.read_text()), json.loads(python_out.read_text()))
+
     def test_differential_parse_only_outputs_match_python(self) -> None:
         """Differential: Python and Bun normalize the same records identically.
 
@@ -651,7 +816,16 @@ class TraceParserDifferentialTests(unittest.TestCase):
                                 {
                                     "type": "tool_result",
                                     "tool_use_id": "call-1",
-                                    "content": {"greeting": "héllo", "items": [1, True, None]},
+                                    "content": {
+                                        "greeting": "héllo",
+                                        "items": [1, True, None],
+                                        "whole_float": 1.0,
+                                        "small_float": 1e-7,
+                                        "plain_decimal": 0.0001,
+                                        "large_float": 1e16,
+                                        "negative_zero": -0.0,
+                                        "huge_integer": 2**80,
+                                    },
                                 }
                             ]
                         },
@@ -679,7 +853,15 @@ class TraceParserDifferentialTests(unittest.TestCase):
                             "type": "function_call",
                             "call_id": "call-1",
                             "name": "shell",
-                            "arguments": '{"command":"echo héllo"}',
+                            "arguments": '{"command":"echo héllo","huge":1208925819614629174706176}',
+                        },
+                    },
+                    {
+                        "type": "response_item",
+                        "payload": {
+                            "type": "custom_tool_call",
+                            "call_id": "call-2",
+                            "name": "missing-input",
                         },
                     },
                     {"type": "event_msg", "payload": {"type": "task_complete"}},
