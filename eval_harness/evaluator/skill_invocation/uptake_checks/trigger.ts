@@ -1,4 +1,4 @@
-import { dedupe, readJson } from "../utils.ts";
+import { dedupe, readJson, roundRatio } from "../utils.ts";
 
 export type ToolCall = {
   name?: unknown;
@@ -77,25 +77,23 @@ export function scoreTriggerQuality(
   const matched = expected.filter((skill) => triggeredSet.has(skill));
   const extra = triggered.filter((skill) => !expectedSet.has(skill));
   const missing = expected.filter((skill) => !triggeredSet.has(skill));
-  const recall = expected.length === 0 ? 1 : matched.length / expected.length;
+  const recall = expected.length === 0
+    ? 1
+    : roundRatio(matched.length, expected.length);
   const precision =
     triggered.length === 0
       ? expected.length === 0
         ? 1
         : 0
-      : matched.length / triggered.length;
+      : roundRatio(matched.length, triggered.length);
   return {
     expectedSkills: expected,
     triggeredSkills: triggered,
     matchedSkills: matched,
     extraSkills: extra,
     missingSkills: missing,
-    recall: roundFour(recall),
-    precision: roundFour(precision),
+    recall,
+    precision,
     anyExpoSkillTriggered: triggered.length > 0,
   };
-}
-
-function roundFour(value: number): number {
-  return Math.round(value * 10_000) / 10_000;
 }

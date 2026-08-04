@@ -38,7 +38,12 @@ export function computeBundleResult(appDir: string): BundleResult {
     const detail = error instanceof Error ? error.message : String(error);
     return { ok: false, reason: `failed to invoke expo export: ${detail}` };
   } finally {
-    rmSync(exportDir, { recursive: true, force: true });
+    try {
+      rmSync(exportDir, { recursive: true, force: true });
+    } catch {
+      // Match shutil.rmtree(..., ignore_errors=True): cleanup must never hide
+      // the build-health result we already computed.
+    }
   }
 }
 

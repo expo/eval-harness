@@ -5,7 +5,8 @@ import {
 } from "node:fs";
 import { extname, join, relative, sep } from "node:path";
 
-import { readJson } from "../utils.ts";
+import { readJson, roundRatio } from "../utils.ts";
+import { registerCodeChecks } from "./code_checks.ts";
 
 export const SOURCE_SUFFIXES = new Set([
   ".js",
@@ -44,6 +45,7 @@ export type CheckStatus =
   | typeof STATUS_NOT_APPLICABLE
   | typeof STATUS_UNAVAILABLE;
 const SCORED_STATUSES = new Set<CheckStatus>([STATUS_PASSED, STATUS_FAILED]);
+const FATAL_UTF8_DECODER = new TextDecoder("utf-8", { fatal: true });
 
 export type CheckDefinition = {
   id: string;
@@ -111,8 +113,9 @@ export class UptakeResults {
   get uptakeRate(): number | null {
     const scored = this.scored;
     if (scored.length === 0) return null;
-    return roundFour(
-      scored.filter((check) => check.passed === true).length / scored.length,
+    return roundRatio(
+      scored.filter((check) => check.passed === true).length,
+      scored.length,
     );
   }
 
@@ -174,7 +177,7 @@ export class AppTree {
         if (!SOURCE_SUFFIXES.has(extname(entry.name))) continue;
         if (SKIP_FILENAMES.has(entry.name) || hasSkippedPart(path)) continue;
         try {
-          files.set(path, readFileSync(absolute, "utf8"));
+          files.set(path, FATAL_UTF8_DECODER.decode(readFileSync(absolute)));
         } catch (error) {
           if (error instanceof TypeError) continue;
           throw error;
@@ -491,6 +494,8 @@ function pyRepr(value: unknown): string {
   return String(value);
 }
 
-function roundFour(value: number): number {
-  return Math.round(value * 10_000) / 10_000;
-}
+registerCodeChecks({
+  register,
+  createResult: (fields) => new CheckResult(fields),
+  stripComments,
+});
