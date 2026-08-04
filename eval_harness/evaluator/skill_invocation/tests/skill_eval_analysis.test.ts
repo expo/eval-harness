@@ -20,6 +20,8 @@ import {
 import { CheckResult, type Check } from "../uptake_checks/registry.ts";
 
 const CLI_PATH = resolve(import.meta.dir, "../main.ts");
+const REPO_ROOT = resolve(import.meta.dir, "../../../..");
+const PYTHON = resolve(REPO_ROOT, ".venv/bin/python");
 
 function withTempDir<T>(run: (root: string) => T): T {
   const root = mkdtempSync(join(tmpdir(), "skill-analysis-"));
@@ -68,7 +70,6 @@ function writeFixture(root: string): {
   mkdirSync(app, { recursive: true });
   mkdirSync(traces, { recursive: true });
   writeFileSync(join(app, "package.json"), "{}");
-  writeFileSync(join(app, "index.ts"), "export const ready = true;\n");
   writeFileSync(join(app, "ready"), "yes\n");
   writeFileSync(
     join(bundle, "manifest.json"),
@@ -366,5 +367,60 @@ test("[CHAR] Bun CLI writes reports and the stable console summary", () => {
       .toMatchObject({ app: "test-app", expected_skills: ["expo-test"] });
     expect(readFileSync(join(outDir, "report.html"), "utf8"))
       .toStartWith("<!doctype html>");
+  });
+});
+
+test("[DIFF] complete skill metrics and report structure match Python", () => {
+  // Oracle: cross-implementation parity for the same authored artifact.
+  // Catches: schema drift, aggregation differences, caller argument loss,
+  // output formatting drift, and omitted report sections.
+  withTempDir((root) => {
+    const fixture = writeFixture(root);
+    const pythonOut = join(root, "python-out");
+    const bunOut = join(root, "bun-out");
+    const shared = [
+      "analyze-artifacts",
+      "--authored-artifact",
+      fixture.authored,
+      "--eval-artifact",
+      "null",
+      "--scenario",
+      "skills_available_unmentioned",
+      "--prd-skills",
+      fixture.prdSkills,
+      "--checks-dir",
+      fixture.checksDir,
+    ];
+    const python = Bun.spawnSync([
+      PYTHON,
+      "-m",
+      "eval_harness.evaluator.skill_invocation.main",
+      ...shared,
+      "--out-dir",
+      pythonOut,
+    ], {
+      cwd: REPO_ROOT,
+      env: { ...process.env, PYTHONPATH: REPO_ROOT },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const bun = Bun.spawnSync([
+      process.execPath,
+      CLI_PATH,
+      ...shared,
+      "--out-dir",
+      bunOut,
+    ], { cwd: REPO_ROOT, stdout: "pipe", stderr: "pipe" });
+
+    expect(python.exitCode).toBe(0);
+    expect(bun.exitCode).toBe(0);
+    expect(bun.stderr.toString()).toBe(python.stderr.toString());
+    expect(bun.stdout.toString()).toBe(python.stdout.toString());
+    expect(JSON.parse(readFileSync(join(bunOut, "metrics.json"), "utf8")))
+      .toEqual(JSON.parse(readFileSync(join(pythonOut, "metrics.json"), "utf8")));
+    const normalizeHtml = (value: string): string =>
+      value.replace(/\s+/gu, " ").trim();
+    expect(normalizeHtml(readFileSync(join(bunOut, "report.html"), "utf8")))
+      .toBe(normalizeHtml(readFileSync(join(pythonOut, "report.html"), "utf8")));
   });
 });
