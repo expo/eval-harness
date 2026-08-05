@@ -594,15 +594,22 @@ class AgentDeviceBridge:
                 error="agent-device does not support fill with an empty string; "
                       "use a non-empty replacement or report the gap.",
             )
+        # Snapshot refs and accessibility identifiers are different selector
+        # types in agent-device. Preserve refs such as @e15 instead of
+        # rewriting them as the invalid accessibility selector id="@e15".
+        selector = (
+            id_ if id_.startswith("@") else f"@{id_}"
+        ) if self._is_ref(id_) else f'id="{id_}"'
+
         # Explicit focus first.
-        focus = self._run_cmd(["press", f'id="{id_}"'])
+        focus = self._run_cmd(["press", selector])
         if not focus.success:
             return AgentDeviceResult(
                 success=False, output="",
                 error=f"fill: failed to focus id={id_!r}: {focus.error or focus.output[:200]}",
             )
         time.sleep(0.3)
-        r = self._run_cmd(["fill", f'id="{id_}"', text])
+        r = self._run_cmd(["fill", selector, text])
         if r.success:
             # Drain the keystroke queue before returning so chained taps don't
             # get queued behind pending keystrokes.

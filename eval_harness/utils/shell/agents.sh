@@ -1,3 +1,13 @@
+eval::reject_claude_quota_exhaustion() { # log_file
+  local log_file="$1"
+  [ -f "$log_file" ] || return 0
+  if grep -Eiq "you.?ve hit your (session|usage) limit|claude (code )?(session|usage) limit.*(exhausted|reached)|usage limit.*resets" "$log_file"; then
+    echo "  ❌ Claude subscription usage limit exhausted; wait for the account reset before retrying"
+    return 75
+  fi
+  return 0
+}
+
 eval::_agent_timeout() {
   if command -v gtimeout >/dev/null 2>&1; then echo "gtimeout 2400";
   elif command -v timeout >/dev/null 2>&1; then echo "timeout 2400";
@@ -441,6 +451,9 @@ eval::run_coding_agent() { # agent root workspace prd_file out_dir [model] [muse
           --dangerously-skip-permissions --add-dir "$workspace" $settings_arg $plugin_arg ) 2>&1 | tee "$out/c-agent.log"
       local rc=${PIPESTATUS[0]}
     fi
+    eval::reject_claude_quota_exhaustion "$out/c-agent.log"
+    local quota_rc=$?
+    [ "$quota_rc" = 0 ] || rc=$quota_rc
     eval::gate $rc "claude-code authored app"
     return $rc
   fi
