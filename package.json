@@ -2,11 +2,10 @@
   "name": "eval-experiments",
   "version": "1.0.0",
   "private": true,
-  "packageManager": "bun@1.3.14",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test:ts": "bun test",
-    "test:python": "PYTHONPATH=. uv run --group test python -m unittest discover -s eval_harness -p 'test_*.py' && PYTHONPATH=. uv run --group test python -m unittest discover -s eval_harness/utils/tests -p 'test_*.py'",
+    "test:ts": "bun test eval_harness",
+    "test:python": "PYTHONPATH=. uv run --group test python -m unittest discover -s eval_harness -p 'test_*.py'",
     "test:all": "bun run typecheck && bun run test:ts && bun run test:python"
   },
   "dependencies": {
