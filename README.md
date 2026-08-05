@@ -45,29 +45,54 @@ dataset/
   prd_test_plans.json         # app -> relevant test-plan filenames (iOS-eval ground truth)
 ```
 
-## Setup
+## One-time Collaborator Setup
 
-Install the EAS CLI, authenticate with Expo, copy `.env.default` to `.env`, and
-push secrets to the EAS `production` environment:
+The shared harness is already linked to Georgian's Expo project and its EAS
+`production` environment already contains the required credentials. If your
+Expo account has been invited to that project, install the EAS CLI and sign in:
+
+```bash
+npm install -g eas-cli
+eas login
+eas whoami
+```
+
+From the repository root, verify that EAS resolves the shared project:
+
+```bash
+eas project:info
+```
+
+It should show:
+
+- owner: `georgian-team`
+- slug: `adi-test-project`
+- project ID: `338f6455-57a3-49c9-a2e0-36e5a0577c77`
+
+You do not need to install this repository's Bun, TypeScript, or Python
+dependencies locally to submit a Workflow. EAS uploads the current checkout and
+installs the required runtimes and dependencies on its remote workers.
+
+### Project secret setup (maintainers only)
+
+Invited collaborators can skip this subsection. When configuring a new EAS
+project, copy `.env.default` to `.env` and push the required values to the EAS
+`production` environment:
 
 ```bash
 eas env:push production --path .env
 ```
 
-Required for Claude Code authoring and evaluator runs:
-`CLAUDE_CODE_OAUTH_TOKEN`, generated locally with `claude setup-token`. Do not
-also set `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN`; Claude Code gives those
-credentials higher priority than subscription OAuth, and the harness rejects
-them to prevent accidentally bypassing the intended Claude subscription.
-Required for Codex authoring: `OPENAI_API_KEY`.
-Optional: `EXPO_TOKEN` (an Expo Robot User access token) so the coding agent can
-run its own `eas build` self-verification step during authoring, and so the
-harness can wire up Expo MCP access for it (mcp.expo.dev accepts this token
-directly as its bearer token now -- no separate OAuth login needed); see
-`.env.default` for details. Optional: `BRAINTRUST_API_KEY` plus
-`BRAINTRUST_PROJECT` for trace pushes.
+Claude Code authoring and evaluation use `CLAUDE_CODE_OAUTH_TOKEN`, generated
+locally with `claude setup-token`. Do not also set `ANTHROPIC_API_KEY` or
+`ANTHROPIC_AUTH_TOKEN`; Claude Code gives those credentials higher priority than
+subscription OAuth, and the harness rejects them to prevent accidentally
+bypassing the intended Claude subscription. Codex authoring requires
+`OPENAI_API_KEY`. `EXPO_TOKEN` is optional and lets the coding agent run its own
+`eas build` self-verification and use Expo MCP. `BRAINTRUST_API_KEY` and
+`BRAINTRUST_PROJECT` are optional trace-export settings; see `.env.default`.
 
-Expo project routing is controlled by `app.config.js`. Override these env vars
+Expo project routing is controlled by `app.config.js`. Override these variables
 when running the same branch under another Expo account:
 
 ```bash
@@ -78,34 +103,51 @@ EXPO_OWNER=<account-name>
 
 ## Run The Full Flow
 
-Run the full modular E2E workflow for Notes:
+The current end-to-end workflow is intentionally hybrid:
+
+```text
+author app
+├── iOS app evaluation: Python
+└── skill evaluation: TypeScript executed by Bun
+```
+
+Bun is pinned and installed automatically on the EAS workers; there is no
+separate `use_bun` input.
+
+First pull the branch you want to evaluate and inspect the checkout. EAS uploads
+the entire current local project directory, including uncommitted files, unless
+you use its `--ref` option.
+
+```bash
+git status --short
+```
+
+Run the complete Pool evaluation with Claude Code authoring, the Python iOS
+evaluator, and the Bun skill evaluator:
 
 ```bash
 eas workflow:run .eas/workflows/eval-e2e.yml \
   -F agent=claude-code \
-  -F prd=dataset/prds/notes/prd/mvp.txt \
+  -F prd=dataset/prds/pool/prd/mvp.txt \
   -F run_eval_ios=true \
-  -F run_eval_skill=false
+  -F run_eval_skill=true \
+  -F skill_scenario=skills_available_unmentioned \
+  --wait
 ```
 
-Use Codex by changing the agent and ensuring `OPENAI_API_KEY` is present:
+`--wait` keeps the terminal attached until the workflow finishes. It is
+optional; the EAS dashboard continues the run if you disconnect.
 
-```bash
-eas workflow:run .eas/workflows/eval-e2e.yml \
-  -F agent=codex \
-  -F prd=dataset/prds/notes/prd/mvp.txt \
-  -F run_eval_ios=true \
-  -F run_eval_skill=false
-```
-
-Run the focused iOS 27 native navigation and glass fixture by changing the PRD:
+Use Codex by changing the authoring agent:
 
 ```bash
 eas workflow:run .eas/workflows/eval-e2e.yml \
   -F agent=codex \
   -F prd=dataset/prds/pool/prd/mvp.txt \
   -F run_eval_ios=true \
-  -F run_eval_skill=true
+  -F run_eval_skill=true \
+  -F skill_scenario=skills_available_unmentioned \
+  --wait
 ```
 
 Authoring always uses a direct PRD path. Which test plans run in `eval_ios`,
@@ -126,10 +168,12 @@ eas workflow:run .eas/workflows/eval-e2e.yml \
   -F skill_scenario=skills_available_unmentioned
 ```
 
-## Workflow Artifacts
+## Download And Interpret Results
 
 Open the EAS Workflow run and download artifacts from the run’s artifact list.
-Untar them locally with `tar -xzf <file>.tar.gz`.
+The iOS and skill jobs run independently after authoring, so one report can be
+available even when the other job fails. The overall Workflow is unsuccessful
+if either enabled evaluation job fails.
 
 `eval-ios-app.yml` and the iOS evaluation job in full E2E runs upload app-eval
 output:
@@ -137,7 +181,19 @@ output:
 - artifact name in full E2E runs: `eval-e2e-output`
 - artifact name in replay runs: `eval-ios-replay-output`
 - archive: `eval-out.tar.gz`
-- contains: `eval/result.json`, evaluator traces, logs, and `manifest.json`
+- primary result after extraction: `eval-out/<RUN_ID>/result.json`
+- also contains evaluator traces, logs, the evidence bundle, and `manifest.json`
+
+Because the run ID is generated dynamically, locate the result with:
+
+```bash
+tar -xzf eval-out.tar.gz
+find eval-out -name result.json -print
+```
+
+Start with `macro_avg_pct`, then inspect individual test-plan scores,
+assertions, and traces. Agent-driven evaluation can expose driver limitations as
+well as application defects, so do not rely only on the headline score.
 
 `eval-skill-use.yml` and the skill evaluation job in full E2E runs upload
 skill-eval output:
@@ -146,8 +202,21 @@ skill-eval output:
 - archive: `skill-eval-report.tar.gz`
 - contains: `metrics.json` and `report.html`
 
-Open `report.html` for the human-readable skill-eval report. Inspect
-`metrics.json` for machine-readable results.
+Extract and inspect it with:
+
+```bash
+tar -xzf skill-eval-report.tar.gz
+open skill-eval-report/report.html
+```
+
+Open `report.html` for the easiest human-readable summary. In `metrics.json`,
+check whether every expected skill triggered, review each skill's uptake rate
+and failed-check evidence, and confirm syntax and bundle build health. Checks
+marked `not_applicable` are excluded rather than counted as failures.
+
+In a full E2E run, iOS and skill evaluation run in parallel. The skill report's
+optional app-evaluator outcome therefore normally remains `pending`/`null` even
+when `run_eval_ios=true`; read the iOS score from `eval-out` separately.
 
 The skill evaluator is an initial v0. Current signal is trace trigger detection,
 static code uptake checks, and optional app-evaluator score if an eval artifact
@@ -187,18 +256,9 @@ The app evaluator can still be run locally against an already served app when
 debugging driver behavior, but collaborators should start with EAS workflows
 because they match the runner environment.
 
-### Python-to-TypeScript migration
-
-The active migration replaces Python runtime code one bounded slice at a time
-with TypeScript executed by Bun. See the
-[migration testing guide](MIGRATION_TESTING.md) for the evidence model and the
-[migration status](MIGRATION_STATUS.md) for current branches, measurements,
-and validation results. Language-independent behavioral properties live in
+Language-independent behavioral properties live in
 [the property catalog](test_properties.json), whose structure is defined by
 [the catalog schema](test_properties.schema.json).
-
-The runtime commands below remain authoritative until their corresponding
-subsystems have completed TypeScript cutover and EAS validation.
 
 ```bash
 uv run python -m eval_harness.evaluator.ios_agentic.main \
