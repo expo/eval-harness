@@ -187,6 +187,19 @@ The app evaluator can still be run locally against an already served app when
 debugging driver behavior, but collaborators should start with EAS workflows
 because they match the runner environment.
 
+### Python-to-TypeScript migration
+
+The active migration replaces Python runtime code one bounded slice at a time
+with TypeScript executed by Bun. See the
+[migration testing guide](MIGRATION_TESTING.md) for the evidence model and the
+[migration status](MIGRATION_STATUS.md) for current branches, measurements,
+and validation results. Language-independent behavioral properties live in
+[the property catalog](test_properties.json), whose structure is defined by
+[the catalog schema](test_properties.schema.json).
+
+The runtime commands below remain authoritative until their corresponding
+subsystems have completed TypeScript cutover and EAS validation.
+
 ```bash
 uv run python -m eval_harness.evaluator.ios_agentic.main \
   dataset/test_plans/primitives/test_insert.txt \
