@@ -216,7 +216,14 @@ Run shell parse checks after touching harness scripts:
 find eval_harness -name '*.sh' -print0 | xargs -0 bash -n
 ```
 
-Run skill evaluator and iOS test-plan-resolution tests:
+Run the canonical local type-check and test suite after changing harness code:
+
+```bash
+bun run test:all
+```
+
+For focused debugging, run the skill evaluator and iOS test-plan-resolution
+tests separately:
 
 ```bash
 PYTHONPATH=. uv run python -m unittest eval_harness.evaluator.skill_invocation.tests.test_skill_eval_core

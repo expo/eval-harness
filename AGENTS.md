@@ -131,6 +131,14 @@ runner plus uploaded artifacts.
 
 ## Verification Commands
 
+Run the canonical local type-check and test suite after changing harness code:
+
+```bash
+bun run test:all
+```
+
+Run focused and configuration checks when working in the corresponding area:
+
 ```bash
 find eval_harness -name '*.sh' -print0 | xargs -0 bash -n
 PYTHONPATH=. uv run python -m unittest eval_harness.evaluator.skill_invocation.tests.test_skill_eval_core
