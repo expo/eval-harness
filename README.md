@@ -172,8 +172,10 @@ eas workflow:run .eas/workflows/eval-e2e.yml \
 
 Open the EAS Workflow run and download artifacts from the run’s artifact list.
 The iOS and skill jobs run independently after authoring, so one report can be
-available even when the other job fails. The overall Workflow is unsuccessful
-if either enabled evaluation job fails.
+available even when the other job fails. Treat the artifact contents, rather
+than the EAS status badge alone, as the completion check: diagnostic early-exit
+paths can still upload an archive. A completed iOS evaluation has a
+`result.json` with numeric score fields; a diagnostics-only archive does not.
 
 `eval-ios-app.yml` and the iOS evaluation job in full E2E runs upload app-eval
 output:
