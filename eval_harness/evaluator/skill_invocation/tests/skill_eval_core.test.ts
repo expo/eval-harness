@@ -141,7 +141,7 @@ function writeRawTar(
     const header = new Header({
       path: entry.path,
       type: entry.type,
-      linkpath: entry.linkpath,
+      ...(entry.linkpath === undefined ? {} : { linkpath: entry.linkpath }),
       size: entry.type === "File" ? contents.length : 0,
       mode: 0o644,
       uid: 0,

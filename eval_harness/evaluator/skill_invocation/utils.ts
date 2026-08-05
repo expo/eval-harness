@@ -96,7 +96,7 @@ export function extractTar(path: string, destDir: string): void {
         entries.push({
           path: entry.path,
           type: entry.type,
-          linkpath: entry.linkpath,
+          ...(entry.linkpath === undefined ? {} : { linkpath: entry.linkpath }),
         });
       },
     });

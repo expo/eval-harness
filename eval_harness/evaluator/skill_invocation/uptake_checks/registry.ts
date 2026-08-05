@@ -3,7 +3,7 @@ import {
   readFileSync,
   readdirSync,
 } from "node:fs";
-import { extname, join, relative, sep } from "node:path";
+import { extname, join, relative } from "node:path";
 
 import { readJson, roundRatio } from "../utils.ts";
 import { registerCodeChecks } from "./code_checks.ts";
