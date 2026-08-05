@@ -503,7 +503,8 @@ export async function emitBraintrustSession(
   name: string | null,
   caller = "cc_transcript",
 ): Promise<void> {
-  const searchOptions = { PATH: process.env.PATH };
+  const searchPath = process.env.PATH;
+  const searchOptions = searchPath === undefined ? undefined : { PATH: searchPath };
   const uv = Bun.which("uv", searchOptions);
   const python =
     Bun.which("python3", searchOptions) ?? Bun.which("python", searchOptions);
