@@ -196,7 +196,7 @@ test("Muse EXIT cleanup removes settings without deleting session data", () => {
   expect(result.exitCode).toBe(0);
 });
 
-test("Muse settings root is external while post-cleanup collection retains session data", () => {
+test("Muse artifact collection retains normalized telemetry without shipping raw session data", () => {
   const root = tempDir("muse-artifacts-");
   const out = join(root, "out");
   const workspace = join(root, "workspace");
@@ -214,8 +214,7 @@ test("Muse settings root is external while post-cleanup collection retains sessi
     test ! -e "$SETTINGS/muse/settings.json"
     test "$MUSE_DATA_ROOT" = "$DATA"
     bash "$COLLECT_ARTIFACTS" "$ROOT" "$RUN_ID" "$OUT" "$WORKSPACE" "$ROOT" "$OUT/telemetry"
-    test -e "$OUT/bundle/telemetry/muse/sessions/session.jsonl"
-    test ! -e "$OUT/bundle/telemetry/muse/settings.json"
+    test ! -e "$OUT/bundle/telemetry/muse"
     test -e "$OUT/bundle/telemetry/meta.jsonl"
     test -e "$OUT/bundle/telemetry/traces/muse-code-authoring.json"
     grep -q '"muse_cli_version": "muse-test-version"' "$OUT/bundle/manifest.json"

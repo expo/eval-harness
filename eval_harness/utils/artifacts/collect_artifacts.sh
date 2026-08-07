@@ -156,7 +156,6 @@ fi
 [ -f "$TELEMETRY_DIR/openai.jsonl" ] && cp "$TELEMETRY_DIR/openai.jsonl" "$BUNDLE/telemetry/" 2>/dev/null
 [ -f "$TELEMETRY_DIR/meta.jsonl" ] && cp "$TELEMETRY_DIR/meta.jsonl" "$BUNDLE/telemetry/" 2>/dev/null
 [ -d "$TELEMETRY_DIR/otel" ] && cp -R "$TELEMETRY_DIR/otel" "$BUNDLE/telemetry/otel" 2>/dev/null
-[ -d "${MUSE_DATA_ROOT:-}/muse" ] && cp -R "$MUSE_DATA_ROOT/muse" "$BUNDLE/telemetry/muse" 2>/dev/null
 
 # --- 4. evaluator traces (all current-run plans) + result.json ---
 find "$EVAL/traces" -mindepth 1 -maxdepth 1 -type d -print 2>/dev/null | while IFS= read -r trace_dir; do
@@ -245,7 +244,6 @@ manifest = {
         "proxy_anthropic": "telemetry/anthropic.jsonl",
         "proxy_openai": "telemetry/openai.jsonl",
         "proxy_meta": "telemetry/meta.jsonl",
-        "muse_sessions": "telemetry/muse/",
         "otel": "telemetry/otel/",
         "agent_traces": "telemetry/traces/",
         "eval_traces": "eval/traces/",
