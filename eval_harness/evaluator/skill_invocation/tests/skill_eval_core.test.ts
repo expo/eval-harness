@@ -398,7 +398,7 @@ test("[REGRESSION] JSON helpers preserve semantic values and PRD skill arrays", 
   });
 });
 
-test("[REGRESSION] Claude and Codex trigger detection uses structured calls", () => {
+test("[REGRESSION] Claude, Codex, and Muse trigger detection uses structured calls", () => {
   expect(
     detectTriggeredSkills(
       trace("claude-code", [
@@ -430,6 +430,17 @@ test("[REGRESSION] Claude and Codex trigger detection uses structured calls", ()
       ]),
     ),
   ).toEqual([]);
+  expect(
+    detectTriggeredSkills(
+      trace("muse-code", [
+        [
+          { name: "Skill", args: { skill: "expo-router" } },
+          { name: "Skill", args: { skill: "expo-router" } },
+          { name: "Skill", args: { skill: "bundled:read-session" } },
+        ],
+      ]),
+    ),
+  ).toEqual(["expo-router"]);
 });
 
 test("[REGRESSION] real check data and skill mappings remain internally valid", () => {

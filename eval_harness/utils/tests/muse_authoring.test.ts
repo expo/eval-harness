@@ -207,13 +207,18 @@ test("Muse settings root is external while post-cleanup collection retains sessi
     source "$0"
     mkdir -p "$MUSE_SETTINGS_ROOT/muse" "$MUSE_DATA_ROOT/muse/sessions" "$WORKSPACE"
     printf 'secret settings' > "$MUSE_SETTINGS_ROOT/muse/settings.json"
-    printf 'session event' > "$MUSE_DATA_ROOT/muse/sessions/session.jsonl"
+    printf '%s\n' '{"payload_type":"runtime.session","payload":{"kind":"run","run_id":"muse-run","event":{"kind":"started","prompt":"Build"}}}' > "$MUSE_DATA_ROOT/muse/sessions/session.jsonl"
+    mkdir -p "$OUT/telemetry"
+    printf 'proxy event\n' > "$OUT/telemetry/meta.jsonl"
     eval::cleanup_muse_settings
     test ! -e "$SETTINGS/muse/settings.json"
     test "$MUSE_DATA_ROOT" = "$DATA"
     bash "$COLLECT_ARTIFACTS" "$ROOT" "$RUN_ID" "$OUT" "$WORKSPACE" "$ROOT" "$OUT/telemetry"
     test -e "$OUT/bundle/telemetry/muse/sessions/session.jsonl"
     test ! -e "$OUT/bundle/telemetry/muse/settings.json"
+    test -e "$OUT/bundle/telemetry/meta.jsonl"
+    test -e "$OUT/bundle/telemetry/traces/muse-code-authoring.json"
+    grep -q '"muse_cli_version": "muse-test-version"' "$OUT/bundle/manifest.json"
   `, {
     ROOT: REPO_ROOT,
     RUN_ID: "muse-artifacts-test",
@@ -225,6 +230,7 @@ test("Muse settings root is external while post-cleanup collection retains sessi
     MUSE_SETTINGS_CREATED: "1",
     DATA: data,
     AGENT: "muse-code",
+    MUSE_CLI_VERSION: "muse-test-version",
     COLLECT_ARTIFACTS,
   });
 

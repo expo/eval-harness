@@ -46,6 +46,7 @@ const TRACE_CANDIDATES = [
   "claude-code-authoring.json",
   "claude-authoring.json",
   "codex-authoring.json",
+  "muse-code-authoring.json",
   "claude-code.json",
   "claude.json",
   "codex.json",
