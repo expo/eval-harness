@@ -38,9 +38,18 @@ if [ ! -f "$REGISTRY" ]; then
   exit 1
 fi
 
+# This runs before the harness installs uv/Python, so don't assume `python3`
+# specifically -- same defensive lookup collect_artifacts.sh uses. A missing
+# interpreter must be its own clear error, not a confusing parse failure.
+PY="$(command -v python3 || command -v python)"
+if [ -z "$PY" ]; then
+  echo "❌ no python3/python on PATH to read $REGISTRY" >&2
+  exit 1
+fi
+
 # Resolve id -> relative file, listing valid ids on a miss so the fix is obvious
 # from the failure alone.
-rel="$(REGISTRY="$REGISTRY" VARIANT="$VARIANT" python3 -c '
+rel="$(REGISTRY="$REGISTRY" VARIANT="$VARIANT" "$PY" -c '
 import json, os, sys
 registry, variant = os.environ["REGISTRY"], os.environ["VARIANT"]
 try:
