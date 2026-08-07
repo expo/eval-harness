@@ -69,6 +69,60 @@ def strip_comments(text: str) -> str:
     return _LINE_COMMENT_RE.sub("", _BLOCK_COMMENT_RE.sub("", text))
 
 
+def strip_json_comments(text: str) -> str:
+    """Strip `//` and `/* */` comments from JSONC, ignoring anything inside a
+    string literal.
+
+    Deliberately separate from strip_comments() above, which scans JS/TS source
+    and is string-blind. That blindness is fine for source scanning but
+    silently destroys a tsconfig: the standard Expo path alias `"@/*"` ends in
+    the two characters that open a block comment, and the standard include glob
+    `"**/*.ts"` contains the two that close one -- so a string-blind stripper
+    deletes everything between them, which is the file's actual content:
+
+        {"paths": {"@/*": ["./src/*"]}, "include": ["**/*.ts"]}
+        -> {"paths": {"@*.ts"]}
+
+    The mangled text then fails json.loads, the caller swallows the error, and
+    the check reports `failed` for every standard Expo app -- create-expo-app's
+    own template ships `"@/*"`, so the check could never pass.
+    """
+    out: list[str] = []
+    i, n = 0, len(text)
+    in_string = False
+    while i < n:
+        ch = text[i]
+        if in_string:
+            out.append(ch)
+            if ch == "\\" and i + 1 < n:  # keep escape pairs intact
+                out.append(text[i + 1])
+                i += 2
+                continue
+            if ch == '"':
+                in_string = False
+            i += 1
+            continue
+        if ch == '"':
+            in_string = True
+            out.append(ch)
+            i += 1
+            continue
+        if ch == "/" and i + 1 < n:
+            if text[i + 1] == "/":
+                while i < n and text[i] != "\n":
+                    i += 1
+                continue
+            if text[i + 1] == "*":
+                i += 2
+                while i + 1 < n and not (text[i] == "*" and text[i + 1] == "/"):
+                    i += 1
+                i += 2
+                continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
 STATUS_PASSED = "passed"
 STATUS_FAILED = "failed"
 STATUS_NOT_APPLICABLE = "not_applicable"
@@ -414,7 +468,7 @@ def _check_tsconfig_path_alias(check: Check, app_tree: AppTree) -> CheckResult:
         if not cfg.exists():
             continue
         try:
-            data = json.loads(strip_comments(cfg.read_text(encoding="utf-8")))
+            data = json.loads(strip_json_comments(cfg.read_text(encoding="utf-8")))
         except (UnicodeDecodeError, json.JSONDecodeError):
             continue
         paths = ((data.get("compilerOptions") or {}).get("paths")) or {}
