@@ -6,6 +6,8 @@ import { join } from "node:path";
 const REPO_ROOT = join(import.meta.dir, "../../..");
 const AGENTS_SH = join(REPO_ROOT, "eval_harness/utils/shell/agents.sh");
 const PROXY = join(REPO_ROOT, "eval_harness/utils/telemetry/proxy/logging-proxy.mjs");
+const COLLECT_ARTIFACTS = join(REPO_ROOT, "eval_harness/utils/artifacts/collect_artifacts.sh");
+const AUTHORING_SCRIPT = join(REPO_ROOT, "eval_harness/app_builder/scripts/author-app.sh");
 const tempDirs: string[] = [];
 const processes: ReturnType<typeof Bun.spawn>[] = [];
 
@@ -192,6 +194,51 @@ test("Muse EXIT cleanup removes settings without deleting session data", () => {
   });
 
   expect(result.exitCode).toBe(0);
+});
+
+test("Muse settings root is external while post-cleanup collection retains session data", () => {
+  const root = tempDir("muse-artifacts-");
+  const out = join(root, "out");
+  const workspace = join(root, "workspace");
+  const settings = tempDir("muse-settings-");
+  const data = join(out, "muse-data");
+  const result = runBash(`
+    set -e
+    source "$0"
+    mkdir -p "$MUSE_SETTINGS_ROOT/muse" "$MUSE_DATA_ROOT/muse/sessions" "$WORKSPACE"
+    printf 'secret settings' > "$MUSE_SETTINGS_ROOT/muse/settings.json"
+    printf 'session event' > "$MUSE_DATA_ROOT/muse/sessions/session.jsonl"
+    eval::cleanup_muse_settings
+    test ! -e "$SETTINGS/muse/settings.json"
+    test "$MUSE_DATA_ROOT" = "$DATA"
+    bash "$COLLECT_ARTIFACTS" "$ROOT" "$RUN_ID" "$OUT" "$WORKSPACE" "$ROOT" "$OUT/telemetry"
+    test -e "$OUT/bundle/telemetry/muse/sessions/session.jsonl"
+    test ! -e "$OUT/bundle/telemetry/muse/settings.json"
+  `, {
+    ROOT: REPO_ROOT,
+    RUN_ID: "muse-artifacts-test",
+    OUT: out,
+    WORKSPACE: workspace,
+    SETTINGS: settings,
+    MUSE_SETTINGS_ROOT: settings,
+    MUSE_DATA_ROOT: data,
+    MUSE_SETTINGS_CREATED: "1",
+    DATA: data,
+    AGENT: "muse-code",
+    COLLECT_ARTIFACTS,
+  });
+
+  expect(result.exitCode).toBe(0);
+});
+
+test("Muse authoring config is outside output and Claude retains OTLP telemetry", () => {
+  const authoring = readFileSync(AUTHORING_SCRIPT, "utf8");
+  expect(authoring).toContain('MUSE_SETTINGS_ROOT="$(mktemp -d');
+  expect(authoring).toContain('XDG_CONFIG_HOME="$MUSE_SETTINGS_ROOT"');
+  expect(authoring).not.toContain('XDG_CONFIG_HOME="$OUT/muse-xdg-config"');
+  expect(authoring).toMatch(
+    /if \[ "\$AGENT" = "claude-code" \]; then[\s\S]*OTEL_EXPORTER_OTLP_ENDPOINT[\s\S]*OTEL_RESOURCE_ATTRIBUTES/,
+  );
 });
 
 test("logging proxy joins an upstream path prefix and redacts credential headers", async () => {

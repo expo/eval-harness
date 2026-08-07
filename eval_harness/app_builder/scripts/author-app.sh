@@ -88,8 +88,12 @@ case "$AGENT" in
   muse-code)
     export MUSE_INSTALL_DIR="$OUT/muse-bin"
     export MUSE_NO_MODIFY_PATH=1
-    export XDG_CONFIG_HOME="$OUT/muse-xdg-config"
+    # Settings include the Expo MCP bearer token, so they must be outside the
+    # workspace and uploaded run output even if EXIT cleanup is interrupted.
+    export MUSE_SETTINGS_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/muse-settings.${RUN_ID}.XXXXXX")"
+    export XDG_CONFIG_HOME="$MUSE_SETTINGS_ROOT"
     export XDG_DATA_HOME="$OUT/muse-xdg-data"
+    export MUSE_DATA_ROOT="$XDG_DATA_HOME"
     curl -fsSL https://dev.meta.ai/install.sh | bash >"$OUT/a-muse-install.log" 2>&1
     eval::gate ${PIPESTATUS[1]} "muse-code CLI install"
     export PATH="$MUSE_INSTALL_DIR:$PATH"
@@ -111,6 +115,8 @@ case "$AGENT" in
   claude-code)
     eval::launch_proxy "$ROOT" anthropic https://api.anthropic.com "$ANTHROPIC_PROXY_PORT" "$TELEMETRY_DIR/anthropic.jsonl"
     eval::wait_for_port "$ANTHROPIC_PROXY_PORT" && echo "  ✅ anthropic proxy on :$ANTHROPIC_PROXY_PORT"
+    eval::launch_otlp_receiver "$ROOT" "$OTLP_PORT" "$TELEMETRY_DIR/otel"
+    eval::wait_for_port "$OTLP_PORT" && echo "  ✅ OTLP receiver on :$OTLP_PORT"
     ;;
   codex)
     eval::launch_proxy "$ROOT" openai https://api.openai.com "$OPENAI_PROXY_PORT" "$TELEMETRY_DIR/openai.jsonl"
@@ -140,7 +146,8 @@ if [ "$AGENT" = "claude-code" ]; then
   export ANTHROPIC_BASE_URL="http://127.0.0.1:$ANTHROPIC_PROXY_PORT"
   export CLAUDE_CODE_ENABLE_TELEMETRY=1
   export ANTHROPIC_MODEL="$AGENT_MODEL"
-elif [ "$AGENT" = "codex" ]; then
+fi
+if [ "$AGENT" = "claude-code" ] || [ "$AGENT" = "codex" ]; then
   export OTEL_EXPORTER_OTLP_ENDPOINT="http://127.0.0.1:$OTLP_PORT"
   export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
   export OTEL_METRICS_EXPORTER=otlp OTEL_LOGS_EXPORTER=otlp OTEL_TRACES_EXPORTER=otlp
