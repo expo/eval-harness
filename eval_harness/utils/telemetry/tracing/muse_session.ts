@@ -186,6 +186,7 @@ export async function parseMuseSession(path: string): Promise<[TraceTurn[], Json
     }
 
     const isDirectSkill = record.payload_type === "agent.skill_read.observed";
+    if (!isDirectSkill && payload.kind !== "run") continue;
     const event = isDirectSkill ? payload : optionalRecord(payload.event);
     const kind = isDirectSkill ? "skill_read_observed" : event.kind;
     if (kind === "skill_read_observed" && record.durability !== undefined && record.durability !== "durable") {

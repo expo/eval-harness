@@ -76,6 +76,9 @@ eval::require_authoring_credentials() { # agent root
         echo "META_API_KEY is missing; Muse authoring requires it" >&2
         return 1
       fi
+      MUSE_API_KEY="$META_API_KEY"
+      unset META_API_KEY
+      export -n MUSE_API_KEY
       echo "META_API_KEY bound"
       ;;
     *)
@@ -92,9 +95,29 @@ eval::require_author_agent_credential() { # agent [root]
       echo "META_API_KEY must be set for Muse authoring" >&2
       return 1
     fi
+    MUSE_API_KEY="$META_API_KEY"
+    unset META_API_KEY
+    export -n MUSE_API_KEY
     return 0
   fi
   eval::require_authoring_credentials "$(eval::normalize_authoring_agent "$agent")" "$root"
+}
+
+eval::install_muse_cli() { # out_dir
+  local out="$1"
+  unset META_API_KEY
+  export -n MUSE_API_KEY
+  export MUSE_INSTALL_DIR="$out/muse-bin"
+  export MUSE_NO_MODIFY_PATH=1
+  curl -fsSL https://dev.meta.ai/install.sh | bash >"$out/a-muse-install.log" 2>&1
+  eval::gate ${PIPESTATUS[1]} "muse-code CLI install" || return $?
+  export PATH="$MUSE_INSTALL_DIR:$PATH"
+  export MUSE_NO_AUTO_UPDATE=1
+  muse --version >"$out/a-muse-version.log" 2>&1
+  eval::gate $? "muse-code CLI version" || return $?
+  MUSE_CLI_VERSION="$(head -n 1 "$out/a-muse-version.log")"
+  export MUSE_CLI_VERSION
+  printf 'MUSE_CLI_VERSION=%s\n' "$MUSE_CLI_VERSION" >>"$out/author.env"
 }
 
 # Configures Expo MCP auth for this run. mcp.expo.dev now accepts an Expo
@@ -126,10 +149,10 @@ eval::configure_expo_mcp() {
 # from $XDG_DATA_HOME/muse. Authoring binds both roots to the current run.
 eval::configure_muse_settings() { # scenario
   local scenario="$1"
-  local settings_root="${MUSE_SETTINGS_ROOT:-${XDG_CONFIG_HOME:-}}"
-  export MUSE_SETTINGS_CREATED=1
+  local settings_root="${MUSE_SETTINGS_ROOT:-}"
   if [ -z "$settings_root" ]; then
     settings_root="$(mktemp -d "${TMPDIR:-/tmp}/muse-settings.XXXXXX")" || return 1
+    export MUSE_SETTINGS_OWNED=1
   fi
   mkdir -p "$settings_root/muse" "$settings_root/data"
   export MUSE_SETTINGS_ROOT="$settings_root"
@@ -154,12 +177,12 @@ eval::configure_muse_settings() { # scenario
 }
 
 eval::cleanup_muse_settings() {
-  if [ "${MUSE_SETTINGS_CREATED:-0}" = "1" ] && [ -n "${MUSE_SETTINGS_ROOT:-}" ]; then
+  if [ "${MUSE_SETTINGS_OWNED:-0}" = "1" ] && [ -n "${MUSE_SETTINGS_ROOT:-}" ]; then
     rm -rf -- "$MUSE_SETTINGS_ROOT"
   fi
   # Session data is non-secret run evidence needed by collect_artifacts.sh;
   # only the credential-bearing settings root is removed here.
-  unset MUSE_SETTINGS_ROOT MUSE_SETTINGS_CREATED
+  unset MUSE_SETTINGS_ROOT MUSE_SETTINGS_OWNED
 }
 
 # Claude Code's Expo plugin bundles an unauthenticated MCP entry. A project-
@@ -231,9 +254,15 @@ EOF
 # PROMPT_FILE: base authoring prompt, relative to repo root. Normally resolved
 # from PROMPT_VARIANT by resolve_prompt.sh (see author-app.sh); defaulted here
 # only so this function stays callable on its own.
-eval::run_coding_agent() { # agent root workspace prd_file out_dir [model]
+eval::run_coding_agent() { # agent root workspace prd_file out_dir [model] [muse_api_key]
   local agent="$1" root="$2" workspace="$3" prd_file="$4" out="$5" model="${6:-}"
   agent="$(eval::normalize_authoring_agent "$agent")" || return $?
+  local muse_api_key=""
+  if [ "$agent" = "muse-code" ]; then
+    muse_api_key="${7:-${MUSE_API_KEY:-${META_API_KEY:-}}}"
+    unset META_API_KEY
+    export -n muse_api_key
+  fi
   local scenario="${SCENARIO:-skills_available_unmentioned}"
   local skills_enabled=1
   [ "$scenario" = "skills_unavailable" ] && skills_enabled=0
@@ -318,7 +347,7 @@ eval::run_coding_agent() { # agent root workspace prd_file out_dir [model]
     local muse_data_root="${MUSE_DATA_ROOT:-}"
     local rc
     if [ -n "$muse_settings_root" ]; then
-      ( cd "$workspace" && printf '%s\n' "$META_API_KEY" | ( unset META_API_KEY; \
+      ( cd "$workspace" && printf '%s\n' "$muse_api_key" | ( unset META_API_KEY MUSE_API_KEY muse_api_key; \
           XDG_CONFIG_HOME="$muse_settings_root" XDG_DATA_HOME="$muse_data_root" \
           MUSE_NO_AUTO_UPDATE=1 $TO muse exec --json --api-key-stdin --provider meta \
             --model "${model:-muse-spark-1.2}" --workspace "$workspace" --yolo \
@@ -326,7 +355,7 @@ eval::run_coding_agent() { # agent root workspace prd_file out_dir [model]
         2>&1 | tee "$out/c-agent.log"
       rc=${PIPESTATUS[0]}
     else
-      ( cd "$workspace" && printf '%s\n' "$META_API_KEY" | ( unset META_API_KEY; \
+      ( cd "$workspace" && printf '%s\n' "$muse_api_key" | ( unset META_API_KEY MUSE_API_KEY muse_api_key; \
           MUSE_NO_AUTO_UPDATE=1 $TO muse exec --json --api-key-stdin --provider meta \
             --model "${model:-muse-spark-1.2}" --workspace "$workspace" --yolo \
             --no-foreign-personal-context --base-url "http://127.0.0.1:${META_PROXY_PORT:-8084}" "$prompt" ) ) \

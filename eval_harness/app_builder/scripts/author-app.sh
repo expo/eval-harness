@@ -96,23 +96,14 @@ case "$AGENT" in
     codex --version >/dev/null 2>&1; eval::gate $? "codex CLI install"
     ;;
   muse-code)
-    export MUSE_INSTALL_DIR="$OUT/muse-bin"
-    export MUSE_NO_MODIFY_PATH=1
     # Settings include the Expo MCP bearer token, so they must be outside the
     # workspace and uploaded run output even if EXIT cleanup is interrupted.
     export MUSE_SETTINGS_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/muse-settings.${RUN_ID}.XXXXXX")"
+    export MUSE_SETTINGS_OWNED=1
     export XDG_CONFIG_HOME="$MUSE_SETTINGS_ROOT"
     export XDG_DATA_HOME="$OUT/muse-xdg-data"
     export MUSE_DATA_ROOT="$XDG_DATA_HOME"
-    curl -fsSL https://dev.meta.ai/install.sh | bash >"$OUT/a-muse-install.log" 2>&1
-    eval::gate ${PIPESTATUS[1]} "muse-code CLI install"
-    export PATH="$MUSE_INSTALL_DIR:$PATH"
-    export MUSE_NO_AUTO_UPDATE=1
-    muse --version >"$OUT/a-muse-version.log" 2>&1
-    eval::gate $? "muse-code CLI version"
-    MUSE_CLI_VERSION="$(head -n 1 "$OUT/a-muse-version.log")"
-    export MUSE_CLI_VERSION
-    printf 'MUSE_CLI_VERSION=%s\n' "$MUSE_CLI_VERSION" >>"$OUT/author.env"
+    eval::install_muse_cli "$OUT"
     ;;
 esac
 
@@ -165,7 +156,7 @@ if [ "$AGENT" = "claude-code" ] || [ "$AGENT" = "codex" ]; then
   export OTEL_RESOURCE_ATTRIBUTES="run.id=$RUN_ID,phase=agent-build,service.name=eval-harness"
 fi
 
-eval::run_coding_agent "$AGENT" "$ROOT" "$WORKSPACE" "$EVAL/$PRD" "$OUT" "$AGENT_MODEL"
+eval::run_coding_agent "$AGENT" "$ROOT" "$WORKSPACE" "$EVAL/$PRD" "$OUT" "$AGENT_MODEL" "${MUSE_API_KEY:-}"
 
 if [ ! -f "$WORKSPACE/package.json" ]; then
   echo "  ❌ coding agent did not produce package.json; downstream eval will collect diagnostics only"
