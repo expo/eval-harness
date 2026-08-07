@@ -55,6 +55,12 @@ function tryParse(s) {
   }
 }
 
+function upstreamRequestPath(requestUrl) {
+  const prefix = UPSTREAM.pathname.replace(/\/+$/, "");
+  const suffix = requestUrl.startsWith("/") ? requestUrl : `/${requestUrl}`;
+  return `${prefix}${suffix}` || "/";
+}
+
 // Pull token usage out of a response. Handles both non-stream JSON
 // (body.usage) and SSE streams (scan each `data:` event for a usage object;
 // keep the last one — Anthropic's message_delta and OpenAI's response.completed
@@ -98,7 +104,11 @@ const server = http.createServer((req, res) => {
         hostname: UPSTREAM.hostname,
         port: UPSTREAM.port || 443,
         method: req.method,
-        path: req.url,
+        // `new URL(req.url, UPSTREAM)` would treat a leading slash as an
+        // absolute upstream path and drop UPSTREAM.pathname. Keep a provider
+        // prefix such as Meta's /v1 while preserving the existing root-origin
+        // behavior for Anthropic and OpenAI.
+        path: upstreamRequestPath(req.url || "/"),
         headers,
       },
       (upRes) => {
