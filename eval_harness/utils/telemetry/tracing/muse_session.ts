@@ -34,7 +34,6 @@ type TurnState = {
   step: TraceStep | undefined;
   toolsById: Map<unknown, ToolCall>;
   pendingResults: Map<unknown, { output: unknown; error: unknown }>;
-  observedSkills: Set<string>;
 };
 
 function optionalRecord(value: unknown): JsonRecord {
@@ -146,6 +145,7 @@ export async function parseMuseSession(path: string): Promise<[TraceTurn[], Json
   const metadata: JsonRecord = {};
   const turns: TraceTurn[] = [];
   const active = new Map<string, TurnState>();
+  const observedSkills = new Set<string>();
   let turnIndex = 0;
 
   const start = (runId: unknown, prompt: unknown): TurnState => {
@@ -163,7 +163,6 @@ export async function parseMuseSession(path: string): Promise<[TraceTurn[], Json
       step: undefined,
       toolsById: new Map(),
       pendingResults: new Map(),
-      observedSkills: new Set(),
     };
     active.set(key, state);
     return state;
@@ -269,8 +268,8 @@ export async function parseMuseSession(path: string): Promise<[TraceTurn[], Json
 
     if (kind === "skill_read_observed") {
       const skillId = typeof event.skill_id === "string" ? event.skill_id : "";
-      if (skillId === "" || state.observedSkills.has(skillId)) continue;
-      state.observedSkills.add(skillId);
+      if (skillId === "" || observedSkills.has(skillId)) continue;
+      observedSkills.add(skillId);
       ensureStep(state).tool_calls.push({
         call_id: `skill:${skillId}`,
         name: "Skill",
@@ -360,7 +359,7 @@ export async function reconstructMuseSessions(
   options: MuseReconstructionOptions,
 ): Promise<JsonRecord & { sessions: JsonRecord[] }> {
   const sinceMtime = options.sinceMtime ?? 0;
-  const source = options.source ?? "muse-code";
+  const source = options.source ?? "muse-code-authoring";
   const runId = options.runId ?? null;
   const sessionName = options.sessionName ?? null;
   const sessions: JsonRecord[] = [];
@@ -428,7 +427,7 @@ function parseArguments(args: string[]): ParsedArguments | "help" {
     sinceMtime: 0,
     braintrust: false,
     runId: null,
-    source: process.env.TRACE_SOURCE ?? "muse-code",
+    source: process.env.TRACE_SOURCE ?? "muse-code-authoring",
     sessionName: process.env.TRACE_SESSION_NAME ?? null,
   };
   for (let index = 0; index < args.length; index += 1) {
