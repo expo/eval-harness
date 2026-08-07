@@ -1048,6 +1048,64 @@ class SkillEvalCoreTests(unittest.TestCase):
 
         self.assertTrue(result.passed)
 
+    def test_tsconfig_path_alias_check_survives_expo_default_template_shape(self):
+        # Regression: the check used to run a string-blind JS comment stripper
+        # over the JSON. `"@/*"` ends in the two characters that open a block
+        # comment and `"**/*.ts"` contains the two that close one, so
+        # everything between was deleted, json.loads failed, the error was
+        # swallowed, and the check reported `failed` for every standard Expo
+        # app -- create-expo-app's own template ships exactly this shape.
+        # The older test above passes even with the bug present, because
+        # without an `include` glob there is no `*/` to close the match.
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "tsconfig.json").write_text(
+                '{\n'
+                '  "extends": "expo/tsconfig.base",\n'
+                '  "compilerOptions": {\n'
+                '    "paths": { "@/*": ["./src/*"], "@/assets/*": ["./assets/*"] }\n'
+                '  },\n'
+                '  "include": ["**/*.ts", "**/*.tsx", ".expo/types/**/*.ts"]\n'
+                '}\n'
+            )
+            checks_dir = _write_checks_dir(
+                Path(td) / "checks",
+                checks=[{"id": "alias", "category": "structural", "kind": "tsconfig_path_alias", "target": "@/*"}],
+                skill_map={"expo-router": ["alias"]},
+            )
+
+            checks, _ = resolve_checks_for_skills(["expo-router"], checks_dir)
+            result = run_checks(checks, app)[0]
+
+        self.assertTrue(result.passed, result.evidence)
+
+    def test_tsconfig_path_alias_check_still_ignores_real_comments(self):
+        # tsconfig.json is JSONC -- comments are legal and must still be
+        # stripped, just not the ones that only look like comments inside
+        # string literals.
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td)
+            (app / "tsconfig.json").write_text(
+                '{\n'
+                '  // the alias both expo-router and expo-project-structure prefer\n'
+                '  "compilerOptions": {\n'
+                '    /* block comment */\n'
+                '    "paths": { "@/*": ["./src/*"] }\n'
+                '  },\n'
+                '  "include": ["**/*.ts"]\n'
+                '}\n'
+            )
+            checks_dir = _write_checks_dir(
+                Path(td) / "checks",
+                checks=[{"id": "alias", "category": "structural", "kind": "tsconfig_path_alias", "target": "@/*"}],
+                skill_map={"expo-router": ["alias"]},
+            )
+
+            checks, _ = resolve_checks_for_skills(["expo-router"], checks_dir)
+            result = run_checks(checks, app)[0]
+
+        self.assertTrue(result.passed, result.evidence)
+
     def test_tsconfig_path_alias_check_fails_when_alias_absent(self):
         with tempfile.TemporaryDirectory() as td:
             app = Path(td)
