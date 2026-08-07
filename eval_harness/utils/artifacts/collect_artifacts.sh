@@ -86,6 +86,8 @@ collect_author_trace() {
       --session-name "Codex Authoring Session" $BT_FLAG \
       >"$OUT/collect-author-trace.log" 2>&1 || echo "  ⚠️  codex author trace reconstruction failed (see collect-author-trace.log)"
     _keep_better_trace "$tmp" "$dest"
+  elif [ "$AGENT" = "muse-code" ]; then
+    echo "  ℹ️  Muse author trace reconstruction is not implemented; preserving raw Meta proxy telemetry"
   else
     local dest="$BUNDLE/telemetry/traces/claude-code-authoring.json" tmp="$BUNDLE/telemetry/traces/claude-code-authoring.json.tmp"
     run_trace_ts "$ROOT/eval_harness/utils/telemetry/tracing/cc_transcript.ts" \
@@ -144,7 +146,9 @@ fi
 # --- 3. telemetry: proxy I/O + OTLP exports ---
 [ -f "$TELEMETRY_DIR/anthropic.jsonl" ] && cp "$TELEMETRY_DIR/anthropic.jsonl" "$BUNDLE/telemetry/" 2>/dev/null
 [ -f "$TELEMETRY_DIR/openai.jsonl" ] && cp "$TELEMETRY_DIR/openai.jsonl" "$BUNDLE/telemetry/" 2>/dev/null
+[ -f "$TELEMETRY_DIR/meta.jsonl" ] && cp "$TELEMETRY_DIR/meta.jsonl" "$BUNDLE/telemetry/" 2>/dev/null
 [ -d "$TELEMETRY_DIR/otel" ] && cp -R "$TELEMETRY_DIR/otel" "$BUNDLE/telemetry/otel" 2>/dev/null
+[ -d "${MUSE_DATA_ROOT:-}/muse" ] && cp -R "$MUSE_DATA_ROOT/muse" "$BUNDLE/telemetry/muse" 2>/dev/null
 
 # --- 4. evaluator traces (all current-run plans) + result.json ---
 find "$EVAL/traces" -mindepth 1 -maxdepth 1 -type d -print 2>/dev/null | while IFS= read -r trace_dir; do
@@ -177,7 +181,7 @@ cp "$OUT"/*.log "$BUNDLE/logs/" 2>/dev/null
 GIT_SHA="$(cd "$ROOT" && git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 RESULT_JSON="$OUT/result.json" RUN_ID="$RUN_ID" AGENT="$AGENT" GIT_SHA="$GIT_SHA" \
 PRD="${PRD:-}" TEST_PLAN="${TEST_PLAN:-}" \
-AGENT_MODEL="${AGENT_MODEL:-}" METRO_MODE="${METRO_MODE:-}" \
+AGENT_MODEL="${AGENT_MODEL:-}" MUSE_CLI_VERSION="${MUSE_CLI_VERSION:-}" METRO_MODE="${METRO_MODE:-}" \
 EVAL_APP_BUNDLE_ID="${EVAL_APP_BUNDLE_ID:-}" EXPO_MCP_AUTH_STATUS="${EXPO_MCP_AUTH_STATUS:-}" \
 SCENARIO="${SCENARIO:-}" PROMPT_VARIANT="${PROMPT_VARIANT:-}" PROMPT_FILE="${PROMPT_FILE:-}" \
 "$PY" - "$BUNDLE/manifest.json" <<'PYEOF'
@@ -217,6 +221,7 @@ manifest = {
     "git_sha": os.environ.get("GIT_SHA"),
     "agent": os.environ.get("AGENT"),
     "agent_model": preferred("AGENT_MODEL", "agent_model"),
+    "muse_cli_version": preferred("MUSE_CLI_VERSION", "muse_cli_version"),
     "metro_mode": preferred("METRO_MODE", "metro_mode", "dev-build"),
     "eval_app_bundle_id": preferred("EVAL_APP_BUNDLE_ID", "eval_app_bundle_id"),
     "test_plan": preferred("TEST_PLAN", "test_plan") or "auto-resolved from dataset/prd_test_plans.json",
@@ -231,6 +236,8 @@ manifest = {
         "app": "app/",
         "proxy_anthropic": "telemetry/anthropic.jsonl",
         "proxy_openai": "telemetry/openai.jsonl",
+        "proxy_meta": "telemetry/meta.jsonl",
+        "muse_sessions": "telemetry/muse/",
         "otel": "telemetry/otel/",
         "agent_traces": "telemetry/traces/",
         "eval_traces": "eval/traces/",
