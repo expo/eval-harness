@@ -3,7 +3,7 @@ import {
   readFileSync,
   readdirSync,
 } from "node:fs";
-import { extname, join, relative } from "node:path";
+import path from "node:path";
 
 import { readJson, roundRatio } from "../utils.ts";
 import { registerCodeChecks } from "./code_checks.ts";
@@ -146,16 +146,23 @@ export class AppTree {
 
   globAny(patterns: string[]): string[] {
     const matches: string[] = [];
+    const seen = new Set<string>();
     for (const pattern of patterns) {
-      const glob = new Bun.Glob(pattern);
-      const patternMatches = [...glob.scanSync({
-        cwd: this.root,
-        dot: true,
-        onlyFiles: false,
-      })].sort();
-      for (const path of patternMatches) {
-        if (hasSkippedPart(path)) continue;
-        matches.push(join(this.root, path));
+      const scanPatterns = pattern.endsWith("/**")
+        ? [pattern.slice(0, -3), pattern]
+        : [pattern];
+      for (const scanPattern of scanPatterns) {
+        const glob = new Bun.Glob(scanPattern);
+        const patternMatches = [...glob.scanSync({
+          cwd: this.root,
+          dot: true,
+          onlyFiles: false,
+        })].sort();
+        for (const relativePath of patternMatches) {
+          if (hasSkippedPart(relativePath) || seen.has(relativePath)) continue;
+          seen.add(relativePath);
+          matches.push(path.join(this.root, relativePath));
+        }
       }
     }
     return matches;
@@ -165,19 +172,20 @@ export class AppTree {
     const files = new Map<string, string>();
     const visit = (directory: string): void => {
       for (const entry of readdirSync(directory, { withFileTypes: true }).sort(
-        (left, right) => left.name.localeCompare(right.name),
+        (left, right) =>
+          left.name < right.name ? -1 : left.name > right.name ? 1 : 0,
       )) {
-        const absolute = join(directory, entry.name);
-        const path = relative(this.root, absolute);
+        const absolute = path.join(directory, entry.name);
+        const relativePath = path.relative(this.root, absolute);
         if (entry.isDirectory()) {
           if (!SKIP_DIR_PARTS.has(entry.name)) visit(absolute);
           continue;
         }
         if (!entry.isFile()) continue;
-        if (!SOURCE_SUFFIXES.has(extname(entry.name))) continue;
-        if (SKIP_FILENAMES.has(entry.name) || hasSkippedPart(path)) continue;
+        if (!SOURCE_SUFFIXES.has(path.extname(entry.name))) continue;
+        if (SKIP_FILENAMES.has(entry.name) || hasSkippedPart(relativePath)) continue;
         try {
-          files.set(path, FATAL_UTF8_DECODER.decode(readFileSync(absolute)));
+          files.set(relativePath, FATAL_UTF8_DECODER.decode(readFileSync(absolute)));
         } catch (error) {
           if (error instanceof TypeError) continue;
           throw error;
@@ -214,9 +222,9 @@ export function register(
 }
 
 export function loadChecksData(checksDir: string): Map<string, Check> {
-  const path = join(checksDir, "checks_data.json");
-  if (!existsSync(path)) return new Map();
-  const data = readJson<{ checks?: CheckDefinition[] }>(path);
+  const checksPath = path.join(checksDir, "checks_data.json");
+  if (!existsSync(checksPath)) return new Map();
+  const data = readJson<{ checks?: CheckDefinition[] }>(checksPath);
   const result = new Map<string, Check>();
   for (const entry of data.checks ?? []) {
     const check: Check = {
@@ -233,9 +241,9 @@ export function loadChecksData(checksDir: string): Map<string, Check> {
 }
 
 export function loadSkillMap(checksDir: string): Record<string, string[]> {
-  const path = join(checksDir, "skill_map.json");
-  if (!existsSync(path)) return {};
-  const raw = readJson<Record<string, unknown>>(path);
+  const skillMapPath = path.join(checksDir, "skill_map.json");
+  if (!existsSync(skillMapPath)) return {};
+  const raw = readJson<Record<string, unknown>>(skillMapPath);
   return Object.fromEntries(
     Object.entries(raw)
       .filter(([key]) => !key.startsWith("_"))
@@ -418,7 +426,11 @@ function checkPathExists(check: Check, appTree: AppTree): CheckResult {
   const patterns = (Array.isArray(check.target) ? check.target : [check.target]).map(String);
   const matches = appTree.globAny(patterns);
   if (matches.length > 0) {
-    return result(check, true, `found ${relative(appTree.root, matches[0] ?? appTree.root)}`);
+    return result(
+      check,
+      true,
+      `found ${path.relative(appTree.root, matches[0] ?? appTree.root)}`,
+    );
   }
   return result(check, false, `no path matched any of ${pyRepr(patterns)}`);
 }
@@ -430,7 +442,7 @@ function checkPathAbsent(check: Check, appTree: AppTree): CheckResult {
     return result(
       check,
       false,
-      `forbidden path exists: ${relative(appTree.root, matches[0] ?? appTree.root)}`,
+      `forbidden path exists: ${path.relative(appTree.root, matches[0] ?? appTree.root)}`,
     );
   }
   return result(check, true, `no path matched any of ${pyRepr(patterns)}`);
@@ -438,7 +450,7 @@ function checkPathAbsent(check: Check, appTree: AppTree): CheckResult {
 
 function checkPackageDependency(check: Check, appTree: AppTree): CheckResult {
   const target = String(check.target);
-  const packagePath = join(appTree.root, "package.json");
+  const packagePath = path.join(appTree.root, "package.json");
   if (!existsSync(packagePath)) return result(check, false, "package.json is missing");
   const data = readJson<{
     dependencies?: Record<string, string>;
@@ -459,10 +471,10 @@ function checkPackageDependency(check: Check, appTree: AppTree): CheckResult {
 function checkTsconfigPathAlias(check: Check, appTree: AppTree): CheckResult {
   const target = String(check.target);
   for (const name of ["tsconfig.json", "jsconfig.json"]) {
-    const path = join(appTree.root, name);
-    if (!existsSync(path)) continue;
+    const configPath = path.join(appTree.root, name);
+    if (!existsSync(configPath)) continue;
     try {
-      const data = JSON.parse(stripComments(readFileSync(path, "utf8"))) as {
+      const data = JSON.parse(stripComments(readFileSync(configPath, "utf8"))) as {
         compilerOptions?: { paths?: Record<string, unknown> };
       };
       if (Object.hasOwn(data.compilerOptions?.paths ?? {}, target)) {

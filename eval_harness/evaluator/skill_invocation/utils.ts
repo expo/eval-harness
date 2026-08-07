@@ -1,9 +1,12 @@
 import {
   existsSync,
   lstatSync,
+  mkdtempSync,
   mkdirSync,
+  renameSync,
   readdirSync,
   readFileSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
@@ -31,14 +34,32 @@ export function readJson<T>(path: string): T {
 }
 
 /**
- * Write readable JSON whose compatibility contract is the parsed JSON value.
+ * Write readable JSON with Python-compatible deterministic key ordering.
  *
  * Python and JavaScript can spell the same JSON number differently (for
  * example, `1.0` and `1`). Callers and differential tests therefore compare
- * decoded objects, not file bytes or object-key order.
+ * decoded objects rather than file bytes, while retaining sorted keys for
+ * stable diffs and reports.
  */
 export function writeJson(data: JsonObject, path: string): void {
-  writeFileSync(path, JSON.stringify(data, null, 2), "utf8");
+  writeFileSync(path, JSON.stringify(data, sortedJsonKeys(data), 2), "utf8");
+}
+
+function sortedJsonKeys(data: JsonValue): string[] {
+  const keys = new Set<string>();
+  const visit = (value: JsonValue): void => {
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item);
+      return;
+    }
+    if (value === null || typeof value !== "object") return;
+    for (const [key, item] of Object.entries(value)) {
+      keys.add(key);
+      visit(item);
+    }
+  };
+  visit(data);
+  return [...keys].sort();
 }
 
 export function loadPrdSkills(path: string): Record<string, string[]> {
@@ -58,17 +79,31 @@ export function appNameFromPrd(prdPath: string): string | null {
 }
 
 export function unpackArtifact(artifactPath: string, destDir: string): string {
-  mkdirSync(destDir, { recursive: true });
   if (statSync(artifactPath).isDirectory()) {
     const archive = firstArchive(artifactPath);
     if (archive !== null) {
-      extractTar(archive, destDir);
+      replaceWithExtractedArchive(archive, destDir);
       return destDir;
     }
     return artifactPath;
   }
-  extractTar(artifactPath, destDir);
+  replaceWithExtractedArchive(artifactPath, destDir);
   return destDir;
+}
+
+function replaceWithExtractedArchive(path: string, destDir: string): void {
+  const destRoot = resolve(destDir);
+  const parent = dirname(destRoot);
+  mkdirSync(parent, { recursive: true });
+  const stagingDir = mkdtempSync(join(parent, `.${basename(destRoot)}-extract-`));
+  try {
+    extractTar(path, stagingDir);
+    rmSync(destRoot, { recursive: true, force: true });
+    renameSync(stagingDir, destRoot);
+  } catch (error) {
+    rmSync(stagingDir, { recursive: true, force: true });
+    throw error;
+  }
 }
 
 export function firstArchive(path: string): string | null {
@@ -86,8 +121,8 @@ export function extractTar(path: string, destDir: string): void {
   if (readdirSync(destRoot).length > 0) {
     throw new Error(`Refusing to extract into non-empty destination: ${destRoot}`);
   }
+  const entries: TarEntryMetadata[] = [];
   try {
-    const entries: TarEntryMetadata[] = [];
     listArchive({
       file: path,
       sync: true,
@@ -100,7 +135,18 @@ export function extractTar(path: string, destDir: string): void {
         });
       },
     });
-    const archiveSymlinkPaths = validateTarEntries(entries, destRoot);
+  } catch (error) {
+    throw new Error(
+      `Failed to read tar archive ${basename(path)}: ${errorDetail(error)}`,
+    );
+  }
+  let archiveSymlinkPaths: Set<string>;
+  try {
+    archiveSymlinkPaths = validateTarEntries(entries, destRoot);
+  } catch (error) {
+    throw unsafeTarError(path, error);
+  }
+  try {
     extractArchive({
       file: path,
       cwd: destRoot,
@@ -111,9 +157,23 @@ export function extractTar(path: string, destDir: string): void {
         validateTarEntry(entryPath, entry, destRoot, archiveSymlinkPaths),
     });
   } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
-    throw new Error(`Refusing to extract unsafe tar archive ${basename(path)}: ${detail}`);
+    if (error instanceof UnsafeTarEntryError) throw unsafeTarError(path, error);
+    throw new Error(
+      `Failed to extract tar archive ${basename(path)}: ${errorDetail(error)}`,
+    );
   }
+}
+
+class UnsafeTarEntryError extends Error {}
+
+function errorDetail(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function unsafeTarError(path: string, error: unknown): Error {
+  return new Error(
+    `Refusing to extract unsafe tar archive ${basename(path)}: ${errorDetail(error)}`,
+  );
 }
 
 type TarEntryMetadata = {
@@ -144,7 +204,7 @@ function validateTarEntry(
   archiveSymlinkPaths: ReadonlySet<string>,
 ): boolean {
   if (entry === null || typeof entry !== "object") {
-    throw new Error(`unsafe tar metadata for ${entryPath}`);
+    throw new UnsafeTarEntryError(`unsafe tar metadata for ${entryPath}`);
   }
   const tarEntry = entry as { type?: string; linkpath?: string };
   const target = resolve(destRoot, entryPath);
@@ -157,10 +217,10 @@ function validateTarEntry(
     archiveSymlinkPaths,
   );
   if (isAbsolute(entryPath) || entryPath.split(/[\\/]/u).includes("..")) {
-    throw new Error(`unsafe tar member: ${entryPath}`);
+    throw new UnsafeTarEntryError(`unsafe tar member: ${entryPath}`);
   }
   if (tarEntry.type === undefined || !SAFE_TAR_ENTRY_TYPES.has(tarEntry.type)) {
-    throw new Error(`unsafe tar member type for ${entryPath}`);
+    throw new UnsafeTarEntryError(`unsafe tar member type for ${entryPath}`);
   }
   if (typeof tarEntry.linkpath !== "string") return true;
   if (tarEntry.type === "SymbolicLink") {
@@ -190,10 +250,14 @@ function assertNoArchiveSymlinkParent(
   let current = dirname(path);
   while (current !== root) {
     if (archiveSymlinkPaths.has(current)) {
-      throw new Error(`unsafe tar member through archive symlink: ${entryPath}`);
+      throw new UnsafeTarEntryError(
+        `unsafe tar member through archive symlink: ${entryPath}`,
+      );
     }
     const parent = dirname(current);
-    if (parent === current) throw new Error(`unsafe tar member: ${entryPath}`);
+    if (parent === current) {
+      throw new UnsafeTarEntryError(`unsafe tar member: ${entryPath}`);
+    }
     current = parent;
   }
 }
@@ -202,11 +266,13 @@ function assertNoSymlinkParent(path: string, root: string, label: string): void 
   let current = dirname(path);
   while (true) {
     if (existsSync(current) && lstatSync(current).isSymbolicLink()) {
-      throw new Error(`unsafe ${label}: symbolic-link parent ${current}`);
+      throw new UnsafeTarEntryError(
+        `unsafe ${label}: symbolic-link parent ${current}`,
+      );
     }
     if (current === root) return;
     const parent = dirname(current);
-    if (parent === current) throw new Error(`unsafe ${label}`);
+    if (parent === current) throw new UnsafeTarEntryError(`unsafe ${label}`);
     current = parent;
   }
 }
@@ -216,7 +282,7 @@ function assertPathWithin(path: string, root: string, label: string): void {
   if (fromRoot === "" || (!fromRoot.startsWith(`..${sep}`) && fromRoot !== ".." && !isAbsolute(fromRoot))) {
     return;
   }
-  throw new Error(`unsafe ${label}`);
+  throw new UnsafeTarEntryError(`unsafe ${label}`);
 }
 
 export function flattenStrings(value: unknown): string[] {

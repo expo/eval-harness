@@ -985,6 +985,32 @@ class SkillEvalCoreTests(unittest.TestCase):
         self.assertEqual(layout.trace_path.name, "claude-authoring.json")
         self.assertIsNone(layout.result_path)
 
+    def test_unpack_artifact_replaces_existing_destination_on_rerun(self):
+        """Regression: a stable EAS output path can be reused by a later run.
+
+        Oracle: the second archive is the complete source of destination state.
+        Catches: non-empty destination failures and stale files from prior runs.
+        """
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            source = root / "source"
+            source.mkdir()
+            archive_path = root / "authored-app.tar.gz"
+            destination = root / "unpacked"
+            (source / "current.txt").write_text("first")
+            with tarfile.open(archive_path, "w:gz") as archive:
+                archive.add(source / "current.txt", arcname="current.txt")
+            unpack_artifact(archive_path, destination)
+            (destination / "stale.txt").write_text("left by the first run")
+
+            (source / "current.txt").write_text("second")
+            with tarfile.open(archive_path, "w:gz") as archive:
+                archive.add(source / "current.txt", arcname="current.txt")
+            unpack_artifact(archive_path, destination)
+
+            self.assertEqual((destination / "current.txt").read_text(), "second")
+            self.assertFalse((destination / "stale.txt").exists())
+
     def test_unpack_artifact_rejects_path_traversal_tarball(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -1142,9 +1168,9 @@ class SkillEvalCoreTests(unittest.TestCase):
             with tarfile.open(tar_path, "w") as archive:
                 archive.addfile(member, io.BytesIO(payload))
 
-            with self.assertRaises(ValueError):
-                unpack_artifact(tar_path, dest)
+            unpack_artifact(tar_path, dest)
             self.assertEqual(outside.read_text(), "outside remains unchanged")
+            self.assertEqual((dest / "file.txt").read_text(), "replacement")
 
     def test_analyze_artifacts_reports_author_only_outcome_pending(self):
         with tempfile.TemporaryDirectory() as td:

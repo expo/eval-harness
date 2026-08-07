@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import shutil
 import tarfile
+import tempfile
 from typing import Any
 
 
@@ -36,15 +38,36 @@ def unpack_artifact(artifact_path: Path | str, dest_dir: Path | str) -> Path:
 
     artifact_path = Path(artifact_path)
     dest_dir = Path(dest_dir)
-    dest_dir.mkdir(parents=True, exist_ok=True)
     if artifact_path.is_dir():
         archive = first_archive(artifact_path)
         if archive:
-            extract_tar(archive, dest_dir)
+            _replace_with_extracted_archive(archive, dest_dir)
             return dest_dir
         return artifact_path
-    extract_tar(artifact_path, dest_dir)
+    _replace_with_extracted_archive(artifact_path, dest_dir)
     return dest_dir
+
+
+def _replace_with_extracted_archive(path: Path, dest_dir: Path) -> None:
+    """Extract safely, then replace the evaluator-owned destination."""
+
+    dest_dir.parent.mkdir(parents=True, exist_ok=True)
+    staging_dir = Path(
+        tempfile.mkdtemp(
+            prefix=f".{dest_dir.name}-extract-",
+            dir=dest_dir.parent,
+        )
+    )
+    try:
+        extract_tar(path, staging_dir)
+        if dest_dir.is_symlink() or dest_dir.is_file():
+            dest_dir.unlink()
+        elif dest_dir.exists():
+            shutil.rmtree(dest_dir)
+        staging_dir.replace(dest_dir)
+    except BaseException:
+        shutil.rmtree(staging_dir, ignore_errors=True)
+        raise
 
 
 def first_archive(path: Path) -> Path | None:

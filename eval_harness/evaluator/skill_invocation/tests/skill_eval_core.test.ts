@@ -371,7 +371,7 @@ test("[REGRESSION] PRD app names preserve Python path behavior", () => {
   expect(appNameFromPrd("some/other/path.txt")).toBeNull();
 });
 
-test("[REGRESSION] JSON helpers preserve semantic values and PRD skill arrays", () => {
+test("[REGRESSION] JSON helpers preserve sorted Python key order and semantic values", () => {
   withTempDir((root) => {
     const path = join(root, "prd_skills.json");
     writeJson(
@@ -385,8 +385,18 @@ test("[REGRESSION] JSON helpers preserve semantic values and PRD skill arrays", 
       path,
     );
 
-    // Oracle: parsed values. Python and JavaScript may use different but
-    // equivalent number spellings, Unicode escapes, and object-key order.
+    // Oracle: Python write_json uses sort_keys=True at every object level.
+    // Number spellings and Unicode escaping can differ without changing the
+    // decoded value, but deterministic key order is part of the diff surface.
+    const written = JSON.parse(readFileSync(path, "utf8")) as Record<
+      string,
+      unknown
+    >;
+    expect(Object.keys(written)).toEqual(["Z", "alpha", "numeric", "zebra", "é"]);
+    expect(Object.keys(written.alpha as Record<string, unknown>)).toEqual([
+      "nested_a",
+      "nested_z",
+    ]);
     expect(readJson<Record<string, unknown>>(path)).toEqual({
       zebra: ["expo-ui"],
       alpha: { nested_z: 2, nested_a: 1 },
@@ -839,6 +849,54 @@ print(json.dumps([str(path) for path in AppTree(Path(sys.argv[1])).files]))
   },
 );
 
+test("[REGRESSION] source files use locale-independent code-point order", () => {
+  withTempDir((root) => {
+    writeAppFiles(root, {
+      "app/_layout.tsx": "export default null;\n",
+      "app/(tabs).tsx": "export default null;\n",
+      "app/+not-found.tsx": "export default null;\n",
+      "app/index.tsx": "export default null;\n",
+    });
+
+    expect([...new AppTree(root).files.keys()]).toEqual([
+      "app/(tabs).tsx",
+      "app/+not-found.tsx",
+      "app/_layout.tsx",
+      "app/index.tsx",
+    ]);
+  });
+});
+
+test("[DIFF] an empty __tests__ directory violates the path-absent check", () => {
+  withTempDir((root) => {
+    mkdirSync(join(root, "app", "__tests__"), { recursive: true });
+    const checksDir = writeChecksDir(
+      root,
+      [
+        {
+          id: "no-dunder-tests",
+          category: "structural",
+          kind: "path_absent",
+          target: ["**/__tests__/**"],
+        },
+      ],
+      { "expo-project-structure": ["no-dunder-tests"] },
+    );
+    const { checks } = resolveChecksForSkills(
+      ["expo-project-structure"],
+      checksDir,
+    );
+
+    expect(runChecks(checks, root)).toMatchObject([
+      {
+        passed: false,
+        evidence: "forbidden path exists: app/__tests__",
+        status: "failed",
+      },
+    ]);
+  });
+});
+
 test("[REGRESSION] valid compressed artifacts unpack into the destination", () => {
   withTempDir((root) => {
     const source = join(root, "source");
@@ -853,6 +911,48 @@ test("[REGRESSION] valid compressed artifacts unpack into the destination", () =
 
     expect(unpackArtifact(archive, destination)).toBe(destination);
     expect(existsSync(join(destination, "bundle", "manifest.json"))).toBe(true);
+  });
+});
+
+test("[REGRESSION] rerunning artifact unpack replaces the prior destination", () => {
+  withTempDir((root) => {
+    const source = join(root, "source");
+    const archive = join(root, "artifact.tar.gz");
+    const destination = join(root, "destination");
+    mkdirSync(source);
+    writeFileSync(join(source, "current.txt"), "first");
+    createArchive(
+      { file: archive, cwd: source, sync: true, gzip: true },
+      ["current.txt"],
+    );
+    unpackArtifact(archive, destination);
+    writeFileSync(join(destination, "stale.txt"), "left by the first run");
+
+    writeFileSync(join(source, "current.txt"), "second");
+    createArchive(
+      { file: archive, cwd: source, sync: true, gzip: true },
+      ["current.txt"],
+    );
+    expect(unpackArtifact(archive, destination)).toBe(destination);
+
+    expect(readFileSync(join(destination, "current.txt"), "utf8")).toBe(
+      "second",
+    );
+    expect(existsSync(join(destination, "stale.txt"))).toBe(false);
+  });
+});
+
+test("[REGRESSION] corrupt archives are not reported as security violations", () => {
+  withTempDir((root) => {
+    const archive = join(root, "corrupt.tar");
+    writeFileSync(archive, "this is not a tar archive");
+
+    expect(() => extractTar(archive, join(root, "destination"))).toThrow(
+      "Failed to read tar archive corrupt.tar",
+    );
+    expect(() => extractTar(archive, join(root, "other-destination"))).not.toThrow(
+      /unsafe/u,
+    );
   });
 });
 
@@ -1217,6 +1317,7 @@ test.skipIf(PYTHON === null)(
     // must match exactly while both implementations coexist.
     withTempDir((root) => {
       mkdirSync(join(root, "app", "api"), { recursive: true });
+      mkdirSync(join(root, "app", "__tests__"));
       mkdirSync(join(root, "components"));
       mkdirSync(join(root, "targets", "clip"), { recursive: true });
       mkdirSync(join(root, "public", ".well-known"), { recursive: true });
