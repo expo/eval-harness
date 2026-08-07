@@ -92,20 +92,28 @@ EOF
 # install/lookup entirely and loads the plugin via `--plugin-dir` from this
 # local path instead -- used by the skills-repo CI integration so a PR's own
 # proposed skill changes get exercised, not whatever's currently published.
-# PROMPT_FILE (default eval_harness/app_builder/prompts/author_app.md):
-# base authoring prompt, relative to repo root -- overridable to compare
-# prompt variants against the same PRD/scenario matrix.
+# PROMPT_FILE: base authoring prompt, relative to repo root. Normally resolved
+# from PROMPT_VARIANT by resolve_prompt.sh (see author-app.sh); defaulted here
+# only so this function stays callable on its own.
 eval::run_coding_agent() { # agent root workspace prd_file out_dir [model]
   local agent="$1" root="$2" workspace="$3" prd_file="$4" out="$5" model="${6:-}"
   [ "$agent" = "claude" ] && agent="claude-code"
   local scenario="${SCENARIO:-skills_available_unmentioned}"
   local skills_enabled=1
   [ "$scenario" = "skills_unavailable" ] && skills_enabled=0
-  local prompt_file="${PROMPT_FILE:-eval_harness/app_builder/prompts/author_app.md}"
+  local prompt_file="${PROMPT_FILE:-dataset/prompts/baseline.md}"
   echo "================= STAGE C: coding agent ($agent) authors the app ================="
   echo "  scenario=$scenario  skills_enabled=$skills_enabled  prompt_file=$prompt_file"
   local prompt TO
-  prompt="$(cat "$root/$prompt_file")"
+  # Hard-fail rather than authoring with an empty base prompt: this script runs
+  # under `set -uo pipefail` without `-e`, so an unreadable prompt would
+  # otherwise leave the agent with just the PRD and no instructions -- and that
+  # invalid run would still be built, evaluated, and scored.
+  if [ ! -s "$root/$prompt_file" ]; then
+    echo "  ❌ prompt file is missing or empty: $root/$prompt_file"
+    return 1
+  fi
+  prompt="$(cat "$root/$prompt_file")" || { echo "  ❌ could not read prompt file: $root/$prompt_file"; return 1; }
   if [ "$scenario" = "skills_available_mentioned" ] && [ -n "${SKILL_MENTION:-}" ]; then
     # Inserted before "The PRD follows." (not after the PRD itself) so it
     # reads as part of the task instructions the agent sees first, not as a
