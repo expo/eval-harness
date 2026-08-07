@@ -18,9 +18,19 @@ function tempDir(prefix: string): string {
 }
 
 function runBash(script: string, env: Record<string, string> = {}) {
+  const processEnv = { ...process.env };
+  for (const key of [
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "OPENAI_API_KEY",
+    "META_API_KEY",
+  ]) {
+    delete processEnv[key];
+  }
   return Bun.spawnSync(["bash", "-c", script, AGENTS_SH], {
     cwd: REPO_ROOT,
-    env: { ...process.env, ...env },
+    env: { ...processEnv, ...env },
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -33,6 +43,38 @@ function output(result: ReturnType<typeof Bun.spawnSync>): string {
 afterEach(() => {
   for (const process of processes.splice(0)) process.kill();
   for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+
+test("shell test helper scrubs ambient provider credentials", () => {
+  const previous = {
+    CLAUDE_CODE_OAUTH_TOKEN: process.env.CLAUDE_CODE_OAUTH_TOKEN,
+    ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
+    ANTHROPIC_AUTH_TOKEN: process.env.ANTHROPIC_AUTH_TOKEN,
+    OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+    META_API_KEY: process.env.META_API_KEY,
+  };
+  Object.assign(process.env, {
+    CLAUDE_CODE_OAUTH_TOKEN: "ambient-claude",
+    ANTHROPIC_API_KEY: "ambient-anthropic",
+    ANTHROPIC_AUTH_TOKEN: "ambient-anthropic-auth",
+    OPENAI_API_KEY: "ambient-openai",
+    META_API_KEY: "ambient-meta",
+  });
+  try {
+    const result = runBash(`
+      test -z "\${CLAUDE_CODE_OAUTH_TOKEN:-}"
+      test -z "\${ANTHROPIC_API_KEY:-}"
+      test -z "\${ANTHROPIC_AUTH_TOKEN:-}"
+      test -z "\${OPENAI_API_KEY:-}"
+      test -z "\${META_API_KEY:-}"
+    `);
+    expect(result.exitCode).toBe(0);
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
 });
 
 test("authoring normalizes Muse and selects all agent defaults", () => {
@@ -63,6 +105,67 @@ test("Muse rejects a missing Meta credential without applying Claude auth rules"
     ANTHROPIC_API_KEY: "must-not-matter-for-muse",
   });
   expect(present.exitCode).toBe(0);
+});
+
+test("Muse credential validation captures the key in non-exported shell state", () => {
+  const result = runBash(`
+    set -e
+    source "$0"
+    eval::require_authoring_credentials muse-code "$ROOT"
+    test "$MUSE_API_KEY" = "meta-secret"
+    test -z "\${META_API_KEY:-}"
+    ! export -p | grep -q 'MUSE_API_KEY'
+  `, {
+    ROOT: REPO_ROOT,
+    META_API_KEY: "meta-secret",
+  });
+
+  expect(result.exitCode).toBe(0);
+});
+
+test("Muse installer and version subprocesses cannot see the provider key", () => {
+  const root = tempDir("muse-install-key-boundary-");
+  const bin = join(root, "bin");
+  const out = join(root, "out");
+  const installerEnvironment = join(root, "installer-environment.txt");
+  const versionEnvironment = join(root, "version-environment.txt");
+  mkdirSync(bin, { recursive: true });
+  mkdirSync(out, { recursive: true });
+  writeFileSync(join(out, "author.env"), "RUN_ID=test\n");
+  writeFileSync(join(bin, "curl"), `#!/usr/bin/env bash
+cat <<'INSTALLER'
+set -e
+printf '%s|%s' "\${META_API_KEY-absent}" "\${MUSE_API_KEY-absent}" > "$CAPTURE_INSTALLER_ENVIRONMENT"
+mkdir -p "$MUSE_INSTALL_DIR"
+cat > "$MUSE_INSTALL_DIR/muse" <<'MUSE'
+#!/usr/bin/env bash
+printf '%s|%s' "\${META_API_KEY-absent}" "\${MUSE_API_KEY-absent}" > "$CAPTURE_VERSION_ENVIRONMENT"
+printf 'muse-test-version\n'
+MUSE
+chmod +x "$MUSE_INSTALL_DIR/muse"
+INSTALLER
+`);
+  chmodSync(join(bin, "curl"), 0o755);
+
+  const result = runBash(`
+    set -e
+    source "$0"
+    eval::gate() { return "$1"; }
+    eval::require_authoring_credentials muse-code "$ROOT"
+    eval::install_muse_cli "$OUT"
+  `, {
+    ROOT: REPO_ROOT,
+    OUT: out,
+    PATH: `${bin}:${process.env.PATH}`,
+    META_API_KEY: "meta-secret",
+    CAPTURE_INSTALLER_ENVIRONMENT: installerEnvironment,
+    CAPTURE_VERSION_ENVIRONMENT: versionEnvironment,
+  });
+
+  expect(result.exitCode).toBe(0);
+  expect(readFileSync(installerEnvironment, "utf8")).toBe("absent|absent");
+  expect(readFileSync(versionEnvironment, "utf8")).toBe("absent|absent");
+  expect(readFileSync(join(out, "author.env"), "utf8")).toContain("MUSE_CLI_VERSION=muse-test-version");
 });
 
 test("Muse authoring streams its key, installs local skills, and records Expo MCP settings", () => {
@@ -135,6 +238,62 @@ cp "$XDG_CONFIG_HOME/muse/settings.json" "$CAPTURE_SETTINGS"
   expect(readFileSync(join(out, "c-plugin.log"), "utf8")).toContain("muse skills list --source project --enabled-only --json");
 });
 
+test("Muse skill setup subprocesses cannot see the key and exec receives it only on stdin", () => {
+  const root = tempDir("muse-key-boundary-");
+  const bin = join(root, "bin");
+  const workspace = join(root, "workspace");
+  const out = join(root, "out");
+  const npxEnvironment = join(root, "npx-environment.txt");
+  const skillsEnvironment = join(root, "skills-environment.txt");
+  const execEnvironment = join(root, "exec-environment.txt");
+  const execStdin = join(root, "exec-stdin.txt");
+  mkdirSync(bin, { recursive: true });
+  mkdirSync(workspace, { recursive: true });
+  mkdirSync(out, { recursive: true });
+  writeFileSync(join(root, "prd.txt"), "Build a tiny app.");
+  writeFileSync(join(bin, "npx"), `#!/usr/bin/env bash
+printf '%s|%s' "\${META_API_KEY-absent}" "\${MUSE_API_KEY-absent}" > "$CAPTURE_NPX_ENVIRONMENT"
+`);
+  writeFileSync(join(bin, "muse"), `#!/usr/bin/env bash
+set -euo pipefail
+if [ "$1" = "skills" ]; then
+  printf '%s|%s' "\${META_API_KEY-absent}" "\${MUSE_API_KEY-absent}" > "$CAPTURE_SKILLS_ENVIRONMENT"
+  printf '{"skills":[]}'
+  exit 0
+fi
+printf '%s|%s' "\${META_API_KEY-absent}" "\${MUSE_API_KEY-absent}" > "$CAPTURE_EXEC_ENVIRONMENT"
+cat > "$CAPTURE_EXEC_STDIN"
+`);
+  chmodSync(join(bin, "npx"), 0o755);
+  chmodSync(join(bin, "muse"), 0o755);
+
+  const result = runBash(`
+    set -e
+    source "$0"
+    eval::_agent_timeout() { :; }
+    eval::gate() { return "$1"; }
+    eval::require_authoring_credentials muse-code "$ROOT"
+    eval::run_coding_agent muse-code "$ROOT" "$WORKSPACE" "$PRD" "$OUT" muse-spark-1.2 "$MUSE_API_KEY"
+  `, {
+    ROOT: REPO_ROOT,
+    WORKSPACE: workspace,
+    OUT: out,
+    PRD: join(root, "prd.txt"),
+    PATH: `${bin}:${process.env.PATH}`,
+    META_API_KEY: "meta-secret-only-on-stdin",
+    CAPTURE_NPX_ENVIRONMENT: npxEnvironment,
+    CAPTURE_SKILLS_ENVIRONMENT: skillsEnvironment,
+    CAPTURE_EXEC_ENVIRONMENT: execEnvironment,
+    CAPTURE_EXEC_STDIN: execStdin,
+  });
+
+  expect(result.exitCode).toBe(0);
+  expect(readFileSync(npxEnvironment, "utf8")).toBe("absent|absent");
+  expect(readFileSync(skillsEnvironment, "utf8")).toBe("absent|absent");
+  expect(readFileSync(execEnvironment, "utf8")).toBe("absent|absent");
+  expect(readFileSync(execStdin, "utf8")).toBe("meta-secret-only-on-stdin\n");
+});
+
 test("Muse negative-control scenario skips Expo skills and MCP settings", () => {
   const root = tempDir("muse-negative-");
   const bin = join(root, "bin");
@@ -188,9 +347,34 @@ test("Muse EXIT cleanup removes settings without deleting session data", () => {
   `, {
     MUSE_SETTINGS_ROOT: settings,
     MUSE_DATA_ROOT: data,
-    MUSE_SETTINGS_CREATED: "1",
+    MUSE_SETTINGS_OWNED: "1",
     SETTINGS: settings,
     DATA: data,
+  });
+
+  expect(result.exitCode).toBe(0);
+});
+
+test("Muse cleanup preserves ambient XDG config and removes only harness-owned settings", () => {
+  const root = tempDir("muse-settings-ownership-");
+  const ambient = join(root, "ambient-config");
+  const sentinel = join(ambient, "keep.txt");
+  mkdirSync(ambient, { recursive: true });
+  writeFileSync(sentinel, "keep");
+
+  const result = runBash(`
+    set -e
+    source "$0"
+    eval::configure_muse_settings skills_unavailable
+    owned_settings="$MUSE_SETTINGS_ROOT"
+    test "$owned_settings" != "$XDG_CONFIG_HOME"
+    test -e "$SENTINEL"
+    eval::cleanup_muse_settings
+    test -e "$SENTINEL"
+    test ! -e "$owned_settings"
+  `, {
+    XDG_CONFIG_HOME: ambient,
+    SENTINEL: sentinel,
   });
 
   expect(result.exitCode).toBe(0);
@@ -226,7 +410,7 @@ test("Muse artifact collection retains normalized telemetry without shipping raw
     SETTINGS: settings,
     MUSE_SETTINGS_ROOT: settings,
     MUSE_DATA_ROOT: data,
-    MUSE_SETTINGS_CREATED: "1",
+    MUSE_SETTINGS_OWNED: "1",
     DATA: data,
     AGENT: "muse-code",
     MUSE_CLI_VERSION: "muse-test-version",

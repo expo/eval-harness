@@ -716,6 +716,43 @@ test("[CHAR] Muse parser skips malformed records and flushes an incomplete turn"
   });
 });
 
+test("[REGRESSION] Muse ignores interleaved task events while pairing run tool results", async () => {
+  await withTempDir(async (directory) => {
+    const session = join(directory, "session.jsonl");
+    await writeJsonl(session, [
+      museEvent(1, "started", { prompt: "Build the app" }),
+      museEvent(2, "assistant_tool_calls_committed", {
+        tool_calls: [{ call_id: "call-1", name: "read_file", args: { path: "app.json" } }],
+      }),
+      {
+        sequence: 3,
+        payload_type: "runtime.session",
+        payload: {
+          kind: "task",
+          run_id: "muse-run-1",
+          event: { kind: "started", task_id: "task-1", tool_call_id: "call-1" },
+        },
+      },
+      museEvent(4, "tool_result_batch_committed", {
+        results: [{ tool_call_id: "call-1", text: "contents" }],
+      }),
+      museEvent(5, "terminal", { terminal: "completed" }),
+    ]);
+
+    const [turns] = await parseMuseSession(session);
+    expect(turns).toHaveLength(1);
+    expect(turns[0]?.user_input).toBe("Build the app");
+    expect(turns[0]?.steps[0]?.tool_calls).toEqual([
+      {
+        call_id: "call-1",
+        name: "read_file",
+        args: { path: "app.json" },
+        output: "contents",
+      },
+    ]);
+  });
+});
+
 test("[REGRESSION] Muse skill observations deduplicate across session turns", async () => {
   await withTempDir(async (directory) => {
     const session = join(directory, "session.jsonl");
