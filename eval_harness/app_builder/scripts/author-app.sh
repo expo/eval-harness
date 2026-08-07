@@ -39,8 +39,15 @@ SKILL_MENTION="${SKILL_MENTION:-}"
 # Resolved and validated here, before any expensive stage: an unknown id or an
 # unreadable/empty prompt file must abort the run rather than silently author
 # from a bare PRD and still get built, evaluated, and scored.
-PROMPT_VARIANT="${PROMPT_VARIANT:-baseline}"
-PROMPT_FILE="$(ROOT="$ROOT" PROMPT_VARIANT="$PROMPT_VARIANT" bash "$ROOT/eval_harness/utils/shell/resolve_prompt.sh")" || exit 1
+# Deliberately not defaulted here: resolve_prompt.sh owns the fallback, so it
+# can tell "nobody picked one" from "someone picked baseline" and log which.
+# Ask it for the effective id too, so author.env and manifest.json record what
+# actually ran rather than an empty string (and without assuming the id matches
+# the filename -- the registry doesn't require that).
+PROMPT_VARIANT="${PROMPT_VARIANT:-}"
+_resolve_prompt="$ROOT/eval_harness/utils/shell/resolve_prompt.sh"
+PROMPT_FILE="$(ROOT="$ROOT" PROMPT_VARIANT="$PROMPT_VARIANT" bash "$_resolve_prompt")" || exit 1
+PROMPT_VARIANT="$(ROOT="$ROOT" PROMPT_VARIANT="$PROMPT_VARIANT" bash "$_resolve_prompt" --variant)" || exit 1
 export AGENT AGENT_MODEL METRO_MODE PRD SCENARIO SKILL_MENTION PROMPT_VARIANT PROMPT_FILE
 
 # Lets the agent's own `eas init --id "$EAS_PROJECT_ID"` (see the prompt) link its freshly

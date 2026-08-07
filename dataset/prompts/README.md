@@ -52,5 +52,19 @@ The PRD follows.
 <dataset/prds/<app>/prd/mvp.txt>
 ```
 
-Both the id and the resolved path are recorded in each run's `manifest.json`
-(`prompt_variant`, `prompt_file`), so results group by variant.
+## The default is never silent
+
+Omit `prompt_variant` and you get `baseline` — but the job log always says so,
+before any expensive stage:
+
+```text
+ℹ️  no prompt variant specified; using default 'baseline' (dataset/prompts/baseline.md)
+ℹ️  using default prompt variant 'baseline' (dataset/prompts/baseline.md)   # asked for it by name
+ℹ️  using prompt variant 'minimal' (dataset/prompts/minimal.md)             # asked for something else
+```
+
+`resolve_prompt.sh` owns the fallback (the workflows deliberately don't
+re-default it) so it can tell "nobody chose" from "chose baseline" and say
+which. The variant is echoed again at point of use in STAGE C. Both the id and
+the resolved path are recorded in each run's `manifest.json` (`prompt_variant`,
+`prompt_file`), so results group by variant.

@@ -18,7 +18,20 @@ set -uo pipefail
 
 ROOT="${ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}"
 REGISTRY="${PROMPT_REGISTRY:-$ROOT/dataset/prompts.json}"
-VARIANT="${PROMPT_VARIANT:-baseline}"
+
+# The one place the fallback lives -- callers pass PROMPT_VARIANT through
+# unset rather than defaulting it themselves, so "nobody chose a variant" is
+# still distinguishable here and can be said plainly in the log.
+DEFAULT_VARIANT="baseline"
+VARIANT="${PROMPT_VARIANT:-}"
+if [ -z "$VARIANT" ]; then
+  VARIANT="$DEFAULT_VARIANT"
+  variant_origin="unspecified"
+elif [ "$VARIANT" = "$DEFAULT_VARIANT" ]; then
+  variant_origin="default"
+else
+  variant_origin="explicit"
+fi
 
 if [ ! -f "$REGISTRY" ]; then
   echo "❌ prompt registry not found: $REGISTRY" >&2
@@ -60,5 +73,28 @@ if [ ! -s "$abs" ]; then
   exit 1
 fi
 
+rel_to_root="${abs#"$ROOT"/}"
+
+# `--variant` reports the effective id (after defaulting) instead of the path,
+# so callers can record what actually ran without assuming the id matches the
+# filename. Quiet: the log line belongs to the path call, not both.
+if [ "${1:-}" = "--variant" ]; then
+  echo "$VARIANT"
+  exit 0
+fi
+
+# Announce the choice on stderr (stdout is reserved for the path, which callers
+# capture). Never let a defaulted prompt be silent: a run scored against the
+# wrong base instructions is indistinguishable from a real result afterwards,
+# so which prompt was used has to be obvious from the job log alone.
+case "$variant_origin" in
+  unspecified)
+    echo "ℹ️  no prompt variant specified; using default '$VARIANT' ($rel_to_root)" >&2 ;;
+  default)
+    echo "ℹ️  using default prompt variant '$VARIANT' ($rel_to_root)" >&2 ;;
+  *)
+    echo "ℹ️  using prompt variant '$VARIANT' ($rel_to_root)" >&2 ;;
+esac
+
 # Repo-relative, matching how PRD is passed around and recorded in manifest.json.
-echo "${abs#"$ROOT"/}"
+echo "$rel_to_root"

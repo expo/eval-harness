@@ -103,7 +103,7 @@ eval::run_coding_agent() { # agent root workspace prd_file out_dir [model]
   [ "$scenario" = "skills_unavailable" ] && skills_enabled=0
   local prompt_file="${PROMPT_FILE:-dataset/prompts/baseline.md}"
   echo "================= STAGE C: coding agent ($agent) authors the app ================="
-  echo "  scenario=$scenario  skills_enabled=$skills_enabled  prompt_file=$prompt_file"
+  echo "  scenario=$scenario  skills_enabled=$skills_enabled  prompt_variant=${PROMPT_VARIANT:-baseline}  prompt_file=$prompt_file"
   local prompt TO
   # Hard-fail rather than authoring with an empty base prompt: this script runs
   # under `set -uo pipefail` without `-e`, so an unreadable prompt would

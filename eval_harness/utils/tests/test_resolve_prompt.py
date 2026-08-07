@@ -10,13 +10,13 @@ ROOT = Path(__file__).resolve().parents[3]
 RESOLVE_PROMPT = ROOT / "eval_harness" / "utils" / "shell" / "resolve_prompt.sh"
 
 
-def run_resolve(**env_overrides: str) -> subprocess.CompletedProcess[str]:
+def run_resolve(*args: str, **env_overrides: str) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
     env.pop("PROMPT_VARIANT", None)
     env.pop("PROMPT_REGISTRY", None)
     env.update(env_overrides)
     return subprocess.run(
-        ["bash", str(RESOLVE_PROMPT)],
+        ["bash", str(RESOLVE_PROMPT), *args],
         cwd=ROOT,
         env=env,
         capture_output=True,
@@ -49,6 +49,53 @@ class ResolvePromptTests(unittest.TestCase):
                 result = run_resolve(PROMPT_VARIANT=variant_id)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertTrue((ROOT / result.stdout.strip()).is_file())
+
+    def test_announces_when_no_variant_was_specified(self) -> None:
+        # The whole point: a defaulted prompt must never be silent, or a run
+        # scored against the wrong base instructions looks like a real result.
+        result = run_resolve()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("no prompt variant specified", result.stderr)
+        self.assertIn("baseline", result.stderr)
+        # The log goes to stderr so stdout stays capturable as just the path.
+        self.assertEqual(result.stdout.strip(), "dataset/prompts/baseline.md")
+
+    def test_announces_default_when_baseline_requested_explicitly(self) -> None:
+        result = run_resolve(PROMPT_VARIANT="baseline")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("using default prompt variant", result.stderr)
+
+    def test_announces_non_default_variant_without_calling_it_default(self) -> None:
+        result = run_resolve(PROMPT_VARIANT="minimal")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("using prompt variant 'minimal'", result.stderr)
+        self.assertNotIn("default", result.stderr)
+
+    def test_variant_flag_reports_effective_id_quietly(self) -> None:
+        self.assertEqual(run_resolve("--variant").stdout.strip(), "baseline")
+        self.assertEqual(
+            run_resolve("--variant", PROMPT_VARIANT="minimal").stdout.strip(), "minimal"
+        )
+        # Quiet, so the announcement isn't duplicated by the second call.
+        self.assertEqual(run_resolve("--variant").stderr.strip(), "")
+
+    def test_variant_flag_does_not_assume_id_matches_filename(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            (Path(td) / "some-file.md").write_text("prompt body")
+            registry = Path(td) / "prompts.json"
+            registry.write_text(
+                json.dumps({"variants": {"terse": {"file": "some-file.md"}}})
+            )
+
+            result = run_resolve(
+                "--variant", PROMPT_VARIANT="terse", PROMPT_REGISTRY=str(registry)
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "terse")
 
     def test_rejects_unknown_variant_and_lists_known_ids(self) -> None:
         result = run_resolve(PROMPT_VARIANT="does-not-exist")

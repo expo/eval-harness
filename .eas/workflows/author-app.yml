@@ -57,7 +57,10 @@ jobs:
       PRD: ${{ inputs.prd || 'dataset/prds/notes/prd/mvp.txt' }}
       SCENARIO: ${{ inputs.skill_scenario || 'skills_available_unmentioned' }}
       SKILL_MENTION: ${{ inputs.skill_mention || '' }}
-      PROMPT_VARIANT: ${{ inputs.prompt_variant || 'baseline' }}
+      # No `|| 'baseline'` fallback: resolve_prompt.sh owns the default so it
+      # can log that it applied one. The input's own YAML default still shows
+      # in the dispatch UI.
+      PROMPT_VARIANT: ${{ inputs.prompt_variant }}
     steps:
       - uses: eas/checkout
 
