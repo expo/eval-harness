@@ -88,9 +88,21 @@ locally with `claude setup-token`. Do not also set `ANTHROPIC_API_KEY` or
 `ANTHROPIC_AUTH_TOKEN`; Claude Code gives those credentials higher priority than
 subscription OAuth, and the harness rejects them to prevent accidentally
 bypassing the intended Claude subscription. Codex authoring requires
-`OPENAI_API_KEY`. `EXPO_TOKEN` is optional and lets the coding agent run its own
-`eas build` self-verification and use Expo MCP. `BRAINTRUST_API_KEY` and
+`OPENAI_API_KEY`. Muse Code authoring uses `META_API_KEY` with provider `meta`
+and defaults to `muse-spark-1.2`. Create that EAS secret with the interactive
+prompt—never an inline value:
+
+```bash
+eas env:create production --name META_API_KEY --visibility secret --scope project
+```
+
+`EXPO_TOKEN` is optional and lets the coding agent run its own `eas build`
+self-verification and use Expo MCP. `BRAINTRUST_API_KEY` and
 `BRAINTRUST_PROJECT` are optional trace-export settings; see `.env.default`.
+
+Muse author-only runs need `META_API_KEY`. A Muse E2E run that enables iOS
+evaluation (`-F run_eval_ios=true`) also needs `CLAUDE_CODE_OAUTH_TOKEN`, because
+the downstream iOS evaluator is always Claude-based.
 
 Expo project routing is controlled by `app.config.js`. Override these variables
 when running the same branch under another Expo account:
@@ -143,6 +155,20 @@ Use Codex by changing the authoring agent:
 ```bash
 eas workflow:run .eas/workflows/eval-e2e.yml \
   -F agent=codex \
+  -F prd=dataset/prds/pool/prd/mvp.txt \
+  -F run_eval_ios=true \
+  -F run_eval_skill=true \
+  -F skill_scenario=skills_available_unmentioned \
+  --wait
+```
+
+Use Muse Code with the Meta provider by changing the authoring agent. Its
+default model is `muse-spark-1.2`; provide `-F agent_model=<model>` only to
+override it:
+
+```bash
+eas workflow:run .eas/workflows/eval-e2e.yml \
+  -F agent=muse-code \
   -F prd=dataset/prds/pool/prd/mvp.txt \
   -F run_eval_ios=true \
   -F run_eval_skill=true \
@@ -225,6 +251,17 @@ static code uptake checks, and optional app-evaluator score if an eval artifact
 is provided. It does not use an LLM judge, screenshots, or production-calibrated
 classification yet.
 
+### Muse authoring artifacts
+
+The `authored-app` artifact contains `authored-app.tar.gz`. For a Muse Code run,
+its normalized author trace is
+`eval-out/<RUN_ID>/bundle/telemetry/traces/muse-code-authoring.json`; the
+redacted Meta proxy telemetry is
+`eval-out/<RUN_ID>/bundle/telemetry/meta.jsonl`. The bundle manifest records
+the `muse-code` agent, selected model, and Muse CLI version. Raw Muse XDG session
+data and the installed Muse binary are transient worker inputs and are excluded
+from the transport archive.
+
 ## Debug Workflows
 
 Use `author-app.yml` when you only want to test coding-agent setup, Expo skill
@@ -234,6 +271,14 @@ plan is needed for author-only runs.
 ```bash
 eas workflow:run .eas/workflows/author-app.yml \
   -F agent=claude-code \
+  -F prd=dataset/prds/notes/prd/mvp.txt
+```
+
+For Muse Code authoring only (no macOS evaluator), use:
+
+```bash
+eas workflow:run .eas/workflows/author-app.yml \
+  -F agent=muse-code \
   -F prd=dataset/prds/notes/prd/mvp.txt
 ```
 
