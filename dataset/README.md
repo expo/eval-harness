@@ -3,6 +3,9 @@
 Each dataset entry pairs an app PRD with reusable, app-agnostic test plans and
 ground-truth mappings that tell the evaluators what to run.
 
+For the base instructions given to the coding agent before the PRD — a separate
+run dimension from the PRD itself — see [`prompts/README.md`](prompts/README.md).
+
 ## 1. Add the PRD
 
 Create:

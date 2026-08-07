@@ -1,0 +1,14 @@
+{
+  "_comment": "Prompt variant id -> definition. `file` is relative to this registry's own directory. The workflow's `prompt_variant` input takes an id from here, never a path: ids are stable across renames, group cleanly in reports, and an unknown id fails fast instead of silently authoring with an empty prompt (see eval_harness/utils/shell/resolve_prompt.sh). Assembly order is fixed and lives in eval::run_coding_agent (agents.sh): <variant file>, then a '## Guidance' block naming SKILL_MENTION when scenario=skills_available_mentioned, then 'The PRD follows.', then '## App PRD' and the PRD content. See README.md to add one.",
+  "variants": {
+    "baseline": {
+      "file": "prompts/baseline.md",
+      "description": "Default. Names the required project files, requires `npm install` and `npx expo install --check` to succeed before stopping, and asks the agent to self-verify a native build via the `agent-verify` EAS profile."
+    },
+    "minimal": {
+      "file": "prompts/minimal.md",
+      "formerly": "eval_harness/app_builder/prompts/author_app_2.md",
+      "description": "Role and task only, with none of baseline's verification instructions. Isolates how much the harness's explicit guardrails contribute versus the agent's own defaults."
+    }
+  }
+}

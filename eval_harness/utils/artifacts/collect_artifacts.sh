@@ -175,7 +175,7 @@ RESULT_JSON="$OUT/result.json" RUN_ID="$RUN_ID" AGENT="$AGENT" GIT_SHA="$GIT_SHA
 PRD="${PRD:-}" TEST_PLAN="${TEST_PLAN:-}" \
 AGENT_MODEL="${AGENT_MODEL:-}" METRO_MODE="${METRO_MODE:-}" \
 EVAL_APP_BUNDLE_ID="${EVAL_APP_BUNDLE_ID:-}" EXPO_MCP_AUTH_STATUS="${EXPO_MCP_AUTH_STATUS:-}" \
-SCENARIO="${SCENARIO:-}" PROMPT_FILE="${PROMPT_FILE:-}" \
+SCENARIO="${SCENARIO:-}" PROMPT_VARIANT="${PROMPT_VARIANT:-}" PROMPT_FILE="${PROMPT_FILE:-}" \
 "$PY" - "$BUNDLE/manifest.json" <<'PYEOF'
 import json, os, sys
 out = sys.argv[1]
@@ -219,7 +219,8 @@ manifest = {
     "prd": preferred("PRD", "prd", "dataset/prds/hot_chocolate/prd/mvp.txt"),
     "expo_mcp_auth_status": preferred("EXPO_MCP_AUTH_STATUS", "expo_mcp_auth_status", "not_attempted"),
     "scenario": preferred("SCENARIO", "scenario"),
-    "prompt_file": preferred("PROMPT_FILE", "prompt_file", "eval_harness/app_builder/prompts/author_app.md"),
+    "prompt_variant": preferred("PROMPT_VARIANT", "prompt_variant", "baseline"),
+    "prompt_file": preferred("PROMPT_FILE", "prompt_file", "dataset/prompts/baseline.md"),
     "score": score, "full_points": full,
     "macro_avg_pct": macro, "micro_pct": micro,
     "artifacts": {

@@ -9,9 +9,9 @@ runner plus uploaded artifacts.
 
 ## Current Shape
 
-- `eval_harness/app_builder/`: authoring side. `prompts/author_app.md` is the
-  coding-agent prompt template; `scripts/` holds its workflow entrypoint
-  (`author-app.sh`).
+- `eval_harness/app_builder/`: authoring side. `scripts/` holds its workflow
+  entrypoint (`author-app.sh`). The coding-agent prompt itself lives in
+  `dataset/prompts/`, selected by id via `dataset/prompts.json`.
 - `eval_harness/evaluator/ios_agentic/`: mobile app evaluator package. It drives
   iOS apps with `agent-device` and scores app-agnostic primitive test plans
   against a PRD. `prompts/prompt_agent.py` is its system prompt; `scripts/`
@@ -123,8 +123,8 @@ runner plus uploaded artifacts.
 ## PRD And Prompt Guidance
 
 - PRDs should describe product behavior, not patch over framework mistakes.
-  Framework-specific guardrails belong in `eval_harness/app_builder/prompts/`
-  only when they are part of the experimental condition.
+  Framework-specific guardrails belong in `dataset/prompts/` only when they are
+  part of the experimental condition.
 - Notes is the stable reference target. Use it first when proving harness changes.
 - Hot Chocolate and other richer PRDs are better for product realism, but expect
   authored-app defects to be part of the signal.
