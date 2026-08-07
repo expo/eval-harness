@@ -422,6 +422,37 @@ test("[REGRESSION] artifact discovery ignores nested workspace dependencies", as
   });
 });
 
+test("[REGRESSION] artifact discovery accepts Muse authoring traces", async () => {
+  await withTempDirAsync(async (root) => {
+    const fixture = writeFixture(root);
+    rmSync(fixture.trace);
+    const museTrace = join(fixture.bundle, "telemetry", "traces", "muse-code-authoring.json");
+    writeFileSync(
+      museTrace,
+      JSON.stringify({
+        agent: "muse-code",
+        sessions: [{ turns: [{ steps: [{ tool_calls: [{ name: "Skill", args: { skill: "expo-test" } }] }] }] }],
+      }),
+    );
+
+    const layout = await discoverArtifactLayout(fixture.authored);
+    expect(layout.tracePath).toBe(museTrace);
+    const payload = await analyzeArtifacts({
+      authoredArtifact: fixture.authored,
+      evalArtifact: null,
+      scenario: "skills_available_unmentioned",
+      outDir: join(root, "muse-out"),
+      prdSkillsPath: fixture.prdSkills,
+      checksDir: fixture.checksDir,
+    });
+    expect(payload.score.trigger_quality).toMatchObject({
+      triggered_skills: ["expo-test"],
+      recall: 1,
+      precision: 1,
+    });
+  });
+});
+
 test("[REGRESSION] evaluator results produce a complete outcome", async () => {
   await withTempDirAsync(async (root) => {
     const fixture = writeFixture(root);
