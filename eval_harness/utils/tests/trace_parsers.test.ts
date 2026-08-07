@@ -759,6 +759,41 @@ test("[CHAR] Muse parser skips malformed records and flushes an incomplete turn"
   });
 });
 
+test("[REGRESSION] Muse skill observations deduplicate across session turns", async () => {
+  await withTempDir(async (directory) => {
+    const session = join(directory, "session.jsonl");
+    await writeJsonl(session, [
+      museEvent(1, "started", { prompt: "first" }, "turn-one"),
+      museEvent(2, "skill_read_observed", {
+        skill_id: "expo-router",
+        observed_at_sequence: 2,
+        evidence_kind: "read_skill_tool",
+        evidence_hash: "sha256:first",
+      }, "turn-one"),
+      museEvent(3, "terminal", { terminal: "completed" }, "turn-one"),
+      museEvent(4, "started", { prompt: "second" }, "turn-two"),
+      museEvent(5, "skill_read_observed", {
+        skill_id: "expo-router",
+        observed_at_sequence: 5,
+        evidence_kind: "read_skill_tool",
+        evidence_hash: "sha256:second",
+      }, "turn-two"),
+      museEvent(6, "terminal", { terminal: "completed" }, "turn-two"),
+    ]);
+
+    const [turns] = await parseMuseSession(session);
+    expect(turns.map((turn) => turn.steps.flatMap((step) => step.tool_calls))).toEqual([
+      [{ call_id: "skill:expo-router", name: "Skill", args: {
+        skill: "expo-router",
+        observed_at_sequence: 2,
+        evidence_kind: "read_skill_tool",
+        evidence_hash: "sha256:first",
+      } }],
+      [],
+    ]);
+  });
+});
+
 test("[CHAR] Muse reconstruction filters session files and writes its envelope", async () => {
   await withTempDir(async (directory) => {
     const dataRoot = join(directory, "data");
@@ -795,6 +830,29 @@ test("[CHAR] Muse reconstruction filters session files and writes its envelope",
       n_sessions: 1,
     });
     expect(basename(String(payload.sessions[0]?.session))).toBe("session.jsonl");
+  });
+});
+
+test("[REGRESSION] Muse reconstruction API and CLI default to authoring source", async () => {
+  await withTempDir(async (directory) => {
+    const dataRoot = join(directory, "data");
+    const session = join(dataRoot, "muse", "sessions", "2026", "08", "07", "selected", "session.jsonl");
+    await mkdir(dirname(session), { recursive: true });
+    await writeJsonl(session, [museEvent(1, "started", { prompt: "selected" }, "selected")]);
+    const apiOut = join(directory, "api.json");
+    expect((await reconstructMuseSessions({ dataRoot, outPath: apiOut })).source).toBe("muse-code-authoring");
+
+    const cliOut = join(directory, "cli.json");
+    const result = await runCli([
+      process.execPath,
+      MUSE_SCRIPT,
+      "--data-root", dataRoot,
+      "--out", cliOut,
+    ]);
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(await readFile(cliOut, "utf8"))).toMatchObject({
+      source: "muse-code-authoring",
+    });
   });
 });
 
