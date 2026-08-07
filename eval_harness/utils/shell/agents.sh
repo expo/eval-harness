@@ -157,7 +157,9 @@ eval::cleanup_muse_settings() {
   if [ "${MUSE_SETTINGS_CREATED:-0}" = "1" ] && [ -n "${MUSE_SETTINGS_ROOT:-}" ]; then
     rm -rf -- "$MUSE_SETTINGS_ROOT"
   fi
-  unset MUSE_SETTINGS_ROOT MUSE_DATA_ROOT MUSE_SETTINGS_CREATED
+  # Session data is non-secret run evidence needed by collect_artifacts.sh;
+  # only the credential-bearing settings root is removed here.
+  unset MUSE_SETTINGS_ROOT MUSE_SETTINGS_CREATED
 }
 
 # Claude Code's Expo plugin bundles an unauthenticated MCP entry. A project-
