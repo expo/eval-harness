@@ -5,15 +5,17 @@
  * turns -> steps -> tool_calls trace shape.
  */
 
-import { readdir, readFile, realpath, stat, writeFile, mkdir } from "node:fs/promises";
+import { mkdir, readdir, realpath, stat, writeFile } from "node:fs/promises";
 import type { Dirent } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
 import {
   emitBraintrustSession,
+  hasMeaningfulValue,
   parsePythonFloat,
   parsePythonJson,
+  readJsonlRecords,
   stringifyPythonJson,
   type JsonRecord,
   type ToolCall,
@@ -34,13 +36,6 @@ type CodexReconstructionOptions = {
 
 type PendingOutput = { output: unknown; error: unknown };
 
-function asRecord(value: unknown): JsonRecord {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new TypeError("expected a JSON object record");
-  }
-  return value as JsonRecord;
-}
-
 function optionalRecord(value: unknown): JsonRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as JsonRecord)
@@ -48,31 +43,15 @@ function optionalRecord(value: unknown): JsonRecord {
 }
 
 function recordOrPythonFallback(value: unknown, field: string): JsonRecord {
-  if (!pythonTruthy(value)) return {};
+  if (!hasMeaningfulValue(value)) return {};
   if (typeof value === "object" && value !== null && !Array.isArray(value)) {
     return value as JsonRecord;
   }
   throw new TypeError(`${field} must be an object when present`);
 }
 
-function pythonTruthy(value: unknown): boolean {
-  if (
-    value === null ||
-    value === undefined ||
-    value === false ||
-    value === 0 ||
-    value === 0n ||
-    value === ""
-  ) {
-    return false;
-  }
-  if (Array.isArray(value)) return value.length > 0;
-  if (typeof value === "object") return Object.keys(value).length > 0;
-  return true;
-}
-
-function firstTruthy(...values: unknown[]): unknown {
-  return values.find((value) => pythonTruthy(value));
+function firstMeaningfulValue(...values: unknown[]): unknown {
+  return values.find((value) => hasMeaningfulValue(value));
 }
 
 function extractText(content: unknown): string {
@@ -85,14 +64,14 @@ function extractText(content: unknown): string {
       continue;
     }
     const record = optionalRecord(part);
-    const value = firstTruthy(record.text, record.output_text, record.input_text, "");
+    const value = firstMeaningfulValue(record.text, record.output_text, record.input_text, "");
     output.push(typeof value === "string" ? value : "");
   }
   return output.join("");
 }
 
 function extractReasoning(payload: JsonRecord): string {
-  if (pythonTruthy(payload.content)) return extractText(payload.content);
+  if (hasMeaningfulValue(payload.content)) return extractText(payload.content);
   if (Array.isArray(payload.summary)) {
     return payload.summary.map((part) => extractText(part)).join(" ");
   }
@@ -135,17 +114,17 @@ function usage(value: unknown): JsonRecord {
 }
 
 function toolError(payload: JsonRecord): unknown {
-  return firstTruthy(
+  return firstMeaningfulValue(
     payload.error,
     payload.codex_error_info,
     payload.stderr,
     payload.aggregated_output,
-    pythonTruthy(payload.exit_code) ? `Exit code: ${String(payload.exit_code)}` : "failed",
+    hasMeaningfulValue(payload.exit_code) ? `Exit code: ${String(payload.exit_code)}` : "failed",
   );
 }
 
 function toolOutput(payload: JsonRecord): unknown {
-  const direct = firstTruthy(
+  const direct = firstMeaningfulValue(
     payload.aggregated_output,
     payload.stdout,
     payload.result,
@@ -159,23 +138,7 @@ function toolOutput(payload: JsonRecord): unknown {
   return fallback;
 }
 
-async function readJsonl(path: string): Promise<JsonRecord[]> {
-  const records: JsonRecord[] = [];
-  for (const rawLine of (await readFile(path, "utf8")).split("\n")) {
-    const line = rawLine.trim();
-    if (line === "") continue;
-    try {
-      records.push(asRecord(parsePythonJson(line)));
-    } catch (error) {
-      if (error instanceof SyntaxError) continue;
-      throw error;
-    }
-  }
-  return records;
-}
-
 export async function parseRollout(path: string): Promise<[TraceTurn[], JsonRecord]> {
-  const records = await readJsonl(path);
   let sessionMeta: JsonRecord = {};
   const turns: TraceTurn[] = [];
   let current: TraceTurn | undefined;
@@ -196,15 +159,15 @@ export async function parseRollout(path: string): Promise<[TraceTurn[], JsonReco
     finishStep();
     current.completed = completed;
     current.aborted = aborted;
-    if (!pythonTruthy(current.final_output)) {
+    if (!hasMeaningfulValue(current.final_output)) {
       for (const step of [...current.steps].reverse()) {
-        if (pythonTruthy(step.text)) {
+        if (hasMeaningfulValue(step.text)) {
           current.final_output = step.text;
           break;
         }
       }
     }
-    if (!pythonTruthy(current.user_input)) {
+    if (!hasMeaningfulValue(current.user_input)) {
       current.user_input = current.user_input_fallback ?? null;
     }
     turns.push(current);
@@ -215,16 +178,24 @@ export async function parseRollout(path: string): Promise<[TraceTurn[], JsonReco
 
   const attachPending = (toolCall: ToolCall): void => {
     const callId = toolCall.call_id;
-    if (!pythonTruthy(callId) || !pendingOutputs.has(callId)) return;
+    if (!hasMeaningfulValue(callId) || !pendingOutputs.has(callId)) return;
     const pending = pendingOutputs.get(callId);
     pendingOutputs.delete(callId);
     if (pending === undefined) return;
-    if (pythonTruthy(pending.error)) toolCall.error = pending.error;
+    if (hasMeaningfulValue(pending.error)) toolCall.error = pending.error;
     if (pending.output !== null && pending.output !== undefined) toolCall.output = pending.output;
   };
 
-  for (const record of records) {
+  for await (const record of readJsonlRecords(path)) {
     const type = record.type;
+    if (
+      type !== "session_meta" &&
+      type !== "turn_context" &&
+      type !== "response_item" &&
+      type !== "event_msg"
+    ) {
+      continue;
+    }
     const payload = recordOrPythonFallback(record.payload, "payload");
 
     if (type === "session_meta") {
@@ -232,7 +203,7 @@ export async function parseRollout(path: string): Promise<[TraceTurn[], JsonReco
       continue;
     }
     if (type === "turn_context" && current !== undefined) {
-      current.model = firstTruthy(payload.model, current.model) ?? null;
+      current.model = firstMeaningfulValue(payload.model, current.model) ?? null;
       current.invocation_params = payload;
       continue;
     }
@@ -263,7 +234,7 @@ export async function parseRollout(path: string): Promise<[TraceTurn[], JsonReco
           args: maybeJson(argumentSource ?? null),
         };
         currentStep.tool_calls.push(toolCall);
-        if (pythonTruthy(toolCall.call_id)) {
+        if (hasMeaningfulValue(toolCall.call_id)) {
           toolsById.set(toolCall.call_id, toolCall);
           attachPending(toolCall);
         }
@@ -279,7 +250,7 @@ export async function parseRollout(path: string): Promise<[TraceTurn[], JsonReco
           },
         };
         currentStep.tool_calls.push(toolCall);
-        if (pythonTruthy(toolCall.call_id)) {
+        if (hasMeaningfulValue(toolCall.call_id)) {
           toolsById.set(toolCall.call_id, toolCall);
           attachPending(toolCall);
         }
@@ -320,7 +291,7 @@ export async function parseRollout(path: string): Promise<[TraceTurn[], JsonReco
     } else if (
       typeof payloadType === "string" &&
       payloadType.endsWith("_end") &&
-      pythonTruthy(payload.call_id)
+      hasMeaningfulValue(payload.call_id)
     ) {
       const toolCall = toolsById.get(payload.call_id);
       const output = toolOutput(payload);
@@ -329,8 +300,8 @@ export async function parseRollout(path: string): Promise<[TraceTurn[], JsonReco
           ? toolError(payload)
           : null;
       if (toolCall !== undefined) {
-        if (pythonTruthy(error)) toolCall.error = error;
-        if (!pythonTruthy(toolCall.output)) toolCall.output = output;
+        if (hasMeaningfulValue(error)) toolCall.error = error;
+        if (!hasMeaningfulValue(toolCall.output)) toolCall.output = output;
       } else {
         pendingOutputs.set(payload.call_id, { output, error });
       }

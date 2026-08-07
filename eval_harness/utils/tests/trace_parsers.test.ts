@@ -188,7 +188,9 @@ test("[CHAR] Claude parser skips malformed lines and opens assistant-first turns
   });
 });
 
-test("[CHAR] trace parsers preserve Python JSON number semantics", async () => {
+test("[CHAR] parsed trace fields preserve number spelling and large integers", async () => {
+  // Scope: values that pass through their parsed JSON holder. Newly derived
+  // numeric values preserve meaning but can use JavaScript's number spelling.
   await withTempDir(async (directory) => {
     const transcript = join(directory, "session.jsonl");
     const numbers =
@@ -220,6 +222,47 @@ test("[CHAR] truthy malformed message and payload records reject their session",
 
     await expect(parseTranscript(claude)).rejects.toThrow();
     await expect(parseRollout(codex)).rejects.toThrow();
+  });
+});
+
+test("[REGRESSION] Claude ignores unknown record types before validating message", async () => {
+  await withTempDir(async (directory) => {
+    const transcript = join(directory, "session.jsonl");
+    await writeJsonl(transcript, [
+      claudePrompt("Keep this turn"),
+      { type: "future-record", message: "externally-owned payload" },
+      {
+        type: "assistant",
+        message: { content: [{ type: "text", text: "Still parsed." }] },
+      },
+    ]);
+
+    const [turns] = await parseTranscript(transcript);
+    expect(turns).toHaveLength(1);
+    expect(turns[0]).toMatchObject({
+      user_input: "Keep this turn",
+      final_output: "Still parsed.",
+    });
+  });
+});
+
+test("[REGRESSION] Codex ignores unknown record types before validating payload", async () => {
+  await withTempDir(async (directory) => {
+    const rollout = join(directory, "rollout-test.jsonl");
+    await writeJsonl(rollout, [
+      codexTaskStarted("turn-kept"),
+      { type: "future-record", payload: "externally-owned payload" },
+      { type: "event_msg", payload: { type: "agent_message", message: "Still parsed." } },
+      { type: "event_msg", payload: { type: "task_complete" } },
+    ]);
+
+    const [turns] = await parseRollout(rollout);
+    expect(turns).toHaveLength(1);
+    expect(turns[0]).toMatchObject({
+      turn_id: "turn-kept",
+      final_output: "Still parsed.",
+      completed: true,
+    });
   });
 });
 
@@ -617,6 +660,22 @@ test("[CHAR] Braintrust bridge forwards its payload and remains fail-open", asyn
       else process.env.TRACE_BRIDGE_EXIT = previousExit;
     }
   });
+});
+
+test("[REGRESSION] real Braintrust bridge imports from the repository root", async () => {
+  const previousApiKey = process.env.BRAINTRUST_API_KEY;
+  const previousLog = console.log;
+  const logs: string[] = [];
+  delete process.env.BRAINTRUST_API_KEY;
+  console.log = (...values: unknown[]) => logs.push(values.map(String).join(" "));
+  try {
+    await emitBraintrustSession([], {}, null, "claude-code-authoring", null);
+    expect(logs).toEqual([]);
+  } finally {
+    console.log = previousLog;
+    if (previousApiKey === undefined) delete process.env.BRAINTRUST_API_KEY;
+    else process.env.BRAINTRUST_API_KEY = previousApiKey;
+  }
 });
 
 test("[CHAR] both parse-only CLIs emit the stable session envelope", async () => {

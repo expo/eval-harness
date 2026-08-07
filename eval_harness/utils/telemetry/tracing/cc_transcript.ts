@@ -6,10 +6,11 @@
  * tool-result blocks attach to tool-use blocks only through their matching ID.
  */
 
-import { readdir, readFile, realpath, stat, writeFile, mkdir } from "node:fs/promises";
-import type { Dirent } from "node:fs";
+import { createReadStream, type Dirent } from "node:fs";
+import { mkdir, readdir, realpath, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { createInterface } from "node:readline";
 
 export type JsonRecord = Record<string, unknown>;
 export type ToolCall = JsonRecord & {
@@ -53,7 +54,8 @@ function optionalRecord(value: unknown): JsonRecord {
     : {};
 }
 
-function pythonTruthy(value: unknown): boolean {
+/** Treat default primitives and empty containers as absent trace data. */
+export function hasMeaningfulValue(value: unknown): boolean {
   if (
     value === null ||
     value === undefined ||
@@ -70,7 +72,7 @@ function pythonTruthy(value: unknown): boolean {
 }
 
 function recordOrPythonFallback(value: unknown, field: string): JsonRecord {
-  if (!pythonTruthy(value)) return {};
+  if (!hasMeaningfulValue(value)) return {};
   if (typeof value === "object" && value !== null && !Array.isArray(value)) {
     return value as JsonRecord;
   }
@@ -297,23 +299,27 @@ export function stringifyPythonJson(value: unknown, indent?: number): string {
   return pythonJsonDumps(value, undefined, undefined, indent);
 }
 
-async function readJsonl(path: string): Promise<JsonRecord[]> {
-  const records: JsonRecord[] = [];
-  for (const rawLine of (await readFile(path, "utf8")).split("\n")) {
-    const line = rawLine.trim();
-    if (line === "") continue;
-    try {
-      records.push(asRecord(parseJsonWithNumberSources(line)));
-    } catch (error) {
-      if (error instanceof SyntaxError) continue;
-      throw error;
+export async function* readJsonlRecords(path: string): AsyncGenerator<JsonRecord> {
+  const input = createReadStream(path, { encoding: "utf8" });
+  const lines = createInterface({ input, crlfDelay: Infinity });
+  try {
+    for await (const rawLine of lines) {
+      const line = rawLine.trim();
+      if (line === "") continue;
+      try {
+        yield asRecord(parseJsonWithNumberSources(line));
+      } catch (error) {
+        if (error instanceof SyntaxError) continue;
+        throw error;
+      }
     }
+  } finally {
+    lines.close();
+    input.destroy();
   }
-  return records;
 }
 
 export async function parseTranscript(path: string): Promise<[TraceTurn[], JsonRecord]> {
-  const records = await readJsonl(path);
   let sessionMeta: JsonRecord = {};
   const turns: TraceTurn[] = [];
   let current: TraceTurn | undefined;
@@ -335,7 +341,7 @@ export async function parseTranscript(path: string): Promise<[TraceTurn[], JsonR
     toolsById = new Map();
   };
 
-  for (const record of records) {
+  for await (const record of readJsonlRecords(path)) {
     const type = record.type;
     if ((type === "user" || type === "assistant") && Object.keys(sessionMeta).length === 0) {
       sessionMeta = {
@@ -345,6 +351,7 @@ export async function parseTranscript(path: string): Promise<[TraceTurn[], JsonR
         git_branch: record.gitBranch ?? null,
       };
     }
+    if (type !== "user" && type !== "assistant") continue;
     const message = recordOrPythonFallback(record.message, "message");
 
     if (type === "user") {
