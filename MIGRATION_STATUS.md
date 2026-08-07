@@ -29,7 +29,7 @@ not be read as a failure or a pass.
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Baseline and migration documentation | `codex/ts-migration-docs`; [PR #24](https://github.com/expo/eval-experiments/pull/24) | None yet | Corrected baseline: 118 tests; PR branch: 120 tests | Not applicable | Not applicable | Baseline recorded below | Authoring and skill jobs pass; iOS times out | Codex pass | Pending | Ready for review |
 | Bun and TypeScript toolchain | `codex/ts-toolchain`; [PR #25](https://github.com/expo/eval-experiments/pull/25) | None expected | Pass: 120 tests | Strict typecheck and 1 Bun smoke test pass from frozen lockfile | Not applicable | No runtime TS exists yet; smoke coverage is not meaningful | All four workflows validate; Linux replay installs Bun 1.3.14 and passes with baseline-equivalent metrics | Codex pass | Pending | Ready for review |
-| Timeout and process helper | Planned `codex/ts-timeout`; PR pending | To be selected after contract review | Characterization and cleanup tests pending | Pending | Pending | Python module currently absent from coverage report | Authoring replay pending | Pending | Pending | Not started |
+| Timeout and process helper | `codex/ts-timeout`; [PR #26](https://github.com/expo/eval-experiments/pull/26) | None; process timing is unsuitable for useful PBT | Retired after initial characterization/parity; review-discovered behavior was recovered from Git history | Strict typecheck; 16 permanent timeout tests plus the toolchain smoke test; executable expected failure for `DEFECT-001`; all 5 shell caller files switched | Caller-relevant finite decimal timeouts, signal status, output, exit, and best-effort cleanup behavior pass | Bun child-process execution is not attributed by the parent coverage profile; focused behavior evidence passes | macOS helper smoke and bounded caller replay pass; the earlier numeric-parity smoke covered a broader Python grammar that is intentionally no longer supported | Codex pass | Kudo approved; minor findings addressed and all local/configuration checks pass | Ready to merge |
 | Telemetry parsers and emission | Branch/PR pending | To be selected per parser | Fixture and property tests pending | Pending | Pending | Script-style modules currently absent from coverage report | `author-app.yml` pending | Pending | Pending | Not started |
 | Deterministic skill evaluator | Branch/PR pending | To be selected | Existing core suite passes | Pending | Pending | Core mostly covered; CLI is 0% | Skill replay pending | Pending | Pending | Not started |
 | iOS core, parsing, scoring, and reports | Branch/PR pending | To be selected | Existing report and resolution tests pass | Pending | Pending | Important modules range from 17% to 89% | iOS replay pending | Pending | Pending | Not started |
@@ -47,7 +47,7 @@ initially marked ready for Expo review.
 | Integration | `codex/migrate-to-ts` | `main` | Repository root | Umbrella draft not opened |
 | A | `codex/ts-migration-docs` | `codex/migrate-to-ts` | `.worktrees/ts-migration-docs` | [PR #24](https://github.com/expo/eval-experiments/pull/24); ready for Expo review |
 | B | `codex/ts-toolchain` | `codex/ts-migration-docs` | `.worktrees/ts-toolchain` | [PR #25](https://github.com/expo/eval-experiments/pull/25); ready for Expo review |
-| C | `codex/ts-timeout` | `codex/ts-toolchain` | Not created | Not opened |
+| C | `codex/ts-timeout` | `codex/ts-toolchain` | `.worktrees/ts-timeout` | [Draft PR #26](https://github.com/expo/eval-experiments/pull/26); internally complete |
 
 No fourth dependent PR may be opened until the bottom PR merges. After a
 bottom PR merges, its successor is rebased and retargeted, affected checks are
@@ -59,10 +59,10 @@ Every tracked path is approved and reviewed independently of its containing
 slice. “Proposed before edit” means the file's purpose, exact change, expected
 effect, and verification were presented in the task before it was modified.
 
-| Path | Slice | Purpose | Approval evidence | Review | Evidence commit | State |
+| Path | Slice | Purpose | Approval evidence | Review | Tested evidence revision | State |
 | --- | --- | --- | --- | --- | --- | --- |
-| `MIGRATION_TESTING.md` | Documentation | Define migration and testing gates. | Explicitly approved before review-fix edit. | Codex re-review passed. | `aa4d0af`, `fd74f31` | Implemented in PR #24 |
-| `MIGRATION_STATUS.md` | Documentation | Record branches, evidence, risks, and reviews. | Explicitly approved before review-fix edit. | Codex re-review passed. | `c719dd3`, `fd74f31` | Implemented in PR #24 |
+| `MIGRATION_TESTING.md` | Documentation | Define migration, testing, review, commit, and merge gates. | Explicitly approved before the original guide and the methodology expansion. | Codex re-review passed. | `aa4d0af`, `fd74f31`, `c627356` | Expanded on the timeout branch with lessons from the first runtime migration |
+| `MIGRATION_STATUS.md` | Documentation | Record branches, evidence, risks, reviews, and the evidence-attribution policy. | Standing approval for status updates. | Codex re-review passed. | Records reviewed implementation head `e6ed4e0` and guide revision `c627356`; the roll-up does not self-reference | Updated with timeout evidence and methodology-review findings |
 | `README.md` | Documentation | Link migration material without changing runtime guidance. | Plan approved; proposed before edit. | Codex review: no issue. | `aa4d0af` | Implemented in PR #24 |
 | `test_properties.json` | Documentation | Hold reviewed language-independent properties. | Plan approved; proposed before edit. | Codex review: no issue. | `aa4d0af` | Empty draft in PR #24 |
 | `test_properties.schema.json` | Documentation | Validate property-record structure and safe source paths. | Explicitly approved before retaining review fix. | Codex re-review passed. | `aa4d0af`, `fd74f31` | Implemented in PR #24 |
@@ -77,6 +77,15 @@ effect, and verification were presented in the task before it was modified.
 | `.eas/workflows/eval-skill-use.yml` | Toolchain | Pin the tested Bun version on the skill-evaluator worker. | Explicitly approved before edit. | Codex re-review passed. | `e242545` | Expo validator passes |
 | `.eas/workflows/eval-ios-app.yml` | Toolchain | Pin the tested Bun version on the iOS-evaluator worker. | Explicitly approved before edit. | Codex re-review passed. | `e242545` | Expo validator passes |
 | `.eas/workflows/eval-e2e.yml` | Toolchain | Pin the tested Bun version for every job in the primary workflow. | Explicitly approved before edit. | Codex re-review passed. | `e242545` | Expo validator passes |
+| `eval_harness/utils/tests/test_timeout_exec.py` | Timeout helper | Characterize the Python CLI and expose incomplete descendant cleanup. | Explicitly approved before edit and later deletion. | Codex pass. | `987de1b`, `668c117` | Removed after behavior and executable defect evidence moved to TypeScript |
+| `eval_harness/utils/tests/timeout_exec.test.ts` | Timeout helper | Protect permanent Bun behavior and execute the known cleanup defect; previously hosted transitional parity cases. | Explicitly approved before each edit. | Codex pass; Kudo review findings addressed. | `7ca8312`, `0ae001a`, `668c117`, `e6ed4e0`; final review-feedback commit pending | 16 caller-relevant timeout grammar, signal, exit, output, diagnostics, and cleanup-race cases pass; executable `test.failing` retains `DEFECT-001` |
+| `eval_harness/utils/shell/timeout_exec.py` | Timeout helper | Original Python timeout implementation retained only for migration parity. | Explicitly approved before deletion. | Codex pass. | `668c117` | Removed after local parity, caller cutover, and EAS gates passed |
+| `eval_harness/utils/shell/timeout_exec.ts` | Timeout helper | Translate the Python timeout CLI for direct execution by Bun. | Explicitly approved before edit. | Codex pass; Kudo review findings addressed. | `e506682`, `e6ed4e0`; final review-feedback commit pending | Accepts the finite, non-negative decimal timeout forms used by callers; cleanup races cannot replace timeout exit 124; `DEFECT-001` remains intentionally preserved |
+| `eval_harness/utils/shell/agents.sh` | Timeout helper | Use the Bun timeout helper when platform timeout commands are unavailable. | Explicitly approved before edit. | Codex pass. | `d260437` | Forced fallback selects Bun; all shell syntax and full local suites pass |
+| `eval_harness/app_builder/scripts/author-app.sh` | Timeout helper | Use the Bun timeout helper for the build-health fallback. | Explicitly approved as part of the complete caller batch. | Codex pass. | `fae5d05` | Shell syntax and full local suites pass |
+| `eval_harness/utils/shell/evaluator.sh` | Timeout helper | Use the Bun timeout helper for the evaluator fallback. | Explicitly approved as part of the complete caller batch. | Codex pass. | `fae5d05` | Shell syntax and full local suites pass |
+| `eval_harness/utils/shell/app_runtime.sh` | Timeout helper | Use the Bun timeout helper for release-build timeout enforcement. | Explicitly approved as part of the complete caller batch. | Codex pass. | `fae5d05` | Shell syntax and full local suites pass |
+| `eval_harness/utils/shell/ios.sh` | Timeout helper | Use the Bun timeout helper for simulator boot and runner preparation. | Explicitly approved as part of the complete caller batch. | Codex pass. | `fae5d05` | Shell syntax and full local suites pass |
 
 Generated files, renames, deletions, and workflow changes use the same ledger.
 A material rebase returns affected rows to a pending review state.
@@ -95,6 +104,7 @@ A material rebase returns affected rows to a pending review state.
 | Corrected pre-migration baseline | 118 passing tests |
 | Documentation branch count | 120 passing tests, including 2 new catalog-integrity tests |
 | Active runtime Python physical lines | 7,482 |
+| Current active runtime Python physical lines | 7,440 after the 42-line timeout helper was retired |
 | Notes PRD | `dataset/prds/notes/prd/mvp.txt` |
 | Notes primitive plan | `dataset/test_plans/primitives/test_insert.txt` |
 
@@ -264,6 +274,20 @@ not a migration-equivalence change.
 | Deterministic comparison | Exact structural and value match to the original Python `metrics.json` after normalizing only the different temporary authored-root prefix. |
 | Artifact-size observation | Replay artifact is about 28 MB because it includes `skill-eval-report/unpacked/authored`; the original E2E skill report was about 9 KB. Recorded as a packaging risk, not changed in this PR. |
 
+## Timeout-helper EAS validation
+
+| Evidence | State |
+| --- | --- |
+| Commit content | Clean `codex/ts-timeout` worktree at `4ce009e`, uploaded by EAS CLI for an untracked temporary workflow. |
+| macOS smoke | [Run `019fbbef-4ae3-7ed3-b24b-31c3a488e14c`](https://expo.dev/accounts/georgian-team/projects/adi-test-project/workflows/019fbbef-4ae3-7ed3-b24b-31c3a488e14c): success. |
+| Assertions | Bun 1.3.14 executes the helper; normal output passes through; timeout returns 124 with exact diagnostic; `agents.sh` fallback selects Bun. |
+| Reviewed parity smoke | [Run `019fbc1d-2b96-7fc0-8f0b-f742282695c2`](https://expo.dev/accounts/georgian-team/projects/adi-test-project/workflows/019fbc1d-2b96-7fc0-8f0b-f742282695c2): success on macOS for signal status, numeric grammar, scientific formatting, non-finite values, and oversized timers. |
+| Bounded caller replay | [Run `019fbbf2-5a5c-7d2a-b354-a91da38398c6`](https://expo.dev/accounts/georgian-team/projects/adi-test-project/workflows/019fbbf2-5a5c-7d2a-b354-a91da38398c6): success against commit `ce88766`. |
+| Replay scope | Fixed Notes artifact, release mode, and `test_insert.txt` only. The temporary workflow was not added to the repository and did not change active workflow inputs. |
+| Caller evidence | Bun-guarded simulator boot, `ios-runner` preparation, release build/install, launch probe, and evaluator all completed. Result: 6/6 points, 100% macro and micro scores. |
+| Replay artifact | `timeout-callers-replay-output`, ID `019fbc03-cf34-79ee-9432-4df537139fc7`, 717,715,469 bytes. |
+| Scope boundary | The bounded replay is the timeout-slice gate. The complete 11-plan Notes replay remains part of later iOS/final validation and retains the known 30-minute budget risk (`RISK-003`). |
+
 ## Evidence log
 
 | Date | Commit | Slice | Command or workflow | Result | Notes |
@@ -285,6 +309,35 @@ not a migration-equivalence change.
 | 2026-08-01 | `a9db7ef` | Corrected toolchain | `bun run test:all` | Pass | The canonical command automatically selects the non-default Python `test` group; strict typecheck, 1 Bun test, and 120 Python tests pass. |
 | 2026-08-01 | `e950f42` | Live EAS Bun provisioning | Skill replay run `019fbbc0-efa2-7470-9927-3a6e16a3e293` | Partial: Bun pass; replay input failure | EAS installed Bun 1.3.14 successfully, then the historical artifact-ID lookup returned 404 before analysis. |
 | 2026-08-01 | `e950f42` | Controlled EAS skill replay | Skill replay run `019fbbc2-9ecd-78ec-b8e1-78876047633e` using the same artifact's fresh signed URL | Pass | Required report files present; normalized `metrics.json` exactly matches the Python baseline. |
+| 2026-08-01 | `987de1b` | Timeout Python characterization | `python -m unittest discover -s eval_harness/utils/tests -p 'test_timeout_exec.py' -v` | Pass: 5 tests; 1 expected failure | Expected failure is specifically `descendant process ... survived wrapper exit`. |
+| 2026-08-01 | `987de1b` | Timeout regression check | `bun run test:all` | Pass | Strict typecheck; 1 Bun test; 114 main Python tests; 12 utility tests including 1 expected failure. |
+| 2026-08-01 | `7ca8312` | Timeout TypeScript red stage | `bun test eval_harness/utils/tests/timeout_exec.test.ts` plus `bun run typecheck` | Expected red: 5 failures; 1 todo; typecheck passes | All five failures receive exit 1 because `timeout_exec.ts` does not exist; direct Bun invocation confirms module-not-found. |
+| 2026-08-01 | `e506682` | Timeout TypeScript green stage | `bun test eval_harness/utils/tests/timeout_exec.test.ts` plus `bun run typecheck` | Pass: 5 tests; 1 todo; strict typecheck passes | Bun implementation preserves the characterized CLI behavior; cleanup todo tracks `DEFECT-001`. |
+| 2026-08-01 | `e506682` | Timeout full local regression | `bun run test:all` | Pass | 6 TypeScript tests pass with 1 todo; 114 main-discovery Python tests and 12 utility-discovery Python tests pass with 1 expected failure. |
+| 2026-08-01 | `0ae001a` | Timeout differential comparison | Run both timeout CLIs with identical arguments and child commands | Pass: 5 exact comparisons | Missing arguments, invalid timeout, child exit, child output, and timeout observables match exactly. |
+| 2026-08-01 | `0ae001a` | Timeout post-differential regression | `bun run test:all` | Pass | Strict typecheck; 11 TypeScript tests with 1 todo; 114 main-discovery Python tests; 12 utility-discovery Python tests with 1 expected failure. |
+| 2026-08-01 | `d260437` | First timeout caller cutover | Force `eval::_agent_timeout` fallback; parse all active shell scripts; run `bun run test:all` | Pass | Fallback emits `bun .../timeout_exec.ts 2400`; strict typecheck and all TypeScript/Python suites pass. |
+| 2026-08-01 | `fae5d05` | Complete timeout caller cutover | Search active callers; parse all active shell scripts; run focused parity/type checks and `bun run test:all` | Pass | All five caller files use Bun; 10 focused timeout tests and all repository TypeScript/Python suites pass. |
+| 2026-08-01 | `4ce009e` | EAS macOS timeout smoke | Temporary validated workflow run `019fbbef-4ae3-7ed3-b24b-31c3a488e14c` | Pass | Bun 1.3.14 executed normal and timed-out commands with expected observables; temporary workflow was not added to the repository. |
+| 2026-08-01 | `ce88766` | Bounded EAS timeout-caller replay | Temporary validated workflow run `019fbbf2-5a5c-7d2a-b354-a91da38398c6` | Pass | Real Notes release app and `test_insert.txt`; timeout callers completed; result 6/6; artifact `019fbc03-cf34-79ee-9432-4df537139fc7`. |
+| 2026-08-01 | `2145dda` | Timeout TypeScript coverage probe | `bun test --coverage` | Tests pass; no file table emitted | The helper runs in child Bun processes, whose execution is not merged into the parent test process's coverage profile; no percentage claim is made. |
+| 2026-08-01 | `668c117` | Timeout Python retirement | Focused TypeScript tests, strict typecheck, all shell parsing, reference audit, and `bun run test:all` | Pass | 7 TypeScript tests; 114 main Python tests; 6 remaining utility Python tests; active runtime Python falls from 7,482 to 7,440 lines. |
+| 2026-08-01 | Working tree after `14351bb` | Review parity red stage | Add signal-status and Python-compatible numeric-text regression cases; run focused Bun test and strict typecheck | Expected red: 10 failures; typecheck passes | Failures exactly reproduce status 143 vs 241, JS-only hex acceptance, underscore rejection, exponent spelling, and non-finite/oversized timer drift. |
+| 2026-08-01 | `e6ed4e0` | Review parity green stage | Focused tests, strict typecheck, all shell parsing, and `bun run test:all` | Pass | 16 focused timeout tests; 17 total TypeScript tests; 114 main Python tests; 6 utility Python tests. |
+| 2026-08-01 | `e6ed4e0` | Timeout-helper Codex re-review | Independent review plus focused suite, strict typecheck, shell parsing, grammar/format edge checks, and a 56-value Python `:g` comparison | Pass | No remaining findings; signal mapping, float compatibility, timer cancellation, expected-failure honesty, and recorded evidence are consistent. |
+| 2026-08-01 | `e6ed4e0` | EAS reviewed parity smoke | Temporary validated workflow run `019fbc1d-2b96-7fc0-8f0b-f742282695c2` | Pass | The runtime/test tree later committed as `e6ed4e0` passed all newly reviewed parity cases on Bun 1.3.14 for macOS; the temporary workflow was not added to the repository. |
+| 2026-08-01 | `c627356` | Migration-method expansion | Independent review of reference retention, commit/evidence discipline, runtime parity checks, and the concrete rolling-stack restack procedure | Pass | Initial review found two important and two minor documentation gaps; all were fixed, and re-review found no remaining issues. |
+
+## Migration defect backlog
+
+Every confirmed implementation defect receives a stable ID, an executable
+regression or expected-failing test, and an explicit disposition. Final cutover
+cannot silently ignore an open row: it must be fixed, linked to an owned
+follow-up issue with a deferral decision, or marked out of scope with rationale.
+
+| ID | Slice | Defect | Executable evidence | Follow-up gate | State |
+| --- | --- | --- | --- | --- | --- |
+| DEFECT-001 | Timeout helper | After a timeout, the direct child can exit on `SIGTERM` while a descendant that ignores `SIGTERM` remains alive in the managed process group. | Bun's `[SPEC DEFECT-001] timed-out descendants do not survive` uses `test.failing`, executes on every run, and forcibly kills the leaked descendant during cleanup. | Preserve during syntax migration and open an owned behavior-fix follow-up. Remove `test.failing` only when the cleanup contract passes normally. | Open |
 
 ## Discrepancies, defects, and risks
 
@@ -299,9 +352,12 @@ not a migration-equivalence change.
 | RISK-007 | Replay-input risk | `eas/download_artifact` returned 404 for the historical authored-app artifact's displayed ID even though the original run still listed it and a fresh signed URL worked. | Preserve both run IDs; use a fresh signed URL for current replay evidence and investigate artifact-ID replay semantics separately from language migration. | Open |
 | RISK-008 | Artifact-size risk | The standalone skill replay packaged its unpacked authored app, producing a roughly 28 MB report versus the original E2E report's roughly 9 KB. | Preserve current behavior during toolchain work; review report staging and cleanup during the skill-evaluator slice. | Open |
 
-No Python-to-TypeScript behavioral discrepancy exists yet because no runtime
-slice has been translated. Existing defects discovered later must be recorded
-without being silently fixed as part of syntax translation.
+The first runtime helper has completed TypeScript cutover. Five direct
+cross-implementation cases matched before the Python implementation and
+transitional parity code were removed. Permanent Bun regression tests remain,
+and the preserved cleanup defect executes as an expected failure. Existing
+defects discovered later must be recorded without being silently fixed as part
+of syntax translation.
 
 ## Review record
 
@@ -311,6 +367,8 @@ without being silently fixed as part of syntax translation.
 | Codex review | Independent Codex reviewer | Pass | Initial findings fixed; final re-review found no remaining issues and assessed the slice ready to merge. |
 | AI-assisted PR review | Independent Codex reviewer | Pass | User selected Codex review as sufficient; no Copilot or additional third-party review required. |
 | Toolchain Codex review | Independent Codex reviewer | Pass | One P2 dependency-isolation issue fixed in `a9db7ef`; re-review found no remaining issues. |
+| Timeout-helper Codex review | Independent Codex reviewer | Pass | No critical issues; two important signal-status and timeout numeric-text parity gaps were fixed, and re-review found no remaining issues. |
+| Migration-method Codex review | Independent Codex reviewer | Pass | Reference retention, evidence attribution, safe stack restacking, and final post-retirement review are internally consistent; re-review found no remaining issues. |
 | Expo collaborator review | Pending | Pending | — |
 | Umbrella approval | Pending | Pending | — |
 

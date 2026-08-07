@@ -1,7 +1,7 @@
 eval::_agent_timeout() {
   if command -v gtimeout >/dev/null 2>&1; then echo "gtimeout 2400";
   elif command -v timeout >/dev/null 2>&1; then echo "timeout 2400";
-  else echo "python3 $_EVAL_STAGES_DIR/timeout_exec.py 2400"; fi
+  else echo "bun $_EVAL_STAGES_DIR/timeout_exec.ts 2400"; fi
 }
 
 # Configures Expo MCP auth for this run. mcp.expo.dev now accepts an Expo
