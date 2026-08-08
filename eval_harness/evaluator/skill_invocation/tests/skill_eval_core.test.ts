@@ -57,6 +57,10 @@ import {
 
 const REAL_CHECKS_DIR = resolve(import.meta.dir, "../uptake_checks");
 const REPO_ROOT = resolve(import.meta.dir, "../../../..");
+const BUNDLE_CHECK_PATH = resolve(
+  import.meta.dir,
+  "../build_health/bundle_check.ts",
+);
 const PYTHON = existsSync(join(REPO_ROOT, ".venv", "bin", "python"))
   ? join(REPO_ROOT, ".venv", "bin", "python")
   : Bun.which("python3");
@@ -65,6 +69,17 @@ function withTempDir<T>(run: (root: string) => T): T {
   const root = mkdtempSync(join(tmpdir(), "skill-core-"));
   try {
     return run(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+async function withTempDirAsync<T>(
+  run: (root: string) => Promise<T>,
+): Promise<T> {
+  const root = mkdtempSync(join(tmpdir(), "skill-core-"));
+  try {
+    return await run(root);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -161,13 +176,13 @@ function writeRawTar(
   writeFileSync(path, Buffer.concat(blocks));
 }
 
-function runRealChecks(
+async function runRealChecks(
   root: string,
   skillId: string,
-): Record<string, CheckResult> {
+): Promise<Record<string, CheckResult>> {
   const { checks } = resolveChecksForSkills([skillId], REAL_CHECKS_DIR);
   return Object.fromEntries(
-    runChecks(checks, root).map((result) => [result.id, result]),
+    (await runChecks(checks, root)).map((result) => [result.id, result]),
   );
 }
 
@@ -497,8 +512,8 @@ test("[REGRESSION] pooled resolution deduplicates shared checks", () => {
   });
 });
 
-test("[REGRESSION] declarative checks ignore comments and tooling directories", () => {
-  withTempDir((root) => {
+test("[REGRESSION] declarative checks ignore comments and tooling directories", async () => {
+  await withTempDirAsync(async (root) => {
     mkdirSync(join(root, "app"));
     mkdirSync(join(root, "scripts"));
     writeFileSync(
@@ -529,7 +544,7 @@ test("[REGRESSION] declarative checks ignore comments and tooling directories", 
     );
     const { checks } = resolveChecksForSkills(["expo-router"], checksDir);
     const results = Object.fromEntries(
-      runChecks(checks, root).map((result) => [result.id, result]),
+      (await runChecks(checks, root)).map((result) => [result.id, result]),
     );
 
     expect(results["router-import"]?.status).toBe("failed");
@@ -537,8 +552,8 @@ test("[REGRESSION] declarative checks ignore comments and tooling directories", 
   });
 });
 
-test("[REGRESSION] every declarative check kind preserves its basic result", () => {
-  withTempDir((root) => {
+test("[REGRESSION] every declarative check kind preserves its basic result", async () => {
+  await withTempDirAsync(async (root) => {
     writeAppFiles(root, {
       "app/index.tsx":
         "const loading = true; const ready = true; export default loading && ready;\n",
@@ -597,7 +612,7 @@ test("[REGRESSION] every declarative check kind preserves its basic result", () 
       },
     );
     const { checks } = resolveChecksForSkills(["all-kinds"], checksDir);
-    const results = runChecks(checks, root);
+    const results = await runChecks(checks, root);
 
     expect(results.map((result) => result.status)).toEqual([
       "passed",
@@ -818,11 +833,11 @@ test.skipIf(PYTHON === null)(
 
 test.skipIf(PYTHON === null)(
   "[DIFF] malformed UTF-8 source files are skipped",
-  () => {
-    withTempDir((root) => {
+  async () => {
+    await withTempDirAsync(async (root) => {
       writeFileSync(join(root, "valid.ts"), "export const valid = true;\n");
       writeFileSync(join(root, "invalid.ts"), Buffer.from([0xc3, 0x28]));
-      const typescriptFiles = [...new AppTree(root).files.keys()];
+      const typescriptFiles = [...(await AppTree.load(root)).files.keys()];
       const pythonScript = `
 import json
 import sys
@@ -849,8 +864,8 @@ print(json.dumps([str(path) for path in AppTree(Path(sys.argv[1])).files]))
   },
 );
 
-test("[REGRESSION] source files use locale-independent code-point order", () => {
-  withTempDir((root) => {
+test("[REGRESSION] source files use locale-independent code-point order", async () => {
+  await withTempDirAsync(async (root) => {
     writeAppFiles(root, {
       "app/_layout.tsx": "export default null;\n",
       "app/(tabs).tsx": "export default null;\n",
@@ -858,7 +873,7 @@ test("[REGRESSION] source files use locale-independent code-point order", () => 
       "app/index.tsx": "export default null;\n",
     });
 
-    expect([...new AppTree(root).files.keys()]).toEqual([
+    expect([...(await AppTree.load(root)).files.keys()]).toEqual([
       "app/(tabs).tsx",
       "app/+not-found.tsx",
       "app/_layout.tsx",
@@ -867,8 +882,39 @@ test("[REGRESSION] source files use locale-independent code-point order", () => 
   });
 });
 
-test("[DIFF] an empty __tests__ directory violates the path-absent check", () => {
-  withTempDir((root) => {
+test("[REGRESSION] app trees load source contents asynchronously", async () => {
+  await withTempDirAsync(async (root) => {
+    writeAppFiles(root, {
+      "app/first.tsx": "export default 'first';\n",
+      "app/second.tsx": "export default 'second';\n",
+    });
+
+    const loading = AppTree.load(root);
+    expect(loading).toBeInstanceOf(Promise);
+    expect([...(await loading).files]).toEqual([
+      ["app/first.tsx", "export default 'first';\n"],
+      ["app/second.tsx", "export default 'second';\n"],
+    ]);
+  });
+});
+
+test("[REGRESSION] syntax checking exposes an asynchronous result", async () => {
+  await withTempDirAsync(async (root) => {
+    writeFileSync(join(root, "index.ts"), "export default 1;\n");
+
+    const pending = checkSyntax(root);
+    expect(pending).toBeInstanceOf(Promise);
+    expect(await pending).toMatchObject({
+      total_files: 1,
+      checked_files: 1,
+      failed_files: [],
+      ok: true,
+    });
+  });
+});
+
+test("[DIFF] an empty __tests__ directory violates the path-absent check", async () => {
+  await withTempDirAsync(async (root) => {
     mkdirSync(join(root, "app", "__tests__"), { recursive: true });
     const checksDir = writeChecksDir(
       root,
@@ -887,7 +933,7 @@ test("[DIFF] an empty __tests__ directory violates the path-absent check", () =>
       checksDir,
     );
 
-    expect(runChecks(checks, root)).toMatchObject([
+    expect(await runChecks(checks, root)).toMatchObject([
       {
         passed: false,
         evidence: "forbidden path exists: app/__tests__",
@@ -985,8 +1031,8 @@ test("[REGRESSION] directory artifacts prefer compressed archives before plain t
   });
 });
 
-test("[REGRESSION] Babel syntax checks distinguish valid and broken source", () => {
-  withTempDir((root) => {
+test("[REGRESSION] Babel syntax checks distinguish valid and broken source", async () => {
+  await withTempDirAsync(async (root) => {
     const valid = join(root, "valid.tsx");
     const broken = join(root, "broken.tsx");
     writeFileSync(valid, "export default function App(){ return <View />; }\n");
@@ -994,7 +1040,7 @@ test("[REGRESSION] Babel syntax checks distinguish valid and broken source", () 
 
     expect(checkFileSyntax(valid)).toEqual({ ok: true });
     expect(checkFileSyntax(broken)).toMatchObject({ error: "parse_error" });
-    const result = checkSyntax(root);
+    const result = await checkSyntax(root);
     expect(result.total_files).toBe(2);
     expect(result.checked_files).toBe(2);
     expect(result.ok).toBe(false);
@@ -1021,8 +1067,8 @@ test("[REGRESSION] AST facts recognize directives, exports, and namespace JSX", 
   });
 });
 
-test("[REGRESSION] real DOM checks use AST-backed applicability and failures", () => {
-  withTempDir((root) => {
+test("[REGRESSION] real DOM checks use AST-backed applicability and failures", async () => {
+  await withTempDirAsync(async (root) => {
     mkdirSync(join(root, "app"));
     mkdirSync(join(root, "components"));
     writeFileSync(
@@ -1036,7 +1082,7 @@ test("[REGRESSION] real DOM checks use AST-backed applicability and failures", (
     );
     const { checks } = resolveChecksForSkills(["expo-dom"], REAL_CHECKS_DIR);
     const results = Object.fromEntries(
-      runChecks(checks, root).map((result) => [result.id, result]),
+      (await runChecks(checks, root)).map((result) => [result.id, result]),
     );
 
     expect(results["dom_use_dom_directive_present"]?.status).toBe("passed");
@@ -1050,8 +1096,8 @@ test("[REGRESSION] real DOM checks use AST-backed applicability and failures", (
   });
 });
 
-test("[REGRESSION] feature-specific anti-pattern checks do not vacuously pass", () => {
-  withTempDir((root) => {
+test("[REGRESSION] feature-specific anti-pattern checks do not vacuously pass", async () => {
+  await withTempDirAsync(async (root) => {
     writeFileSync(
       join(root, "index.tsx"),
       "import { SafeAreaProvider } from 'react-native-safe-area-context';\n" +
@@ -1062,7 +1108,7 @@ test("[REGRESSION] feature-specific anti-pattern checks do not vacuously pass", 
       REAL_CHECKS_DIR,
     );
     const results = Object.fromEntries(
-      runChecks(checks, root).map((result) => [result.id, result]),
+      (await runChecks(checks, root)).map((result) => [result.id, result]),
     );
 
     expect(results["native_ui_no_safe_area_view_from_react_native"]?.status).toBe(
@@ -1075,8 +1121,8 @@ test("[REGRESSION] feature-specific anti-pattern checks do not vacuously pass", 
   });
 });
 
-test("[REGRESSION] server secrets are excluded from client env-prefix checks", () => {
-  withTempDir((root) => {
+test("[REGRESSION] server secrets are excluded from client env-prefix checks", async () => {
+  await withTempDirAsync(async (root) => {
     mkdirSync(join(root, "app", "api"), { recursive: true });
     writeFileSync(
       join(root, "app", "api", "secret+api.ts"),
@@ -1087,7 +1133,7 @@ test("[REGRESSION] server secrets are excluded from client env-prefix checks", (
       REAL_CHECKS_DIR,
     );
     const results = Object.fromEntries(
-      runChecks(checks, root).map((result) => [result.id, result]),
+      (await runChecks(checks, root)).map((result) => [result.id, result]),
     );
 
     expect(results["data_fetching_expo_public_env_prefix"]?.status).toBe(
@@ -1096,7 +1142,7 @@ test("[REGRESSION] server secrets are excluded from client env-prefix checks", (
   });
 });
 
-test("[REGRESSION] code-driven checks preserve applicability and violation rules", () => {
+test("[REGRESSION] code-driven checks preserve applicability and violation rules", async () => {
   const cases: Array<{
     name: string;
     skillId: string;
@@ -1208,9 +1254,9 @@ test("[REGRESSION] code-driven checks preserve applicability and violation rules
   ];
 
   for (const testCase of cases) {
-    withTempDir((root) => {
+    await withTempDirAsync(async (root) => {
       writeAppFiles(root, testCase.files);
-      const results = runRealChecks(root, testCase.skillId);
+      const results = await runRealChecks(root, testCase.skillId);
       for (const [checkId, expectedStatus] of Object.entries(
         testCase.expected,
       )) {
@@ -1222,7 +1268,7 @@ test("[REGRESSION] code-driven checks preserve applicability and violation rules
   }
 });
 
-test("[REGRESSION] DOM checks distinguish missing, malformed, layout, and export states", () => {
+test("[REGRESSION] DOM checks distinguish missing, malformed, layout, and export states", async () => {
   const cases: Array<{
     name: string;
     files: Record<string, string>;
@@ -1266,9 +1312,9 @@ test("[REGRESSION] DOM checks distinguish missing, malformed, layout, and export
   ];
 
   for (const testCase of cases) {
-    withTempDir((root) => {
+    await withTempDirAsync(async (root) => {
       writeAppFiles(root, testCase.files);
-      const results = runRealChecks(root, "expo-dom");
+      const results = await runRealChecks(root, "expo-dom");
       for (const [checkId, expectedStatus] of Object.entries(
         testCase.expected,
       )) {
@@ -1306,16 +1352,56 @@ test("[REGRESSION] bundle checks preserve unknown, failure, and persistence beha
     chmodSync(fakeExpo, 0o755);
     expect(computeBundleResult(root)).toEqual({ ok: true });
     expect(existsSync(join(root, ".eval-bundle-export-tmp"))).toBe(false);
+
+    writeFileSync(
+      fakeExpo,
+      "#!/bin/sh\nprintf '%s' \"$3\" > .selected-platform\nmkdir -p \"$5\"\nexit 0\n",
+    );
+    chmodSync(fakeExpo, 0o755);
+    expect(computeBundleResult(root)).toEqual({ ok: true });
+    expect(readFileSync(join(root, ".selected-platform"), "utf8")).toBe(
+      "ios",
+    );
+    expect(computeBundleResult(root, { platform: "android" })).toEqual({
+      ok: true,
+    });
+    expect(readFileSync(join(root, ".selected-platform"), "utf8")).toBe(
+      "android",
+    );
+  });
+});
+
+test("[REGRESSION] bundle CLI accepts an Android platform flag", () => {
+  withTempDir((root) => {
+    const binDir = join(root, "node_modules", ".bin");
+    mkdirSync(binDir, { recursive: true });
+    const fakeExpo = join(binDir, "expo");
+    writeFileSync(
+      fakeExpo,
+      "#!/bin/sh\nprintf '%s' \"$3\" > .selected-platform\nmkdir -p \"$5\"\nexit 0\n",
+    );
+    chmodSync(fakeExpo, 0o755);
+
+    const result = Bun.spawnSync(
+      [process.execPath, BUNDLE_CHECK_PATH, root, "--platform", "android"],
+      { stdout: "pipe", stderr: "pipe" },
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(new TextDecoder().decode(result.stderr)).toBe("");
+    expect(readFileSync(join(root, ".selected-platform"), "utf8")).toBe(
+      "android",
+    );
   });
 });
 
 test.skipIf(PYTHON === null)(
   "[DIFF] registry and code-check results match Python",
-  () => {
+  async () => {
     // Differential oracle: Python and TypeScript receive the same authored-app
     // tree, real registry, and expected skills; every observable check result
     // must match exactly while both implementations coexist.
-    withTempDir((root) => {
+    await withTempDirAsync(async (root) => {
       mkdirSync(join(root, "app", "api"), { recursive: true });
       mkdirSync(join(root, "app", "__tests__"));
       mkdirSync(join(root, "components"));
@@ -1364,13 +1450,14 @@ test.skipIf(PYTHON === null)(
         expectedSkills,
         REAL_CHECKS_DIR,
       );
+      const typescriptResults = await runChecks(checks, root);
       const typescriptPayload = {
         check_ids: checks.map((check) => check.id),
         descriptions: Object.fromEntries(
           checks.map((check) => [check.id, check.description]),
         ),
         warnings,
-        results: runChecks(checks, root).map((result) => ({
+        results: typescriptResults.map((result) => ({
           id: result.id,
           category: result.category,
           kind: result.kind,

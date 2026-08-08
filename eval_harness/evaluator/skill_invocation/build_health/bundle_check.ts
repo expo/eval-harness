@@ -5,8 +5,14 @@ export const RESULT_FILENAME = ".eval-build-health-bundle.json";
 const TIMEOUT_MILLISECONDS = 180_000;
 
 export type BundleResult = { ok: boolean | null; reason?: string };
+export type BundlePlatform = "ios" | "android";
+export type BundleOptions = { platform?: BundlePlatform };
 
-export function computeBundleResult(appDir: string): BundleResult {
+export function computeBundleResult(
+  appDir: string,
+  options: BundleOptions = {},
+): BundleResult {
+  const platform = options.platform ?? "ios";
   const expoBin = join(appDir, "node_modules", ".bin", "expo");
   if (!existsSync(expoBin)) {
     return { ok: null, reason: "no node_modules/.bin/expo in workspace" };
@@ -14,7 +20,7 @@ export function computeBundleResult(appDir: string): BundleResult {
   const exportDir = join(appDir, ".eval-bundle-export-tmp");
   try {
     const result = Bun.spawnSync(
-      [expoBin, "export", "--platform", "ios", "--output-dir", exportDir],
+      [expoBin, "export", "--platform", platform, "--output-dir", exportDir],
       {
         cwd: appDir,
         stdout: "pipe",
@@ -47,8 +53,11 @@ export function computeBundleResult(appDir: string): BundleResult {
   }
 }
 
-export function persistBundleResult(appDir: string): BundleResult {
-  const result = computeBundleResult(appDir);
+export function persistBundleResult(
+  appDir: string,
+  options: BundleOptions = {},
+): BundleResult {
+  const result = computeBundleResult(appDir, options);
   writeFileSync(join(appDir, RESULT_FILENAME), JSON.stringify(result), "utf8");
   return result;
 }
@@ -63,12 +72,33 @@ export function readBundleResult(appDir: string): BundleResult | null {
   }
 }
 
-if (import.meta.main) {
-  const workspace = process.argv[2];
+export function main(args: string[] = process.argv.slice(2)): number {
+  const [workspace, ...options] = args;
   if (workspace === undefined) {
-    console.error("usage: bun bundle_check.ts <workspace-dir>");
-    process.exit(2);
+    console.error(
+      "usage: bun bundle_check.ts <workspace-dir> [--platform ios|android]",
+    );
+    return 2;
   }
-  const outcome = persistBundleResult(workspace);
+  let platform: BundlePlatform = "ios";
+  if (options.length === 2 && options[0] === "--platform") {
+    const requestedPlatform = options[1];
+    if (requestedPlatform !== "ios" && requestedPlatform !== "android") {
+      console.error("error: --platform must be ios or android");
+      return 2;
+    }
+    platform = requestedPlatform;
+  } else if (options.length !== 0) {
+    console.error(
+      "usage: bun bundle_check.ts <workspace-dir> [--platform ios|android]",
+    );
+    return 2;
+  }
+  const outcome = persistBundleResult(workspace, { platform });
   console.log(`bundle check: ${JSON.stringify(outcome)}`);
+  return 0;
+}
+
+if (import.meta.main) {
+  process.exitCode = main();
 }

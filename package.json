@@ -10,7 +10,6 @@
   },
   "dependencies": {
     "@babel/parser": "7.29.8",
-    "expo": "~56.0.12",
     "tar": "^7.5.22"
   },
   "devDependencies": {

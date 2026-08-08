@@ -12,7 +12,15 @@ export type AstFacts = {
 
 export function checkFileSyntax(path: string): SyntaxResult {
   try {
-    parseSource(readFileSync(path, "utf8"));
+    return checkSourceSyntax(readFileSync(path, "utf8"));
+  } catch (error) {
+    return { error: "parse_error", message: errorMessage(error) };
+  }
+}
+
+export function checkSourceSyntax(source: string): SyntaxResult {
+  try {
+    parseSource(source);
     return { ok: true };
   } catch (error) {
     return { error: "parse_error", message: errorMessage(error) };
@@ -20,9 +28,17 @@ export function checkFileSyntax(path: string): SyntaxResult {
 }
 
 export function extractAstFacts(path: string): AstFacts | ParseError {
+  try {
+    return extractAstFactsFromSource(readFileSync(path, "utf8"));
+  } catch (error) {
+    return { error: "parse_error", message: errorMessage(error) };
+  }
+}
+
+export function extractAstFactsFromSource(source: string): AstFacts | ParseError {
   let ast: unknown;
   try {
-    ast = parseSource(readFileSync(path, "utf8"));
+    ast = parseSource(source);
   } catch (error) {
     return { error: "parse_error", message: errorMessage(error) };
   }

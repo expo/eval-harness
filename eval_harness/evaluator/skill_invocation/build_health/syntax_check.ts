@@ -1,7 +1,5 @@
-import { join } from "node:path";
-
 import { AppTree } from "../uptake_checks/registry.ts";
-import { checkFileSyntax } from "./node_parser.ts";
+import { checkSourceSyntax } from "./node_parser.ts";
 
 export type SyntaxCheckResult = {
   total_files: number;
@@ -11,15 +9,22 @@ export type SyntaxCheckResult = {
   ok: boolean | null;
 };
 
-export function checkSyntax(appDir: string): SyntaxCheckResult {
-  const appTree = new AppTree(appDir);
-  const failedFiles: Array<{ file: string; message: string }> = [];
-  for (const relativePath of appTree.files.keys()) {
-    const facts = checkFileSyntax(join(appDir, relativePath));
-    if ("error" in facts) {
-      failedFiles.push({ file: relativePath, message: facts.message });
-    }
-  }
+export async function checkSyntax(appDir: string): Promise<SyntaxCheckResult> {
+  // AppTree performs directory discovery and source reads concurrently.
+  // Promise.all preserves result order here, but Babel parsing remains
+  // synchronous CPU work unless it is later moved into worker threads.
+  const appTree = await AppTree.load(appDir);
+  const checkedFiles = await Promise.all(
+    [...appTree.files].map(async ([relativePath, source]) => ({
+      relativePath,
+      facts: checkSourceSyntax(source),
+    })),
+  );
+  const failedFiles = checkedFiles.flatMap(({ relativePath, facts }) =>
+    "error" in facts
+      ? [{ file: relativePath, message: facts.message }]
+      : [],
+  );
   const total = appTree.files.size;
   return {
     total_files: total,

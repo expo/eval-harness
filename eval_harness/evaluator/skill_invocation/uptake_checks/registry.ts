@@ -1,8 +1,8 @@
 import {
   existsSync,
   readFileSync,
-  readdirSync,
 } from "node:fs";
+import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 
 import { readJson, roundRatio } from "../utils.ts";
@@ -55,7 +55,9 @@ export type CheckDefinition = {
   description?: string;
 };
 
-export type CheckRunner = (appTree: AppTree) => CheckResult;
+export type CheckRunner = (
+  appTree: AppTree,
+) => CheckResult | Promise<CheckResult>;
 
 export type Check = CheckDefinition & {
   target: unknown;
@@ -133,18 +135,23 @@ export class UptakeResults {
 
 export class AppTree {
   readonly root: string;
-  #files: Map<string, string> | null = null;
+  readonly #files: Map<string, string>;
 
-  constructor(appDir: string) {
+  private constructor(appDir: string, files: Map<string, string>) {
     this.root = appDir;
+    this.#files = files;
+  }
+
+  static async load(appDir: string): Promise<AppTree> {
+    const files = await readSourceFiles(appDir);
+    return new AppTree(appDir, files);
   }
 
   get files(): Map<string, string> {
-    this.#files ??= this.#readSourceFiles();
     return this.#files;
   }
 
-  globAny(patterns: string[]): string[] {
+  async globAny(patterns: string[]): Promise<string[]> {
     const matches: string[] = [];
     const seen = new Set<string>();
     for (const pattern of patterns) {
@@ -153,11 +160,15 @@ export class AppTree {
         : [pattern];
       for (const scanPattern of scanPatterns) {
         const glob = new Bun.Glob(scanPattern);
-        const patternMatches = [...glob.scanSync({
+        const patternMatches: string[] = [];
+        for await (const relativePath of glob.scan({
           cwd: this.root,
           dot: true,
           onlyFiles: false,
-        })].sort();
+        })) {
+          patternMatches.push(relativePath);
+        }
+        patternMatches.sort();
         for (const relativePath of patternMatches) {
           if (hasSkippedPart(relativePath) || seen.has(relativePath)) continue;
           seen.add(relativePath);
@@ -167,34 +178,51 @@ export class AppTree {
     }
     return matches;
   }
+}
 
-  #readSourceFiles(): Map<string, string> {
-    const files = new Map<string, string>();
-    const visit = (directory: string): void => {
-      for (const entry of readdirSync(directory, { withFileTypes: true }).sort(
-        (left, right) =>
-          left.name < right.name ? -1 : left.name > right.name ? 1 : 0,
-      )) {
-        const absolute = path.join(directory, entry.name);
-        const relativePath = path.relative(this.root, absolute);
+async function readSourceFiles(root: string): Promise<Map<string, string>> {
+  const discover = async (
+    directory: string,
+  ): Promise<Array<[relativePath: string, absolutePath: string]>> => {
+    const entries = (await readdir(directory, { withFileTypes: true })).sort(
+      (left, right) =>
+        left.name < right.name ? -1 : left.name > right.name ? 1 : 0,
+    );
+    const discovered = await Promise.all(
+      entries.map(async (entry) => {
+        const absolutePath = path.join(directory, entry.name);
+        const relativePath = path.relative(root, absolutePath);
         if (entry.isDirectory()) {
-          if (!SKIP_DIR_PARTS.has(entry.name)) visit(absolute);
-          continue;
+          return SKIP_DIR_PARTS.has(entry.name)
+            ? []
+            : await discover(absolutePath);
         }
-        if (!entry.isFile()) continue;
-        if (!SOURCE_SUFFIXES.has(path.extname(entry.name))) continue;
-        if (SKIP_FILENAMES.has(entry.name) || hasSkippedPart(relativePath)) continue;
-        try {
-          files.set(relativePath, FATAL_UTF8_DECODER.decode(readFileSync(absolute)));
-        } catch (error) {
-          if (error instanceof TypeError) continue;
-          throw error;
+        if (!entry.isFile()) return [];
+        if (!SOURCE_SUFFIXES.has(path.extname(entry.name))) return [];
+        if (SKIP_FILENAMES.has(entry.name) || hasSkippedPart(relativePath)) {
+          return [];
         }
+        return [[relativePath, absolutePath] as [string, string]];
+      }),
+    );
+    return discovered.flat();
+  };
+
+  const sourcePaths = await discover(root);
+  const contents = await Promise.all(
+    sourcePaths.map(async ([relativePath, absolutePath]) => {
+      try {
+        return [
+          relativePath,
+          FATAL_UTF8_DECODER.decode(await readFile(absolutePath)),
+        ] as const;
+      } catch (error) {
+        if (error instanceof TypeError) return null;
+        throw error;
       }
-    };
-    visit(this.root);
-    return files;
-  }
+    }),
+  );
+  return new Map(contents.filter((entry) => entry !== null));
 }
 
 function hasSkippedPart(path: string): boolean {
@@ -316,13 +344,19 @@ export function resolveChecksBySkill(
   return { checksBySkill, warnings };
 }
 
-export function runChecks(checks: Check[], appDir: string): CheckResult[] {
-  const appTree = new AppTree(appDir);
-  return checks.map((check) => runCheck(check, appTree));
+export async function runChecks(
+  checks: Check[],
+  appDir: string,
+): Promise<CheckResult[]> {
+  const appTree = await AppTree.load(appDir);
+  return Promise.all(checks.map((check) => runCheck(check, appTree)));
 }
 
-export function runCheck(check: Check, appTree: AppTree): CheckResult {
-  if (check.run !== null) return check.run(appTree);
+export async function runCheck(
+  check: Check,
+  appTree: AppTree,
+): Promise<CheckResult> {
+  if (check.run !== null) return await check.run(appTree);
   switch (check.kind) {
     case "import":
       return checkImport(check, appTree);
@@ -422,9 +456,12 @@ function checkTextAbsent(check: Check, appTree: AppTree): CheckResult {
   );
 }
 
-function checkPathExists(check: Check, appTree: AppTree): CheckResult {
+async function checkPathExists(
+  check: Check,
+  appTree: AppTree,
+): Promise<CheckResult> {
   const patterns = (Array.isArray(check.target) ? check.target : [check.target]).map(String);
-  const matches = appTree.globAny(patterns);
+  const matches = await appTree.globAny(patterns);
   if (matches.length > 0) {
     return result(
       check,
@@ -435,9 +472,12 @@ function checkPathExists(check: Check, appTree: AppTree): CheckResult {
   return result(check, false, `no path matched any of ${pyRepr(patterns)}`);
 }
 
-function checkPathAbsent(check: Check, appTree: AppTree): CheckResult {
+async function checkPathAbsent(
+  check: Check,
+  appTree: AppTree,
+): Promise<CheckResult> {
   const patterns = (Array.isArray(check.target) ? check.target : [check.target]).map(String);
-  const matches = appTree.globAny(patterns);
+  const matches = await appTree.globAny(patterns);
   if (matches.length > 0) {
     return result(
       check,

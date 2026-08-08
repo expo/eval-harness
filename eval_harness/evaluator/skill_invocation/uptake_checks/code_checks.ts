@@ -1,7 +1,7 @@
-import { basename, extname, join, relative } from "node:path";
+import { basename, extname, relative } from "node:path";
 
 import {
-  extractAstFacts,
+  extractAstFactsFromSource,
   type AstFacts,
 } from "../build_health/node_parser.ts";
 import type {
@@ -175,7 +175,7 @@ function domCandidateFiles(appTree: AppTree): DomCandidates {
   const confirmed: Array<[string, AstFacts]> = [];
   const unavailablePaths = new Set<string>();
   for (const path of candidatePaths) {
-    const facts = extractAstFacts(join(appTree.root, path));
+    const facts = extractAstFactsFromSource(appTree.files.get(path) ?? "");
     if ("error" in facts) {
       unavailablePaths.add(path);
       continue;
@@ -444,8 +444,8 @@ register(
   "expo_ui_platform_specific_trees_not_in_app_dir",
   "structural",
   CODE_CHECK_DESCRIPTIONS.expo_ui_platform_specific_trees_not_in_app_dir,
-)((appTree) => {
-  const matches = appTree.globAny(EXPO_UI_PLATFORM_TREE_GLOBS);
+)(async (appTree) => {
+  const matches = await appTree.globAny(EXPO_UI_PLATFORM_TREE_GLOBS);
   if (matches[0] !== undefined) {
     return failed(
       "expo_ui_platform_specific_trees_not_in_app_dir",
