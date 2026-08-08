@@ -395,6 +395,8 @@ test("[REGRESSION] JSON helpers preserve sorted Python key order and semantic va
         alpha: { nested_z: 2, nested_a: 1 },
         Z: "é",
         é: "😀",
+        "\uE000": "private-use",
+        "\u{10000}": "supplementary",
         numeric: { integerLikeFloat: 1, exponent: 1e-7 },
       },
       path,
@@ -407,7 +409,15 @@ test("[REGRESSION] JSON helpers preserve sorted Python key order and semantic va
       string,
       unknown
     >;
-    expect(Object.keys(written)).toEqual(["Z", "alpha", "numeric", "zebra", "é"]);
+    expect(Object.keys(written)).toEqual([
+      "Z",
+      "alpha",
+      "numeric",
+      "zebra",
+      "é",
+      "\uE000",
+      "\u{10000}",
+    ]);
     expect(Object.keys(written.alpha as Record<string, unknown>)).toEqual([
       "nested_a",
       "nested_z",
@@ -417,6 +427,8 @@ test("[REGRESSION] JSON helpers preserve sorted Python key order and semantic va
       alpha: { nested_z: 2, nested_a: 1 },
       Z: "é",
       é: "😀",
+      "\uE000": "private-use",
+      "\u{10000}": "supplementary",
       numeric: { integerLikeFloat: 1, exponent: 1e-7 },
     });
     const skillsPath = join(root, "skills-only.json");
@@ -878,6 +890,21 @@ test("[REGRESSION] source files use locale-independent code-point order", async 
       "app/+not-found.tsx",
       "app/_layout.tsx",
       "app/index.tsx",
+    ]);
+  });
+});
+
+test("[REGRESSION] source files use Python order across Unicode planes", async () => {
+  await withTempDirAsync(async (root) => {
+    writeAppFiles(root, {
+      "\uE000.ts": "export const privateUse = true;\n",
+      "\u{10000}.ts": "export const supplementary = true;\n",
+    });
+
+    // Python compares Unicode code points: U+E000 precedes U+10000.
+    expect([...(await AppTree.load(root)).files.keys()]).toEqual([
+      "\uE000.ts",
+      "\u{10000}.ts",
     ]);
   });
 });
@@ -1393,6 +1420,24 @@ test("[REGRESSION] bundle CLI accepts an Android platform flag", () => {
       "android",
     );
   });
+});
+
+test("[CHAR] bundle CLI reports invalid invocations instead of crashing", () => {
+  // Characterization: the Bun CLI intentionally replaces Python's missing-
+  // argument traceback and ignored extra arguments with explicit usage errors.
+  const missing = Bun.spawnSync([process.execPath, BUNDLE_CHECK_PATH], {
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const unknown = Bun.spawnSync(
+    [process.execPath, BUNDLE_CHECK_PATH, "/tmp/app", "--unknown"],
+    { stdout: "pipe", stderr: "pipe" },
+  );
+
+  expect(missing.exitCode).toBe(2);
+  expect(new TextDecoder().decode(missing.stderr)).toContain("usage:");
+  expect(unknown.exitCode).toBe(2);
+  expect(new TextDecoder().decode(unknown.stderr)).toContain("usage:");
 });
 
 test.skipIf(PYTHON === null)(

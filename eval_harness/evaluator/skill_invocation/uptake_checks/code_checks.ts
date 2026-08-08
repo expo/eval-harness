@@ -4,6 +4,7 @@ import {
   extractAstFactsFromSource,
   type AstFacts,
 } from "../build_health/node_parser.ts";
+import { compareUnicodeCodePoints } from "../utils.ts";
 import type {
   AppTree,
   CheckResult,
@@ -230,7 +231,7 @@ register(
   const violatingLayouts = confirmed
     .map(([path]) => path)
     .filter((path) => layoutPaths.has(path))
-    .sort();
+    .sort(compareUnicodeCodePoints);
   if (violatingLayouts[0] !== undefined) {
     return failed(
       "dom_layout_excludes_use_dom",
@@ -240,7 +241,7 @@ register(
   }
   const unresolvedLayouts = [...layoutPaths]
     .filter((path) => unavailablePaths.has(path))
-    .sort();
+    .sort(compareUnicodeCodePoints);
   if (unresolvedLayouts[0] !== undefined) {
     return unavailable(
       "dom_layout_excludes_use_dom",
@@ -397,7 +398,7 @@ register(
   }
   const nonPublic = [...environmentNames]
     .filter((name) => !name.startsWith("EXPO_PUBLIC_"))
-    .sort();
+    .sort(compareUnicodeCodePoints);
   if (nonPublic.length > 0) {
     return failed(
       "data_fetching_expo_public_env_prefix",
@@ -408,7 +409,7 @@ register(
   return passed(
     "data_fetching_expo_public_env_prefix",
     "lexical",
-    `all client-read env var(s) ${pyList([...environmentNames].sort())} use the EXPO_PUBLIC_ prefix`,
+    `all client-read env var(s) ${pyList([...environmentNames].sort(compareUnicodeCodePoints))} use the EXPO_PUBLIC_ prefix`,
   );
 });
 

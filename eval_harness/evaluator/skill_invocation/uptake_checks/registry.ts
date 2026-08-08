@@ -5,7 +5,7 @@ import {
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 
-import { readJson, roundRatio } from "../utils.ts";
+import { compareUnicodeCodePoints, readJson, roundRatio } from "../utils.ts";
 import { registerCodeChecks } from "./code_checks.ts";
 
 export const SOURCE_SUFFIXES = new Set([
@@ -168,7 +168,7 @@ export class AppTree {
         })) {
           patternMatches.push(relativePath);
         }
-        patternMatches.sort();
+        patternMatches.sort(compareUnicodeCodePoints);
         for (const relativePath of patternMatches) {
           if (hasSkippedPart(relativePath) || seen.has(relativePath)) continue;
           seen.add(relativePath);
@@ -185,8 +185,7 @@ async function readSourceFiles(root: string): Promise<Map<string, string>> {
     directory: string,
   ): Promise<Array<[relativePath: string, absolutePath: string]>> => {
     const entries = (await readdir(directory, { withFileTypes: true })).sort(
-      (left, right) =>
-        left.name < right.name ? -1 : left.name > right.name ? 1 : 0,
+      (left, right) => compareUnicodeCodePoints(left.name, right.name),
     );
     const discovered = await Promise.all(
       entries.map(async (entry) => {

@@ -29,6 +29,18 @@ export type JsonValue =
   | { [key: string]: JsonValue };
 export type JsonObject = { [key: string]: JsonValue };
 
+/** Compare strings by Unicode code point, matching Python's string ordering. */
+export function compareUnicodeCodePoints(left: string, right: string): number {
+  const leftPoints = Array.from(left, (character) => character.codePointAt(0) ?? 0);
+  const rightPoints = Array.from(right, (character) => character.codePointAt(0) ?? 0);
+  const sharedLength = Math.min(leftPoints.length, rightPoints.length);
+  for (let index = 0; index < sharedLength; index += 1) {
+    const difference = (leftPoints[index] ?? 0) - (rightPoints[index] ?? 0);
+    if (difference !== 0) return difference;
+  }
+  return leftPoints.length - rightPoints.length;
+}
+
 export function readJson<T>(path: string): T {
   return JSON.parse(readFileSync(path, "utf8")) as T;
 }
@@ -59,7 +71,7 @@ function sortedJsonKeys(data: JsonValue): string[] {
     }
   };
   visit(data);
-  return [...keys].sort();
+  return [...keys].sort(compareUnicodeCodePoints);
 }
 
 export function loadPrdSkills(path: string): Record<string, string[]> {
@@ -107,7 +119,7 @@ function replaceWithExtractedArchive(path: string, destDir: string): void {
 }
 
 export function firstArchive(path: string): string | null {
-  const entries = readdirSync(path).sort();
+  const entries = readdirSync(path).sort(compareUnicodeCodePoints);
   for (const suffix of [".tar.gz", ".tgz", ".tar"]) {
     const match = entries.find((entry) => entry.endsWith(suffix));
     if (match !== undefined) return join(path, match);
