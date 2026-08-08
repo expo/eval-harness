@@ -122,13 +122,14 @@ you use its `--ref` option.
 git status --short
 ```
 
-Run the complete Pool evaluation with Claude Code authoring, the Python iOS
-evaluator, and the Bun skill evaluator:
+Start with the canonical Notes evaluation. Notes is the small, known-good
+target for proving harness changes. This runs Claude Code authoring, the Python
+iOS evaluator, and the Bun skill evaluator:
 
 ```bash
 eas workflow:run .eas/workflows/eval-e2e.yml \
   -F agent=claude-code \
-  -F prd=dataset/prds/pool/prd/mvp.txt \
+  -F prd=dataset/prds/notes/prd/mvp.txt \
   -F run_eval_ios=true \
   -F run_eval_skill=true \
   -F skill_scenario=skills_available_unmentioned \
@@ -138,7 +139,8 @@ eas workflow:run .eas/workflows/eval-e2e.yml \
 `--wait` keeps the terminal attached until the workflow finishes. It is
 optional; the EAS dashboard continues the run if you disconnect.
 
-Use Codex by changing the authoring agent:
+For the richer iOS 27 native-navigation and glass fixture, change the agent to
+Codex and the PRD to Pool:
 
 ```bash
 eas workflow:run .eas/workflows/eval-e2e.yml \

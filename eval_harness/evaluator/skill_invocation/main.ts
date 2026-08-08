@@ -1,12 +1,12 @@
-import { join, resolve } from "node:path";
+import path from "node:path";
 
 import { analyzeArtifacts, printSummary } from "./analysis.ts";
 import { unpackArtifact } from "./utils.ts";
 
 const PACKAGE_DIR = import.meta.dir;
-const REPO_ROOT = resolve(PACKAGE_DIR, "../../..");
-const DEFAULT_CHECKS_DIR = resolve(PACKAGE_DIR, "uptake_checks");
-const DEFAULT_PRD_SKILLS = resolve(REPO_ROOT, "dataset/prd_skills.json");
+const REPO_ROOT = path.resolve(PACKAGE_DIR, "../../..");
+const DEFAULT_CHECKS_DIR = path.resolve(PACKAGE_DIR, "uptake_checks");
+const DEFAULT_PRD_SKILLS = path.resolve(REPO_ROOT, "dataset/prd_skills.json");
 
 const TOP_LEVEL_HELP = `usage: main.ts [-h] {analyze-artifacts} ...
 
@@ -48,7 +48,7 @@ type AnalyzeOptions = {
   checksDir: string;
 };
 
-export function runCli(argv: string[]): number {
+export async function runCli(argv: string[]): Promise<number> {
   if (argv.length === 0) return usageError("the following arguments are required: cmd");
   const command = argv[0];
   if (command === "-h" || command === "--help") {
@@ -62,16 +62,16 @@ export function runCli(argv: string[]): number {
   }
   const parsed = parseAnalyzeOptions(argv.slice(1));
   if (typeof parsed === "number") return parsed;
-  const unpackRoot = join(parsed.outDir, "unpacked");
+  const unpackRoot = path.join(parsed.outDir, "unpacked");
   const authored = unpackArtifact(
     parsed.authoredArtifact,
-    join(unpackRoot, "authored"),
+    path.join(unpackRoot, "authored"),
   );
   const evalArtifact = parsed.evalArtifact === null ||
       ["undefined", "null", ""].includes(parsed.evalArtifact)
     ? null
-    : unpackArtifact(parsed.evalArtifact, join(unpackRoot, "eval"));
-  const payload = analyzeArtifacts({
+    : unpackArtifact(parsed.evalArtifact, path.join(unpackRoot, "eval"));
+  const payload = await analyzeArtifacts({
     authoredArtifact: authored,
     evalArtifact,
     scenario: parsed.scenario,
@@ -158,5 +158,5 @@ function analyzeUsageError(message: string): 2 {
 }
 
 if (import.meta.main) {
-  process.exitCode = runCli(process.argv.slice(2));
+  process.exitCode = await runCli(process.argv.slice(2));
 }

@@ -36,6 +36,17 @@ function withTempDir<T>(run: (root: string) => T): T {
   }
 }
 
+async function withTempDirAsync<T>(
+  run: (root: string) => Promise<T>,
+): Promise<T> {
+  const root = mkdtempSync(join(tmpdir(), "skill-analysis-"));
+  try {
+    return await run(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
 function result(
   id: string,
   status: "passed" | "failed" | "not_applicable" | "unavailable",
@@ -282,18 +293,18 @@ test("[REGRESSION] aggregation compares skill runs with unavailable baselines", 
   });
 });
 
-test("[REGRESSION] artifact discovery and analysis preserve the metrics contract", () => {
-  withTempDir((root) => {
+test("[REGRESSION] artifact discovery and analysis preserve the metrics contract", async () => {
+  await withTempDirAsync(async (root) => {
     const fixture = writeFixture(root);
     const outDir = join(root, "out");
-    const layout = discoverArtifactLayout(fixture.authored);
+    const layout = await discoverArtifactLayout(fixture.authored);
 
     expect(layout.appDir).toEndWith(join("agent-workspace", "run-1"));
     expect(layout.tracePath).toEndWith("claude-code-authoring.json");
     expect(layout.manifestPath).toEndWith("manifest.json");
     expect(layout.resultPath).toBeNull();
 
-    const payload = analyzeArtifacts({
+    const payload = await analyzeArtifacts({
       authoredArtifact: fixture.authored,
       evalArtifact: null,
       scenario: "skills_available_unmentioned",
@@ -392,8 +403,27 @@ test("[REGRESSION] artifact discovery and analysis preserve the metrics contract
   });
 });
 
-test("[REGRESSION] evaluator results produce a complete outcome", () => {
-  withTempDir((root) => {
+test("[REGRESSION] artifact discovery ignores nested workspace dependencies", async () => {
+  await withTempDirAsync(async (root) => {
+    const fixture = writeFixture(root);
+    const dependency = join(
+      fixture.app,
+      "node_modules",
+      "nested-dependency",
+    );
+    mkdirSync(dependency, { recursive: true });
+    writeFileSync(join(dependency, "package.json"), "{}");
+
+    const layout = await discoverArtifactLayout(fixture.authored);
+
+    // Python searches only agent-workspace/*/package.json. A dependency's
+    // nested package.json must never replace the authored app root.
+    expect(layout.appDir).toBe(fixture.app);
+  });
+});
+
+test("[REGRESSION] evaluator results produce a complete outcome", async () => {
+  await withTempDirAsync(async (root) => {
     const fixture = writeFixture(root);
     const evalArtifact = join(root, "eval");
     const resultDir = join(evalArtifact, "eval-out", "run-1", "bundle", "eval");
@@ -403,7 +433,7 @@ test("[REGRESSION] evaluator results produce a complete outcome", () => {
       JSON.stringify({ macro_avg_pct: 87.5 }),
     );
 
-    const payload = analyzeArtifacts({
+    const payload = await analyzeArtifacts({
       authoredArtifact: fixture.authored,
       evalArtifact,
       scenario: "skills_available_mentioned",
@@ -427,12 +457,52 @@ test("[REGRESSION] evaluator results produce a complete outcome", () => {
   });
 });
 
-test("[REGRESSION] a missing author trace degrades to warnings", () => {
-  withTempDir((root) => {
+test("[REGRESSION] non-finite evaluator scores cannot create complete outcomes", async () => {
+  await withTempDirAsync(async (root) => {
+    const fixture = writeFixture(root);
+    const evalArtifact = join(root, "eval");
+    const resultDir = join(evalArtifact, "eval-out", "run-1", "bundle", "eval");
+    mkdirSync(resultDir, { recursive: true });
+    const resultPath = join(resultDir, "result.json");
+
+    writeFileSync(
+      resultPath,
+      JSON.stringify({ macro_avg_pct: "n/a", micro_pct: 64.5 }),
+    );
+    const fallback = await analyzeArtifacts({
+      authoredArtifact: fixture.authored,
+      evalArtifact,
+      scenario: "skills_available_unmentioned",
+      outDir: join(root, "fallback-out"),
+      prdSkillsPath: fixture.prdSkills,
+      checksDir: fixture.checksDir,
+    });
+    expect(fallback.outcome_status).toBe("complete");
+    expect(fallback.runs[0]?.evaluator_pct).toBe(64.5);
+
+    writeFileSync(
+      resultPath,
+      JSON.stringify({ macro_avg_pct: "Infinity", micro_pct: "n/a" }),
+    );
+    const unavailable = await analyzeArtifacts({
+      authoredArtifact: fixture.authored,
+      evalArtifact,
+      scenario: "skills_available_unmentioned",
+      outDir: join(root, "unavailable-out"),
+      prdSkillsPath: fixture.prdSkills,
+      checksDir: fixture.checksDir,
+    });
+    expect(unavailable.outcome_status).toBe("pending");
+    expect(unavailable.runs[0]?.evaluator_pct).toBeNull();
+  });
+});
+
+test("[REGRESSION] a missing author trace degrades to warnings", async () => {
+  await withTempDirAsync(async (root) => {
     const fixture = writeFixture(root);
     rmSync(fixture.trace);
 
-    const payload = analyzeArtifacts({
+    const payload = await analyzeArtifacts({
       authoredArtifact: fixture.authored,
       evalArtifact: null,
       scenario: "skills_available_unmentioned",
@@ -447,12 +517,12 @@ test("[REGRESSION] a missing author trace degrades to warnings", () => {
   });
 });
 
-test("[REGRESSION] a missing app tree degrades to warnings", () => {
-  withTempDir((root) => {
+test("[REGRESSION] a missing app tree degrades to warnings", async () => {
+  await withTempDirAsync(async (root) => {
     const fixture = writeFixture(root);
     rmSync(fixture.app, { recursive: true });
 
-    const payload = analyzeArtifacts({
+    const payload = await analyzeArtifacts({
       authoredArtifact: fixture.authored,
       evalArtifact: null,
       scenario: "skills_available_unmentioned",
@@ -468,12 +538,12 @@ test("[REGRESSION] a missing app tree degrades to warnings", () => {
   });
 });
 
-test("[REGRESSION] expected skills without mappings remain unsupported", () => {
-  withTempDir((root) => {
+test("[REGRESSION] expected skills without mappings remain unsupported", async () => {
+  await withTempDirAsync(async (root) => {
     const fixture = writeFixture(root);
     writeFileSync(join(fixture.checksDir, "skill_map.json"), "{}");
 
-    const payload = analyzeArtifacts({
+    const payload = await analyzeArtifacts({
       authoredArtifact: fixture.authored,
       evalArtifact: null,
       scenario: "skills_available_unmentioned",
@@ -495,8 +565,8 @@ test("[REGRESSION] expected skills without mappings remain unsupported", () => {
   });
 });
 
-test("[REGRESSION] unavailable scenarios expect no skill triggers", () => {
-  withTempDir((root) => {
+test("[REGRESSION] unavailable scenarios expect no skill triggers", async () => {
+  await withTempDirAsync(async (root) => {
     const fixture = writeFixture(root);
     writeFileSync(
       fixture.trace,
@@ -508,7 +578,7 @@ test("[REGRESSION] unavailable scenarios expect no skill triggers", () => {
       }),
     );
 
-    const payload = analyzeArtifacts({
+    const payload = await analyzeArtifacts({
       authoredArtifact: fixture.authored,
       evalArtifact: null,
       scenario: "skills_unavailable",
@@ -527,8 +597,8 @@ test("[REGRESSION] unavailable scenarios expect no skill triggers", () => {
   });
 });
 
-test("[REGRESSION] manifest scenario overrides mismatched CLI input", () => {
-  withTempDir((root) => {
+test("[REGRESSION] manifest scenario overrides mismatched CLI input", async () => {
+  await withTempDirAsync(async (root) => {
     const fixture = writeFixture(root);
     writeFileSync(
       fixture.manifest,
@@ -538,7 +608,7 @@ test("[REGRESSION] manifest scenario overrides mismatched CLI input", () => {
       }),
     );
 
-    const payload = analyzeArtifacts({
+    const payload = await analyzeArtifacts({
       authoredArtifact: fixture.authored,
       evalArtifact: null,
       scenario: "skills_available_mentioned",
@@ -554,15 +624,15 @@ test("[REGRESSION] manifest scenario overrides mismatched CLI input", () => {
   });
 });
 
-test("[REGRESSION] unmapped PRDs produce an empty expected-skill set", () => {
-  withTempDir((root) => {
+test("[REGRESSION] unmapped PRDs produce an empty expected-skill set", async () => {
+  await withTempDirAsync(async (root) => {
     const fixture = writeFixture(root);
     writeFileSync(
       fixture.manifest,
       JSON.stringify({ prd: "dataset/prds/unmapped-app/prd/mvp.txt" }),
     );
 
-    const payload = analyzeArtifacts({
+    const payload = await analyzeArtifacts({
       authoredArtifact: fixture.authored,
       evalArtifact: null,
       scenario: "skills_available_unmentioned",
@@ -578,10 +648,10 @@ test("[REGRESSION] unmapped PRDs produce an empty expected-skill set", () => {
   });
 });
 
-test("[REGRESSION] HTML report escapes artifact-controlled values", () => {
-  withTempDir((root) => {
+test("[REGRESSION] HTML report escapes artifact-controlled values", async () => {
+  await withTempDirAsync(async (root) => {
     const path = join(root, "report.html");
-    writeHtmlReport(
+    await writeHtmlReport(
       {
         summary: "<script>alert(1)</script>",
         runs: [

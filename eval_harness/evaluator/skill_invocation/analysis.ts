@@ -1,11 +1,5 @@
-import {
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  statSync,
-  writeFileSync,
-} from "node:fs";
-import { basename, dirname, join, normalize, relative, sep } from "node:path";
+import { mkdir, readdir } from "node:fs/promises";
+import path from "node:path";
 
 import {
   readBundleResult,
@@ -16,6 +10,7 @@ import {
   type SyntaxCheckResult,
 } from "./build_health/syntax_check.ts";
 import {
+  SCORED_STATUSES,
   STATUS_UNAVAILABLE,
   CheckResult,
   UptakeResults,
@@ -33,12 +28,13 @@ import {
 } from "./uptake_checks/trigger.ts";
 import {
   appNameFromPrd,
+  compareUnicodeCodePoints,
   dedupe,
   flattenStrings,
-  loadPrdSkills,
-  readJson,
+  loadPrdSkillsAsync,
+  readJsonAsync,
   roundFloat,
-  writeJson,
+  writeJsonAsync,
   type JsonObject,
 } from "./utils.ts";
 
@@ -140,23 +136,25 @@ export type SkillEvalPayload = {
   [key: string]: unknown;
 };
 
-export function analyzeArtifacts(args: {
+export async function analyzeArtifacts(args: {
   authoredArtifact: string;
   evalArtifact: string | null;
   scenario: string;
   outDir: string;
   prdSkillsPath: string;
   checksDir: string;
-}): SkillEvalPayload {
-  mkdirSync(args.outDir, { recursive: true });
-  const authorLayout = discoverArtifactLayout(args.authoredArtifact);
-  const evalLayout = args.evalArtifact === null
-    ? null
-    : discoverArtifactLayout(args.evalArtifact);
+}): Promise<SkillEvalPayload> {
+  await mkdir(args.outDir, { recursive: true });
+  const [authorLayout, evalLayout] = await Promise.all([
+    discoverArtifactLayout(args.authoredArtifact),
+    args.evalArtifact === null
+      ? Promise.resolve(null)
+      : discoverArtifactLayout(args.evalArtifact),
+  ]);
   const warnings: string[] = [];
-  const scenario = resolveScenario(args.scenario, authorLayout, warnings);
+  const scenario = await resolveScenario(args.scenario, authorLayout, warnings);
   const { appName, expectedSkills: appExpectedSkills } =
-    resolveAppExpectedSkills(authorLayout, args.prdSkillsPath, warnings);
+    await resolveAppExpectedSkills(authorLayout, args.prdSkillsPath, warnings);
   const expectedSkills = UNAVAILABLE_SCENARIOS.has(scenario)
     ? []
     : appExpectedSkills;
@@ -177,14 +175,18 @@ export function analyzeArtifacts(args: {
   if (authorLayout.appDir === null) {
     warnings.push("app tree not found");
   } else {
-    const uptake = new UptakeResults(runChecks(pooled.checks, authorLayout.appDir));
+    const [checkResults, syntax] = await Promise.all([
+      runChecks(pooled.checks, authorLayout.appDir),
+      checkSyntax(authorLayout.appDir),
+    ]);
+    const uptake = new UptakeResults(checkResults);
     staticPassed = uptake.passed;
     staticTotal = uptake.total;
     staticRows = uptake.checks.map(checkResultToJson);
     categoryBreakdown = uptake.categoryBreakdown();
     for (const result of uptake.checks) resultsById.set(result.id, result);
     buildHealth = {
-      syntax: checkSyntax(authorLayout.appDir),
+      syntax,
       bundle: readBundleResult(authorLayout.appDir),
     };
   }
@@ -204,7 +206,9 @@ export function analyzeArtifacts(args: {
     appDirMissing: authorLayout.appDir === null,
   });
   const resultPath = evalLayout?.resultPath ?? null;
-  const evaluatorPct = resultPath === null ? null : readEvaluatorPct(resultPath);
+  const evaluatorPct = resultPath === null
+    ? null
+    : await readEvaluatorPct(resultPath);
   const buildSuccess = resultPath === null ? null : true;
   const score = scoreCaseRun({
     expectedSkills,
@@ -250,32 +254,37 @@ export function analyzeArtifacts(args: {
       eval_result: resultPath,
       eval_manifest: evalLayout?.manifestPath ?? null,
     },
-    braintrust_refs: collectBraintrustRefs(authorLayout, evalLayout, trace),
+    braintrust_refs: await collectBraintrustRefs(authorLayout, evalLayout, trace),
   };
-  writeJson(payload as JsonObject, join(args.outDir, "metrics.json"));
-  writeHtmlReport(payload, join(args.outDir, "report.html"));
+  await Promise.all([
+    writeJsonAsync(payload as JsonObject, path.join(args.outDir, "metrics.json")),
+    writeHtmlReport(payload, path.join(args.outDir, "report.html")),
+  ]);
   return payload;
 }
 
-function resolveAppExpectedSkills(
+async function resolveAppExpectedSkills(
   layout: ArtifactLayout,
   prdSkillsPath: string,
   warnings: string[],
-): { appName: string | null; expectedSkills: string[] } {
+): Promise<{ appName: string | null; expectedSkills: string[] }> {
   let prd: unknown = null;
-  if (layout.manifestPath !== null && existsSync(layout.manifestPath)) {
-    prd = readJson<Record<string, unknown>>(layout.manifestPath).prd;
+  if (
+    layout.manifestPath !== null &&
+    await Bun.file(layout.manifestPath).exists()
+  ) {
+    prd = (await readJsonAsync<Record<string, unknown>>(layout.manifestPath)).prd;
   }
   const appName = typeof prd === "string" ? appNameFromPrd(prd) : null;
   if (appName === null) {
     warnings.push(`could not derive app name from manifest prd=${pythonRepr(prd)}`);
     return { appName, expectedSkills: [] };
   }
-  if (!existsSync(prdSkillsPath)) {
+  if (!await Bun.file(prdSkillsPath).exists()) {
     warnings.push(`prd_skills map not found at ${prdSkillsPath}`);
     return { appName, expectedSkills: [] };
   }
-  const expectedSkills = loadPrdSkills(prdSkillsPath)[appName];
+  const expectedSkills = (await loadPrdSkillsAsync(prdSkillsPath))[appName];
   if (expectedSkills === undefined) {
     warnings.push(
       `no ground-truth skill set for app '${appName}' in ${prdSkillsPath}`,
@@ -285,13 +294,18 @@ function resolveAppExpectedSkills(
   return { appName, expectedSkills };
 }
 
-function resolveScenario(
+async function resolveScenario(
   input: string,
   layout: ArtifactLayout,
   warnings: string[],
-): string {
-  if (layout.manifestPath === null || !existsSync(layout.manifestPath)) return input;
-  const recorded = readJson<Record<string, unknown>>(layout.manifestPath).scenario;
+): Promise<string> {
+  if (
+    layout.manifestPath === null ||
+    !await Bun.file(layout.manifestPath).exists()
+  ) return input;
+  const recorded = (await readJsonAsync<Record<string, unknown>>(
+    layout.manifestPath,
+  )).scenario;
   if (typeof recorded !== "string" || recorded.length === 0) return input;
   if (input.length > 0 && recorded !== input) {
     warnings.push(
@@ -301,21 +315,24 @@ function resolveScenario(
   return recorded;
 }
 
-export function discoverArtifactLayout(root: string): ArtifactLayout {
-  const normalizedRoot = normalize(root);
+export async function discoverArtifactLayout(root: string): Promise<ArtifactLayout> {
+  const normalizedRoot = path.normalize(root);
+  const files = await allFiles(normalizedRoot);
   return {
     root: normalizedRoot,
-    appDir: findAppDir(normalizedRoot),
-    tracePath: findTrace(normalizedRoot),
+    appDir: findAppDir(normalizedRoot, files),
+    tracePath: findTrace(files),
     manifestPath: firstExisting(
       normalizedRoot,
       ["bundle/manifest.json", "manifest.json"],
       "manifest.json",
+      files,
     ),
     resultPath: firstExisting(
       normalizedRoot,
       ["bundle/eval/result.json", "eval/result.json", "result.json"],
       "result.json",
+      files,
     ),
   };
 }
@@ -401,13 +418,16 @@ export function computeSkillResults(args: {
       const found = args.resultsById.get(check.id);
       return found === undefined ? [] : [found];
     });
-    const scored = checkResults.filter(
-      (item) => item.status === "passed" || item.status === "failed",
+    const scored = checkResults.filter((item) =>
+      SCORED_STATUSES.has(item.status)
     );
     const passed = scored.filter((item) => item.passed === true).length;
     const unavailable = checkResults.some(
       (item) => item.status === STATUS_UNAVAILABLE,
     );
+    // One unavailable required check means the complete uptake measurement is
+    // unavailable. Keep any measured counts as evidence, but do not label a
+    // partial result as fully measured.
     const uptakeStatus = unavailable
       ? "unavailable"
       : scored.length > 0
@@ -502,10 +522,10 @@ export function printSummary(payload: SkillEvalPayload): void {
   console.log(`trigger_exact_match=${pythonDisplay(run.trigger_exact_match)}`);
 }
 
-export function writeHtmlReport(
+export async function writeHtmlReport(
   payload: Record<string, unknown>,
   path: string,
-): void {
+): Promise<void> {
   const runs = (Array.isArray(payload.runs) ? payload.runs : []).filter(isRecord);
   const rows = runs.map((run) =>
     "<tr>" +
@@ -584,28 +604,44 @@ export function writeHtmlReport(
 </body>
 </html>
 `;
-  writeFileSync(path, document, "utf8");
+  await Bun.write(path, document);
 }
 
-function findAppDir(root: string): string | null {
-  for (const path of [join(root, "bundle", "app"), join(root, "app")]) {
-    if (existsSync(join(path, "package.json"))) return path;
+function findAppDir(root: string, files: string[]): string | null {
+  const fileSet = new Set(files);
+  for (const candidate of [
+    path.join(root, "bundle", "app"),
+    path.join(root, "app"),
+  ]) {
+    if (fileSet.has(path.join(candidate, "package.json"))) return candidate;
   }
-  const workspacePackages = filesNamed(root, "package.json")
-    .filter((path) => relative(root, path).split(sep)[0] === "agent-workspace")
-    .sort();
-  if (workspacePackages[0] !== undefined) return dirname(workspacePackages[0]);
-  const packages = filesNamed(root, "package.json").sort();
-  for (const path of packages) {
-    if (!path.split(sep).includes("node_modules")) return dirname(path);
+  const workspacePackages = filesNamed(files, "package.json")
+    .filter((candidate) => {
+      const parts = path.relative(root, candidate).split(path.sep);
+      return parts.length === 3 &&
+        parts[0] === "agent-workspace" &&
+        parts[2] === "package.json";
+    })
+    .sort(compareUnicodeCodePoints);
+  if (workspacePackages[0] !== undefined) {
+    return path.dirname(workspacePackages[0]);
+  }
+  const packages = filesNamed(files, "package.json").sort(
+    compareUnicodeCodePoints,
+  );
+  for (const candidate of packages) {
+    if (!candidate.split(path.sep).includes("node_modules")) {
+      return path.dirname(candidate);
+    }
   }
   return null;
 }
 
-function findTrace(root: string): string | null {
-  const files = allFiles(root);
+function findTrace(files: string[]): string | null {
   for (const name of TRACE_CANDIDATES) {
-    const match = files.filter((path) => basename(path) === name).sort()[0];
+    const match = files
+      .filter((candidate) => path.basename(candidate) === name)
+      .sort(compareUnicodeCodePoints)[0];
     if (match !== undefined) return match;
   }
   return null;
@@ -615,62 +651,88 @@ function firstExisting(
   root: string,
   preferred: string[],
   filename: string,
+  files: string[],
 ): string | null {
+  const fileSet = new Set(files);
   for (const relativePath of preferred) {
-    const path = join(root, relativePath);
-    if (existsSync(path)) return path;
+    const candidate = path.join(root, relativePath);
+    if (fileSet.has(candidate)) return candidate;
   }
-  return filesNamed(root, filename).sort()[0] ?? null;
+  return filesNamed(files, filename).sort(compareUnicodeCodePoints)[0] ?? null;
 }
 
-function allFiles(root: string): string[] {
-  if (!existsSync(root)) return [];
-  const files: string[] = [];
-  const visit = (directory: string): void => {
-    for (const entry of readdirSync(directory, { withFileTypes: true })) {
-      const path = join(directory, entry.name);
-      if (entry.isDirectory()) visit(path);
-      else if (entry.isFile()) files.push(path);
+async function allFiles(root: string): Promise<string[]> {
+  const visit = async (directory: string): Promise<string[]> => {
+    let entries;
+    try {
+      entries = await readdir(directory, { withFileTypes: true });
+    } catch (error) {
+      if (isMissingPathError(error)) return [];
+      throw error;
     }
+    entries.sort((left, right) =>
+      compareUnicodeCodePoints(left.name, right.name)
+    );
+    const nested = await Promise.all(entries.map(async (entry) => {
+      const candidate = path.join(directory, entry.name);
+      if (entry.isDirectory()) return await visit(candidate);
+      return entry.isFile() ? [candidate] : [];
+    }));
+    return nested.flat();
   };
-  if (statSync(root).isDirectory()) visit(root);
-  return files;
+  return await visit(root);
 }
 
-function filesNamed(root: string, filename: string): string[] {
-  return allFiles(root).filter((path) => basename(path) === filename);
+function filesNamed(files: string[], filename: string): string[] {
+  return files.filter((candidate) => path.basename(candidate) === filename);
 }
 
-function readEvaluatorPct(path: string): number | null {
-  const data = readJson<Record<string, unknown>>(path);
+async function readEvaluatorPct(resultPath: string): Promise<number | null> {
+  const data = await readJsonAsync<Record<string, unknown>>(resultPath);
   if (data.macro_avg_pct !== null && data.macro_avg_pct !== undefined) {
-    return Number(data.macro_avg_pct);
+    const value = Number(data.macro_avg_pct);
+    if (Number.isFinite(value)) return value;
   }
   if (data.micro_pct !== null && data.micro_pct !== undefined) {
-    return Number(data.micro_pct);
+    const value = Number(data.micro_pct);
+    if (Number.isFinite(value)) return value;
   }
   return null;
 }
 
-function collectBraintrustRefs(
+async function collectBraintrustRefs(
   authorLayout: ArtifactLayout,
   evalLayout: ArtifactLayout | null,
   trace: NormalizedTrace,
-): string[] {
+): Promise<string[]> {
   const values = flattenStrings(trace).filter((item) =>
     item.toLowerCase().includes("braintrust")
   );
-  for (const path of [authorLayout.manifestPath, evalLayout?.manifestPath ?? null]) {
-    if (path === null || !existsSync(path)) continue;
+  const manifests = [
+    authorLayout.manifestPath,
+    evalLayout?.manifestPath ?? null,
+  ];
+  const manifestValues = await Promise.all(manifests.map(async (manifestPath) => {
+    if (manifestPath === null || !await Bun.file(manifestPath).exists()) return [];
     try {
-      for (const item of flattenStrings(readJson<unknown>(path))) {
-        if (item.toLowerCase().includes("braintrust")) values.push(item);
-      }
+      return flattenStrings(await readJsonAsync<unknown>(manifestPath));
     } catch {
       // Malformed optional metadata is not fatal to analysis.
+      return [];
+    }
+  }));
+  for (const items of manifestValues) {
+    for (const item of items) {
+      if (item.toLowerCase().includes("braintrust")) values.push(item);
     }
   }
   return dedupe(values);
+}
+
+function isMissingPathError(error: unknown): boolean {
+  return error instanceof Error &&
+    "code" in error &&
+    (error.code === "ENOENT" || error.code === "ENOTDIR");
 }
 
 function values(rows: Array<Record<string, unknown>>, key: string): number[] {

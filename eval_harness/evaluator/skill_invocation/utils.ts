@@ -45,6 +45,10 @@ export function readJson<T>(path: string): T {
   return JSON.parse(readFileSync(path, "utf8")) as T;
 }
 
+export async function readJsonAsync<T>(path: string): Promise<T> {
+  return JSON.parse(await Bun.file(path).text()) as T;
+}
+
 /**
  * Write readable JSON with Python-compatible deterministic key ordering.
  *
@@ -55,6 +59,13 @@ export function readJson<T>(path: string): T {
  */
 export function writeJson(data: JsonObject, path: string): void {
   writeFileSync(path, JSON.stringify(data, sortedJsonKeys(data), 2), "utf8");
+}
+
+export async function writeJsonAsync(
+  data: JsonObject,
+  path: string,
+): Promise<void> {
+  await Bun.write(path, JSON.stringify(data, sortedJsonKeys(data), 2));
 }
 
 function sortedJsonKeys(data: JsonValue): string[] {
@@ -76,6 +87,19 @@ function sortedJsonKeys(data: JsonValue): string[] {
 
 export function loadPrdSkills(path: string): Record<string, string[]> {
   const raw = readJson<Record<string, unknown>>(path);
+  return normalizePrdSkills(raw);
+}
+
+export async function loadPrdSkillsAsync(
+  path: string,
+): Promise<Record<string, string[]>> {
+  const raw = await readJsonAsync<Record<string, unknown>>(path);
+  return normalizePrdSkills(raw);
+}
+
+function normalizePrdSkills(
+  raw: Record<string, unknown>,
+): Record<string, string[]> {
   return Object.fromEntries(
     Object.entries(raw).map(([key, value]) => [
       String(key),
