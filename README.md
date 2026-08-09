@@ -8,6 +8,14 @@ evaluator can inspect whether Expo skills were triggered and reflected in code.
 The Notes app is the canonical first target because it is small, known-good, and
 has a stable primitive test plan.
 
+## How It Fits Together
+
+![Evaluation harness flow from dataset inputs through app authoring and the skill and iOS evaluators](eval_harness/evaluation-harness.png)
+
+The diagram includes the repository paths for each stage. Its
+[editable Excalidraw source](eval_harness/evaluation-harness.excalidraw) is kept
+next to the rendered image.
+
 ## Layout
 
 ```text
