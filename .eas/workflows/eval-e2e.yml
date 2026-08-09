@@ -7,7 +7,9 @@
 #   eas workflow:run .eas/workflows/eval-e2e.yml
 #
 # Secrets come ONLY from the `production` environment (auto-injected as $VAR).
-# Required: CLAUDE_CODE_OAUTH_TOKEN. Optional: OPENAI_API_KEY (AGENT=codex),
+# Required for the selected authoring agent: CLAUDE_CODE_OAUTH_TOKEN
+# (claude-code), OPENAI_API_KEY (codex), or META_API_KEY (muse-code).
+# The downstream iOS evaluator always requires CLAUDE_CODE_OAUTH_TOKEN.
 # GCS_BUCKET + GCP_SA_KEY (mirror exfil), BRAINTRUST_API_KEY (trace push).
 # Braintrust defaults to project `expo-evals`; override with BRAINTRUST_PROJECT,
 # BRAINTRUST_CC_PROJECT, or BRAINTRUST_EVAL_PROJECT.
@@ -17,6 +19,7 @@ name: eval-e2e
 defaults:
   tools:
     bun: '1.3.14'
+    node: '22.20.0'
 
 on:
   workflow_dispatch:
@@ -26,6 +29,7 @@ on:
         options:
           - claude-code
           - codex
+          - muse-code
         default: claude-code
         required: false
         description: Coding agent to author the app
@@ -33,7 +37,7 @@ on:
         type: string
         default: ''
         required: false
-        description: Optional model alias/name; defaults to sonnet for Claude Code and gpt-5-mini for Codex
+        description: Optional model alias/name; defaults to sonnet (Claude Code), gpt-5-mini (Codex), or muse-spark-1.2 (Muse)
       prd:
         type: string
         default: dataset/prds/hot_chocolate/prd/mvp.txt
@@ -103,9 +107,6 @@ jobs:
     steps:
       - uses: eas/checkout
 
-      - name: Check Claude subscription OAuth
-        run: bash ./eval_harness/utils/shell/check_claude_auth.sh
-
       - name: Author app with coding agent
         run: bash ./eval_harness/app_builder/scripts/author-app.sh
 
@@ -128,6 +129,8 @@ jobs:
             --exclude 'eval-out/*/codex-home/state_*.sqlite*' \
             --exclude 'eval-out/*/codex-home/memories_*.sqlite*' \
             --exclude 'eval-out/*/codex-home/goals_*.sqlite*' \
+            --exclude 'eval-out/*/muse-xdg-data' \
+            --exclude 'eval-out/*/muse-bin' \
             -czf authored-app.tar.gz agent-workspace eval-out
 
       - name: Upload authored app

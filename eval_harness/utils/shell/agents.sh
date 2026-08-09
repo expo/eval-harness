@@ -4,6 +4,147 @@ eval::_agent_timeout() {
   else echo "bun $_EVAL_STAGES_DIR/timeout_exec.ts 2400"; fi
 }
 
+# Normalize the public authoring-agent values once at the harness boundary.
+# `muse` remains a convenience alias only; manifests and workflow behavior use
+# the canonical `muse-code` value.
+eval::normalize_authoring_agent() { # agent
+  case "$1" in
+    claude|claude-code) printf '%s\n' "claude-code" ;;
+    codex) printf '%s\n' "codex" ;;
+    muse|muse-code) printf '%s\n' "muse-code" ;;
+    *)
+      echo "unsupported authoring agent: $1 (expected claude-code, codex, or muse-code)" >&2
+      return 2
+      ;;
+  esac
+}
+
+# Compatibility names keep the pure authoring configuration contract easy to
+# invoke from shell tests and local tooling. The canonical runtime value remains
+# `muse-code`; `muse` is accepted only as an input alias.
+eval::normalize_author_agent() { # agent
+  case "$1" in
+    claude|claude-code|codex|muse|muse-code)
+      eval::normalize_authoring_agent "$1"
+      ;;
+    *)
+      echo "unknown coding agent: $1" >&2
+      return 2
+      ;;
+  esac
+}
+
+eval::resolve_authoring_model() { # agent requested_model
+  local agent="$1" requested="${2:-}"
+  if [ -n "$requested" ]; then
+    printf '%s\n' "$requested"
+    return 0
+  fi
+  case "$agent" in
+    claude-code) printf '%s\n' "sonnet" ;;
+    codex) printf '%s\n' "${CODEX_MODEL:-gpt-5-mini}" ;;
+    muse-code) printf '%s\n' "muse-spark-1.2" ;;
+    *)
+      echo "unsupported authoring agent: $agent" >&2
+      return 2
+      ;;
+  esac
+}
+
+eval::default_author_model() { # agent
+  eval::resolve_authoring_model "$1" ""
+}
+
+# Authoring credentials are deliberately provider-specific. In particular,
+# do not run Claude Code's OAuth check for Codex or Muse: the downstream iOS
+# evaluator retains its own Claude auth check in eval-ios-app.sh.
+eval::require_authoring_credentials() { # agent root
+  local agent="$1" root="$2"
+  case "$agent" in
+    claude-code)
+      bash "$root/eval_harness/utils/shell/check_claude_auth.sh"
+      ;;
+    codex)
+      if [ -z "${OPENAI_API_KEY:-}" ]; then
+        echo "OPENAI_API_KEY is missing; Codex authoring requires it" >&2
+        return 1
+      fi
+      echo "OPENAI_API_KEY bound"
+      ;;
+    muse-code)
+      if [ -z "${META_API_KEY:-}" ]; then
+        echo "META_API_KEY is missing; Muse authoring requires it" >&2
+        return 1
+      fi
+      MUSE_API_KEY="$META_API_KEY"
+      unset META_API_KEY
+      export -n MUSE_API_KEY
+      echo "META_API_KEY bound"
+      ;;
+    *)
+      echo "unsupported authoring agent: $agent" >&2
+      return 2
+      ;;
+  esac
+}
+
+eval::require_author_agent_credential() { # agent [root]
+  local agent="$1" root="${2:-${_EVAL_STAGES_DIR%/utils/shell}}"
+  if [ "$agent" = "muse" ] || [ "$agent" = "muse-code" ]; then
+    if [ -z "${META_API_KEY:-}" ]; then
+      echo "META_API_KEY must be set for Muse authoring" >&2
+      return 1
+    fi
+    MUSE_API_KEY="$META_API_KEY"
+    unset META_API_KEY
+    export -n MUSE_API_KEY
+    return 0
+  fi
+  eval::require_authoring_credentials "$(eval::normalize_authoring_agent "$agent")" "$root"
+}
+
+eval::install_muse_cli() { # out_dir
+  local out="$1"
+  unset META_API_KEY
+  export -n MUSE_API_KEY
+  export MUSE_INSTALL_DIR="$out/muse-bin"
+  export MUSE_NO_MODIFY_PATH=1
+  curl -fsSL https://dev.meta.ai/install.sh | bash >"$out/a-muse-install.log" 2>&1
+  eval::gate ${PIPESTATUS[1]} "muse-code CLI install" || return $?
+  export PATH="$MUSE_INSTALL_DIR:$PATH"
+  export MUSE_NO_AUTO_UPDATE=1
+  muse --version >"$out/a-muse-version.log" 2>&1
+  eval::gate $? "muse-code CLI version" || return $?
+  MUSE_CLI_VERSION="$(head -n 1 "$out/a-muse-version.log")"
+  export MUSE_CLI_VERSION
+  printf 'MUSE_CLI_VERSION=%q\n' "$MUSE_CLI_VERSION" >>"$out/author.env"
+}
+
+eval::_scrub_muse_agent_credentials() {
+  # EXPO_TOKEN is intentionally retained: the authored app can use it for the
+  # EAS setup/build checks required by the authoring prompt. The selected Meta
+  # key is supplied only through --api-key-stdin, while credentials belonging
+  # to telemetry, storage, and the other authoring agents must not reach Muse
+  # or any shell command that Muse starts.
+  unset META_API_KEY MUSE_API_KEY
+  unset CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN OPENAI_API_KEY
+  unset BRAINTRUST_API_KEY GCP_SA_KEY GOOGLE_APPLICATION_CREDENTIALS
+  unset EXPO_MCP_REFRESH_TOKEN EXPO_MCP_BEARER_TOKEN
+}
+
+eval::require_authored_app() { # agent_exit_code workspace
+  local agent_rc="$1" workspace="$2"
+  if [ "$agent_rc" != 0 ]; then
+    echo "  ❌ coding agent failed; authored-app diagnostics will still be collected"
+    return "$agent_rc"
+  fi
+  if [ ! -f "$workspace/package.json" ]; then
+    echo "  ❌ coding agent did not produce package.json; authored-app diagnostics will still be collected"
+    return 1
+  fi
+  echo "  ✅ authored package.json present"
+}
+
 # Configures Expo MCP auth for this run. mcp.expo.dev now accepts an Expo
 # Robot User access token (EXPO_TOKEN) directly as a Bearer token -- verified
 # live (initialize + tools/list both succeed) -- so this is a plain variable
@@ -21,10 +162,52 @@ eval::configure_expo_mcp() {
     export EXPO_MCP_AUTH_STATUS="unconfigured"
     return 1
   fi
-  export EXPO_MCP_BEARER_TOKEN="$EXPO_TOKEN"
+  if [ -n "${EXPO_TOKEN:-}" ]; then
+    export EXPO_MCP_BEARER_TOKEN="$EXPO_TOKEN"
+  fi
   export EXPO_MCP_AUTH_STATUS="ok"
   echo "  ✅ Expo MCP bearer token set from EXPO_TOKEN (len ${#EXPO_TOKEN})"
   return 0
+}
+
+# Muse reads settings from $XDG_CONFIG_HOME/muse/settings.json and session data
+# from $XDG_DATA_HOME/muse. Authoring binds both roots to the current run.
+eval::configure_muse_settings() { # scenario
+  local scenario="$1"
+  local settings_root="${MUSE_SETTINGS_ROOT:-}"
+  if [ -z "$settings_root" ]; then
+    settings_root="$(mktemp -d "${TMPDIR:-/tmp}/muse-settings.XXXXXX")" || return 1
+    export MUSE_SETTINGS_OWNED=1
+  fi
+  mkdir -p "$settings_root/muse" "$settings_root/data"
+  export MUSE_SETTINGS_ROOT="$settings_root"
+  export MUSE_DATA_ROOT="${MUSE_DATA_ROOT:-${XDG_DATA_HOME:-$settings_root/data}}"
+  mkdir -p "$MUSE_DATA_ROOT"
+  if [ "$scenario" = "skills_unavailable" ]; then
+    export EXPO_MCP_AUTH_STATUS="not_attempted"
+    echo "  Muse Expo MCP not configured: skills_unavailable scenario"
+    return 0
+  fi
+  if [ -z "${EXPO_TOKEN:-}" ] && [ -z "${EXPO_MCP_BEARER_TOKEN:-}" ]; then
+    export EXPO_MCP_AUTH_STATUS="unconfigured"
+    echo "  Muse Expo MCP not configured: EXPO_TOKEN unset"
+    return 0
+  fi
+  MUSE_SETTINGS_FILE="$settings_root/muse/settings.json" \
+    MUSE_MCP_TOKEN="${EXPO_TOKEN:-${EXPO_MCP_BEARER_TOKEN:-}}" \
+    node -e 'const fs = require("node:fs"); const file = process.env.MUSE_SETTINGS_FILE; const token = process.env.MUSE_MCP_TOKEN; fs.writeFileSync(file, JSON.stringify({schema_version: 1, mcp_servers: {expo: {enabled: true, transport: "streamable_http", url: "https://mcp.expo.dev/mcp", headers: {Authorization: `Bearer ${token}`}}}}, null, 2), {mode: 0o600});' \
+    || return 1
+  export EXPO_MCP_AUTH_STATUS="ok"
+  echo "  ✅ Muse Expo MCP configured from EXPO_TOKEN"
+}
+
+eval::cleanup_muse_settings() {
+  if [ "${MUSE_SETTINGS_OWNED:-0}" = "1" ] && [ -n "${MUSE_SETTINGS_ROOT:-}" ]; then
+    rm -rf -- "$MUSE_SETTINGS_ROOT"
+  fi
+  # Session data is non-secret run evidence needed by collect_artifacts.sh;
+  # only the credential-bearing settings root is removed here.
+  unset MUSE_SETTINGS_ROOT MUSE_SETTINGS_OWNED
 }
 
 # Claude Code's Expo plugin bundles an unauthenticated MCP entry. A project-
@@ -81,6 +264,8 @@ EOF
 
 # Runs the selected coding agent. Globals it reads when agent=codex:
 #   CODEX_HOME, OPENAI_PROXY_PORT, OTLP_PORT, CODEX_MODEL
+# Globals it reads when agent=muse-code:
+#   MUSE_SETTINGS_ROOT, MUSE_DATA_ROOT
 # Also reads SCENARIO (default skills_available_unmentioned) and, only for the
 # "skills_available_mentioned" scenario, SKILL_MENTION (a skill id to name
 # explicitly in the prompt). "skills_unavailable" is the enforced
@@ -88,19 +273,27 @@ EOF
 # entirely, so nothing exists for the agent to trigger -- see
 # skill_invocation's UNAVAILABLE_SCENARIOS, which scores against this same
 # enforced absence.
-# SKILL_PLUGIN_DIR (claude-code only): when set, skips the marketplace
-# install/lookup entirely and loads the plugin via `--plugin-dir` from this
-# local path instead -- used by the skills-repo CI integration so a PR's own
-# proposed skill changes get exercised, not whatever's currently published.
+# SKILL_PLUGIN_DIR: when set, use the local checkout's skills rather than the
+# published package. Claude loads its plugin directly; Codex and Muse copy the
+# checkout's skills/ children into the authored project's .agents/skills/.
 # PROMPT_FILE: base authoring prompt, relative to repo root. Normally resolved
 # from PROMPT_VARIANT by resolve_prompt.sh (see author-app.sh); defaulted here
 # only so this function stays callable on its own.
-eval::run_coding_agent() { # agent root workspace prd_file out_dir [model]
+eval::run_coding_agent() { # agent root workspace prd_file out_dir [model] [muse_api_key]
   local agent="$1" root="$2" workspace="$3" prd_file="$4" out="$5" model="${6:-}"
-  [ "$agent" = "claude" ] && agent="claude-code"
+  agent="$(eval::normalize_authoring_agent "$agent")" || return $?
+  local muse_api_key=""
+  if [ "$agent" = "muse-code" ]; then
+    muse_api_key="${7:-${MUSE_API_KEY:-${META_API_KEY:-}}}"
+    unset META_API_KEY
+    export -n muse_api_key
+  fi
   local scenario="${SCENARIO:-skills_available_unmentioned}"
   local skills_enabled=1
   [ "$scenario" = "skills_unavailable" ] && skills_enabled=0
+  if [ "$agent" = "muse-code" ] && [ -z "${MUSE_SETTINGS_ROOT:-}" ]; then
+    eval::configure_muse_settings "$scenario" || return $?
+  fi
   local prompt_file="${PROMPT_FILE:-dataset/prompts/baseline.md}"
   echo "================= STAGE C: coding agent ($agent) authors the app ================="
   echo "  scenario=$scenario  skills_enabled=$skills_enabled  prompt_variant=${PROMPT_VARIANT:-baseline}  prompt_file=$prompt_file"
@@ -151,6 +344,55 @@ eval::run_coding_agent() { # agent root workspace prd_file out_dir [model]
     ( cd "$workspace" && $TO codex exec "$prompt" ) 2>&1 | tee "$out/c-agent.log"
     local rc=${PIPESTATUS[0]}
     eval::gate $rc "codex authored app"
+    return $rc
+  elif [ "$agent" = "muse-code" ]; then
+    if ! command -v muse >/dev/null 2>&1; then echo "  ❌ muse not on PATH"; return 127; fi
+    if [ "$skills_enabled" = 1 ]; then
+      (
+        if [ -n "${SKILL_PLUGIN_DIR:-}" ]; then
+          if [ ! -d "$SKILL_PLUGIN_DIR/skills" ]; then
+            echo "  ❌ SKILL_PLUGIN_DIR has no skills directory: $SKILL_PLUGIN_DIR/skills"
+            exit 1
+          else
+            mkdir -p "$workspace/.agents/skills"
+            cp -R "$SKILL_PLUGIN_DIR/skills/." "$workspace/.agents/skills/"
+            echo "loaded Expo skills from SKILL_PLUGIN_DIR"
+          fi
+        else
+          ( cd "$workspace" && npx -y skills add expo/skills --yes )
+        fi
+        echo "muse skills list --source project --enabled-only --workspace $workspace --trust-workspace --json"
+        ( cd "$workspace" && env -u META_API_KEY muse skills list --source project --enabled-only \
+            --workspace "$workspace" --trust-workspace --json )
+      ) >"$out/c-plugin.log" 2>&1 || \
+        echo "  ⚠️  Muse Expo skill setup failed (continuing; see c-plugin.log)"
+    else
+      echo "skills_unavailable scenario: skipping Expo skill install and MCP wiring" >"$out/c-plugin.log"
+    fi
+    local muse_settings_root="${MUSE_SETTINGS_ROOT:-}"
+    local muse_data_root="${MUSE_DATA_ROOT:-}"
+    local rc
+    # Keep Muse on its native Meta endpoint. Its custom --base-url path caused
+    # model-catalog 404s on EAS, while the same worker, key, model, and Muse
+    # version succeeded through the native endpoint. Native Muse sessions are
+    # collected below as the supported authoring trace.
+    if [ -n "$muse_settings_root" ]; then
+      ( cd "$workspace" && printf '%s\n' "$muse_api_key" | ( eval::_scrub_muse_agent_credentials; unset muse_api_key; \
+          XDG_CONFIG_HOME="$muse_settings_root" XDG_DATA_HOME="$muse_data_root" \
+          MUSE_NO_AUTO_UPDATE=1 $TO muse exec --json --api-key-stdin --provider meta \
+            --model "${model:-muse-spark-1.2}" --workspace "$workspace" --yolo \
+            --no-foreign-personal-context "$prompt" ) ) \
+        2>&1 | tee "$out/c-agent.log"
+      rc=${PIPESTATUS[0]}
+    else
+      ( cd "$workspace" && printf '%s\n' "$muse_api_key" | ( eval::_scrub_muse_agent_credentials; unset muse_api_key; \
+          MUSE_NO_AUTO_UPDATE=1 $TO muse exec --json --api-key-stdin --provider meta \
+            --model "${model:-muse-spark-1.2}" --workspace "$workspace" --yolo \
+            --no-foreign-personal-context "$prompt" ) ) \
+        2>&1 | tee "$out/c-agent.log"
+      rc=${PIPESTATUS[0]}
+    fi
+    eval::gate $rc "muse-code authored app"
     return $rc
   else
     if ! command -v claude >/dev/null 2>&1; then echo "  ❌ claude not on PATH"; return 127; fi

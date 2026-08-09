@@ -86,6 +86,16 @@ collect_author_trace() {
       --session-name "Codex Authoring Session" $BT_FLAG \
       >"$OUT/collect-author-trace.log" 2>&1 || echo "  ⚠️  codex author trace reconstruction failed (see collect-author-trace.log)"
     _keep_better_trace "$tmp" "$dest"
+  elif [ "$AGENT" = "muse-code" ]; then
+    local dest="$BUNDLE/telemetry/traces/muse-code-authoring.json" tmp="$BUNDLE/telemetry/traces/muse-code-authoring.json.tmp"
+    run_trace_ts "$ROOT/eval_harness/utils/telemetry/tracing/muse_session.ts" \
+      --data-root "${MUSE_DATA_ROOT:-${XDG_DATA_HOME:-$HOME/.local/share}}" \
+      --out "$tmp" \
+      --since-mtime "$RUN_START_MTIME" $before_args \
+      --run-id "$RUN_ID" --source "muse-code-authoring" \
+      --session-name "Muse Code Authoring Session" $BT_FLAG \
+      >"$OUT/collect-author-trace.log" 2>&1 || echo "  ⚠️  Muse author trace reconstruction failed (see collect-author-trace.log)"
+    _keep_better_trace "$tmp" "$dest"
   else
     local dest="$BUNDLE/telemetry/traces/claude-code-authoring.json" tmp="$BUNDLE/telemetry/traces/claude-code-authoring.json.tmp"
     run_trace_ts "$ROOT/eval_harness/utils/telemetry/tracing/cc_transcript.ts" \
@@ -177,7 +187,7 @@ cp "$OUT"/*.log "$BUNDLE/logs/" 2>/dev/null
 GIT_SHA="$(cd "$ROOT" && git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 RESULT_JSON="$OUT/result.json" RUN_ID="$RUN_ID" AGENT="$AGENT" GIT_SHA="$GIT_SHA" \
 PRD="${PRD:-}" TEST_PLAN="${TEST_PLAN:-}" \
-AGENT_MODEL="${AGENT_MODEL:-}" METRO_MODE="${METRO_MODE:-}" \
+AGENT_MODEL="${AGENT_MODEL:-}" MUSE_CLI_VERSION="${MUSE_CLI_VERSION:-}" METRO_MODE="${METRO_MODE:-}" \
 EVAL_APP_BUNDLE_ID="${EVAL_APP_BUNDLE_ID:-}" EXPO_MCP_AUTH_STATUS="${EXPO_MCP_AUTH_STATUS:-}" \
 SCENARIO="${SCENARIO:-}" PROMPT_VARIANT="${PROMPT_VARIANT:-}" PROMPT_FILE="${PROMPT_FILE:-}" \
 "$PY" - "$BUNDLE/manifest.json" <<'PYEOF'
@@ -217,6 +227,7 @@ manifest = {
     "git_sha": os.environ.get("GIT_SHA"),
     "agent": os.environ.get("AGENT"),
     "agent_model": preferred("AGENT_MODEL", "agent_model"),
+    "muse_cli_version": preferred("MUSE_CLI_VERSION", "muse_cli_version"),
     "metro_mode": preferred("METRO_MODE", "metro_mode", "dev-build"),
     "eval_app_bundle_id": preferred("EVAL_APP_BUNDLE_ID", "eval_app_bundle_id"),
     "test_plan": preferred("TEST_PLAN", "test_plan") or "auto-resolved from dataset/prd_test_plans.json",
@@ -277,6 +288,7 @@ echo "== capture backstop (manifest + result + trace indexes + key logs; capped)
 CAP=40000
 for f in "$BUNDLE/manifest.json" "$BUNDLE/eval/result.json" \
          "$BUNDLE/telemetry/traces/claude-code-authoring.json" "$BUNDLE/telemetry/traces/codex-authoring.json" \
+         "$BUNDLE/telemetry/traces/muse-code-authoring.json" \
          "$BUNDLE/telemetry/traces/agentic-evaluator.json" \
          "$BUNDLE/telemetry/otel/index.jsonl" \
          "$BUNDLE/logs/c-agent.log" "$BUNDLE/logs/c-plugin.log" \

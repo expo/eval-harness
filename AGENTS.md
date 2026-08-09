@@ -113,7 +113,14 @@ runner plus uploaded artifacts.
 
 - EAS generic artifacts are the primary download path. GCS mirroring is optional.
 - Keep the run index named `manifest.json`.
-- Authoring traces should be named as Claude Code or Codex authoring sessions.
+- Authoring traces should be named as Claude Code, Codex, or Muse Code authoring
+  sessions.
+- Muse talks directly to its native Meta endpoint. Do not route it through the
+  generic logging proxy: the custom base-URL path caused model-catalog failures
+  on EAS, while direct requests from the same worker succeeded. Muse authoring
+  artifacts retain the normalized native
+  `telemetry/traces/muse-code-authoring.json`; raw Muse XDG session data and
+  installed Muse binaries must not enter the authored-app transport archive.
 - Evaluator Claude SDK traces should be named and tagged as agentic evaluator
   sessions.
 - Avoid enabling duplicate Braintrust pushes unless intentionally comparing two

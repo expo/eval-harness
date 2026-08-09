@@ -50,9 +50,13 @@ export function detectTriggeredSkills(trace: NormalizedTrace): string[] {
   return dedupe(observed);
 }
 
-function skillsFromToolCall(_agent: string, call: ToolCall): string[] {
+function skillsFromToolCall(agent: string, call: ToolCall): string[] {
   const name = call.name;
   const args = call.args ?? {};
+  if (agent === "muse-code" && name === "Skill") {
+    const skill = String(args.skill ?? "");
+    return skill.length > 0 && !skill.startsWith("bundled:") ? [skill] : [];
+  }
   if (name === "Skill") {
     const skill = String(args.skill ?? "");
     return skill.length > 0 ? [skill.split(":").at(-1) ?? skill] : [];

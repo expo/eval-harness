@@ -11,7 +11,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 
 import {
   emitBraintrustSession,
@@ -25,10 +25,16 @@ import {
   parseRollout,
   reconstructCodexRollouts,
 } from "../telemetry/tracing/codex_rollout.ts";
+import {
+  findMuseSessions,
+  parseMuseSession,
+  reconstructMuseSessions,
+} from "../telemetry/tracing/muse_session.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "../../..");
 const CC_SCRIPT = resolve(import.meta.dir, "../telemetry/tracing/cc_transcript.ts");
 const CODEX_SCRIPT = resolve(import.meta.dir, "../telemetry/tracing/codex_rollout.ts");
+const MUSE_SCRIPT = resolve(import.meta.dir, "../telemetry/tracing/muse_session.ts");
 
 type JsonRecord = Record<string, unknown>;
 type CliResult = { exitCode: number; stdout: string; stderr: string };
@@ -63,6 +69,19 @@ function claudePrompt(text: string, uuid = "user-1"): JsonRecord {
 
 function codexTaskStarted(turnId = "turn-1"): JsonRecord {
   return { type: "event_msg", payload: { type: "task_started", turn_id: turnId } };
+}
+
+function museEvent(
+  sequence: number,
+  kind: string,
+  event: JsonRecord,
+  runId = "muse-run-1",
+): JsonRecord {
+  return {
+    sequence,
+    payload_type: "runtime.session",
+    payload: { kind: "run", run_id: runId, event: { kind, ...event } },
+  };
 }
 
 async function runCli(command: string[]): Promise<CliResult> {
@@ -572,6 +591,308 @@ test("[CHAR] Codex reconstruction filters mtimes and writes its envelope", async
   });
 });
 
+test("[CHAR] Muse session normalizes durable turns, tools, usage, and skill reads", async () => {
+  await withTempDir(async (directory) => {
+    const session = join(directory, "session.jsonl");
+    await writeJsonl(session, [
+      {
+        sequence: 1,
+        payload_type: "runtime.session.metadata",
+        payload: {
+          record: {
+            workspace_root: "/workspace/muse-app",
+            provider_id: "meta",
+            model_id: "muse-spark-1.2",
+            build: { semver: "0.1.0" },
+          },
+        },
+      },
+      {
+        sequence: 2,
+        payload_type: "session.opened.observed",
+        payload: { record: { session_id: "muse-session-1" } },
+      },
+      museEvent(3, "started", { prompt: "Build the app" }),
+      museEvent(4, "model_completed", {
+        model: "muse-spark-1.2",
+        usage: { input_tokens: 10, output_tokens: 4, cache_read_tokens: 2 },
+      }),
+      museEvent(5, "assistant_tool_calls_committed", {
+        tool_calls: [
+          { call_id: "call-a", name: "bash", args: '{"command":"echo app"}' },
+          { call_id: "call-b", name: "read_file", args: { path: "a.txt" } },
+        ],
+      }),
+      museEvent(6, "tool_result_batch_committed", {
+        results: [
+          { tool_call_id: "call-b", text: "contents" },
+          { tool_call_id: "call-a", text: "ok" },
+        ],
+      }),
+      museEvent(7, "skill_read_observed", {
+        skill_id: "expo-router",
+        observed_at_sequence: 5,
+        evidence_kind: "read_skill_tool",
+        evidence_hash: "sha256:router",
+      }),
+      museEvent(8, "skill_read_observed", {
+        skill_id: "expo-router",
+        observed_at_sequence: 5,
+        evidence_kind: "read_skill_tool",
+        evidence_hash: "sha256:router",
+      }),
+      {
+        durability: "ephemeral",
+        ...museEvent(8.5, "skill_read_observed", {
+          skill_id: "expo-transient",
+          observed_at_sequence: 5,
+          evidence_kind: "read_skill_tool",
+          evidence_hash: "sha256:transient",
+        }),
+      },
+      {
+        sequence: 9,
+        payload_type: "agent.skill_read.observed",
+        payload: {
+          skill_id: "bundled:read-session",
+          observed_at_sequence: 9,
+          evidence_kind: "read_skill_tool",
+          evidence_hash: "sha256:bundled",
+        },
+      },
+      museEvent(10, "assistant_message_committed", { text: "Finished." }),
+      museEvent(11, "model_completed", {
+        model: "muse-spark-1.2",
+        usage: { input_tokens: 3, output_tokens: 1, cache_write_tokens: 5 },
+      }),
+      museEvent(12, "terminal", { terminal: "completed" }),
+    ]);
+
+    const [turns, metadata] = await parseMuseSession(session);
+    expect(metadata).toEqual({
+      id: "muse-session-1",
+      cwd: "/workspace/muse-app",
+      cli_version: "0.1.0",
+      provider: "meta",
+      model: "muse-spark-1.2",
+    });
+    expect(turns).toEqual([
+      {
+        turn_id: "muse-run-1",
+        turn_index: 1,
+        user_input: "Build the app",
+        steps: [
+          {
+            text: "",
+            reasoning: "",
+            tool_calls: [
+              { call_id: "call-a", name: "bash", args: { command: "echo app" }, output: "ok" },
+              { call_id: "call-b", name: "read_file", args: { path: "a.txt" }, output: "contents" },
+              {
+                call_id: "skill:expo-router",
+                name: "Skill",
+                args: {
+                  skill: "expo-router",
+                  observed_at_sequence: 5,
+                  evidence_kind: "read_skill_tool",
+                  evidence_hash: "sha256:router",
+                },
+              },
+              {
+                call_id: "skill:bundled:read-session",
+                name: "Skill",
+                args: {
+                  skill: "bundled:read-session",
+                  observed_at_sequence: 9,
+                  evidence_kind: "read_skill_tool",
+                  evidence_hash: "sha256:bundled",
+                },
+              },
+            ],
+            usage: { prompt_tokens: 10, completion_tokens: 4, tokens: 14, cache_read_input_tokens: 2 },
+          },
+          {
+            text: "Finished.",
+            reasoning: "",
+            tool_calls: [],
+            usage: { prompt_tokens: 3, completion_tokens: 1, tokens: 4, cache_creation_input_tokens: 5 },
+          },
+        ],
+        model: "muse-spark-1.2",
+        total_usage: {
+          prompt_tokens: 13,
+          completion_tokens: 5,
+          tokens: 18,
+          cache_read_input_tokens: 2,
+          cache_creation_input_tokens: 5,
+        },
+        final_output: "Finished.",
+        completed: true,
+        aborted: false,
+      },
+    ]);
+  });
+});
+
+test("[CHAR] Muse parser skips malformed records and flushes an incomplete turn", async () => {
+  await withTempDir(async (directory) => {
+    const session = join(directory, "session.jsonl");
+    await writeJsonl(session, [
+      "not-json",
+      museEvent(1, "started", { prompt: "unfinished" }, "open-run"),
+      museEvent(2, "assistant_message_committed", { text: "still working" }, "open-run"),
+    ]);
+
+    const [turns, metadata] = await parseMuseSession(session);
+    expect(metadata).toEqual({});
+    expect(turns).toEqual([
+      {
+        turn_id: "open-run",
+        turn_index: 1,
+        user_input: "unfinished",
+        steps: [{ text: "still working", reasoning: "", tool_calls: [] }],
+        final_output: "still working",
+        completed: false,
+        aborted: false,
+      },
+    ]);
+  });
+});
+
+test("[REGRESSION] Muse ignores interleaved task events while pairing run tool results", async () => {
+  await withTempDir(async (directory) => {
+    const session = join(directory, "session.jsonl");
+    await writeJsonl(session, [
+      museEvent(1, "started", { prompt: "Build the app" }),
+      museEvent(2, "assistant_tool_calls_committed", {
+        tool_calls: [{ call_id: "call-1", name: "read_file", args: { path: "app.json" } }],
+      }),
+      {
+        sequence: 3,
+        payload_type: "runtime.session",
+        payload: {
+          kind: "task",
+          run_id: "muse-run-1",
+          event: { kind: "started", task_id: "task-1", tool_call_id: "call-1" },
+        },
+      },
+      museEvent(4, "tool_result_batch_committed", {
+        results: [{ tool_call_id: "call-1", text: "contents" }],
+      }),
+      museEvent(5, "terminal", { terminal: "completed" }),
+    ]);
+
+    const [turns] = await parseMuseSession(session);
+    expect(turns).toHaveLength(1);
+    expect(turns[0]?.user_input).toBe("Build the app");
+    expect(turns[0]?.steps[0]?.tool_calls).toEqual([
+      {
+        call_id: "call-1",
+        name: "read_file",
+        args: { path: "app.json" },
+        output: "contents",
+      },
+    ]);
+  });
+});
+
+test("[REGRESSION] Muse skill observations deduplicate across session turns", async () => {
+  await withTempDir(async (directory) => {
+    const session = join(directory, "session.jsonl");
+    await writeJsonl(session, [
+      museEvent(1, "started", { prompt: "first" }, "turn-one"),
+      museEvent(2, "skill_read_observed", {
+        skill_id: "expo-router",
+        observed_at_sequence: 2,
+        evidence_kind: "read_skill_tool",
+        evidence_hash: "sha256:first",
+      }, "turn-one"),
+      museEvent(3, "terminal", { terminal: "completed" }, "turn-one"),
+      museEvent(4, "started", { prompt: "second" }, "turn-two"),
+      museEvent(5, "skill_read_observed", {
+        skill_id: "expo-router",
+        observed_at_sequence: 5,
+        evidence_kind: "read_skill_tool",
+        evidence_hash: "sha256:second",
+      }, "turn-two"),
+      museEvent(6, "terminal", { terminal: "completed" }, "turn-two"),
+    ]);
+
+    const [turns] = await parseMuseSession(session);
+    expect(turns.map((turn) => turn.steps.flatMap((step) => step.tool_calls))).toEqual([
+      [{ call_id: "skill:expo-router", name: "Skill", args: {
+        skill: "expo-router",
+        observed_at_sequence: 2,
+        evidence_kind: "read_skill_tool",
+        evidence_hash: "sha256:first",
+      } }],
+      [],
+    ]);
+  });
+});
+
+test("[CHAR] Muse reconstruction filters session files and writes its envelope", async () => {
+  await withTempDir(async (directory) => {
+    const dataRoot = join(directory, "data");
+    const sessions = join(dataRoot, "muse", "sessions", "2026", "08", "07");
+    await mkdir(sessions, { recursive: true });
+    const old = join(sessions, "old", "session.jsonl");
+    const selected = join(sessions, "selected", "session.jsonl");
+    const upper = join(sessions, "upper", "session.jsonl");
+    await Promise.all([mkdir(dirname(old), { recursive: true }), mkdir(dirname(selected), { recursive: true }), mkdir(dirname(upper), { recursive: true })]);
+    await writeJsonl(old, [museEvent(1, "started", { prompt: "old" }, "old")]);
+    await writeJsonl(selected, [museEvent(1, "started", { prompt: "selected" }, "selected")]);
+    await writeJsonl(upper, [museEvent(1, "started", { prompt: "upper" }, "upper")]);
+    await utimes(old, 10, 10);
+    await utimes(selected, 20, 20);
+    await utimes(upper, 30, 30);
+    const out = join(directory, "out", "trace.json");
+
+    expect(await findMuseSessions(dataRoot, 20, 30)).toEqual([selected]);
+    const payload = await reconstructMuseSessions({
+      dataRoot,
+      outPath: out,
+      sinceMtime: 20,
+      beforeMtime: 30,
+      runId: "run-muse",
+      source: "muse-code-authoring",
+      sessionName: "Muse Code Authoring Session",
+    });
+    expect(JSON.parse(await readFile(out, "utf8"))).toEqual(payload);
+    expect(payload).toMatchObject({
+      agent: "muse-code",
+      run_id: "run-muse",
+      source: "muse-code-authoring",
+      session_name: "Muse Code Authoring Session",
+      n_sessions: 1,
+    });
+    expect(basename(String(payload.sessions[0]?.session))).toBe("session.jsonl");
+  });
+});
+
+test("[REGRESSION] Muse reconstruction API and CLI default to authoring source", async () => {
+  await withTempDir(async (directory) => {
+    const dataRoot = join(directory, "data");
+    const session = join(dataRoot, "muse", "sessions", "2026", "08", "07", "selected", "session.jsonl");
+    await mkdir(dirname(session), { recursive: true });
+    await writeJsonl(session, [museEvent(1, "started", { prompt: "selected" }, "selected")]);
+    const apiOut = join(directory, "api.json");
+    expect((await reconstructMuseSessions({ dataRoot, outPath: apiOut })).source).toBe("muse-code-authoring");
+
+    const cliOut = join(directory, "cli.json");
+    const result = await runCli([
+      process.execPath,
+      MUSE_SCRIPT,
+      "--data-root", dataRoot,
+      "--out", cliOut,
+    ]);
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(await readFile(cliOut, "utf8"))).toMatchObject({
+      source: "muse-code-authoring",
+    });
+  });
+});
+
 test("[CHAR] discovery follows symlinks and keeps readable siblings", async () => {
   await withTempDir(async (directory) => {
     const claudeRoot = join(directory, "claude");
@@ -678,7 +999,7 @@ test("[REGRESSION] real Braintrust bridge imports from the repository root", asy
   }
 });
 
-test("[CHAR] both parse-only CLIs emit the stable session envelope", async () => {
+test("[CHAR] all parse-only CLIs emit the stable session envelope", async () => {
   await withTempDir(async (directory) => {
     const cases = [
       { script: CC_SCRIPT, records: [claudePrompt("hello")], expectedId: "session-1" },
@@ -686,6 +1007,14 @@ test("[CHAR] both parse-only CLIs emit the stable session envelope", async () =>
         script: CODEX_SCRIPT,
         records: [{ type: "session_meta", payload: { id: "codex-1" } }, codexTaskStarted()],
         expectedId: "codex-1",
+      },
+      {
+        script: MUSE_SCRIPT,
+        records: [
+          { payload_type: "session.opened.observed", payload: { record: { session_id: "muse-1" } } },
+          museEvent(1, "started", { prompt: "hello" }),
+        ],
+        expectedId: "muse-1",
       },
     ];
 
@@ -703,7 +1032,7 @@ test("[CHAR] both parse-only CLIs emit the stable session envelope", async () =>
   });
 });
 
-test("[CHAR] both CLIs preserve argparse help and accepted option forms", async () => {
+test("[CHAR] parser CLIs preserve argparse help and accepted option forms", async () => {
   await withTempDir(async (directory) => {
     const cases = [
       {
@@ -715,6 +1044,11 @@ test("[CHAR] both CLIs preserve argparse help and accepted option forms", async 
         script: CODEX_SCRIPT,
         rootOption: `--sessions=${directory}`,
         usage: "usage: codex_rollout.py [-h] [--sessions-dir SESSIONS_DIR] --out OUT",
+      },
+      {
+        script: MUSE_SCRIPT,
+        rootOption: `--data=${directory}`,
+        usage: "usage: muse_session.py [-h] [--data-root DATA_ROOT] --out OUT",
       },
     ];
 
