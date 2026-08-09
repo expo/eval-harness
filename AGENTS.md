@@ -115,10 +115,12 @@ runner plus uploaded artifacts.
 - Keep the run index named `manifest.json`.
 - Authoring traces should be named as Claude Code, Codex, or Muse Code authoring
   sessions.
-- Muse authoring artifacts retain only normalized
-  `telemetry/traces/muse-code-authoring.json` and `telemetry/meta.jsonl`;
-  raw Muse XDG session data and installed Muse binaries must not enter the
-  authored-app transport archive.
+- Muse talks directly to its native Meta endpoint. Do not route it through the
+  generic logging proxy: the custom base-URL path caused model-catalog failures
+  on EAS, while direct requests from the same worker succeeded. Muse authoring
+  artifacts retain the normalized native
+  `telemetry/traces/muse-code-authoring.json`; raw Muse XDG session data and
+  installed Muse binaries must not enter the authored-app transport archive.
 - Evaluator Claude SDK traces should be named and tagged as agentic evaluator
   sessions.
 - Avoid enabling duplicate Braintrust pushes unless intentionally comparing two

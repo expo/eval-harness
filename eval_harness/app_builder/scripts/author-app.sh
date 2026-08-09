@@ -3,8 +3,9 @@
 #
 # This is the first half of eval-e2e.yml. It runs only the coding agent and
 # telemetry sidecars, then lets collect_artifacts.sh package the authored app,
-# reconstructed agent trace, raw proxy log, and stage logs. The workflow uploads
-# agent-workspace/ + eval-out/ as the artifact consumed by the macOS eval job.
+# reconstructed agent trace, provider proxy logs when enabled, and stage logs.
+# The workflow uploads agent-workspace/ + eval-out/ as the artifact consumed by
+# the macOS eval job.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
@@ -56,9 +57,8 @@ export EAS_PROJECT_ID
 
 ANTHROPIC_PROXY_PORT=8082
 OPENAI_PROXY_PORT=8083
-META_PROXY_PORT=8084
 OTLP_PORT=4318
-export OPENAI_PROXY_PORT META_PROXY_PORT OTLP_PORT
+export OPENAI_PROXY_PORT OTLP_PORT
 
 export CI=1 EXPO_NO_TELEMETRY=1
 eval::env_banner
@@ -124,10 +124,6 @@ case "$AGENT" in
     eval::wait_for_port "$OPENAI_PROXY_PORT" && echo "  ✅ openai proxy on :$OPENAI_PROXY_PORT"
     eval::launch_otlp_receiver "$ROOT" "$OTLP_PORT" "$TELEMETRY_DIR/otel"
     eval::wait_for_port "$OTLP_PORT" && echo "  ✅ OTLP receiver on :$OTLP_PORT"
-    ;;
-  muse-code)
-    eval::launch_proxy "$ROOT" meta https://api.meta.ai/v1 "$META_PROXY_PORT" "$TELEMETRY_DIR/meta.jsonl"
-    eval::wait_for_port "$META_PROXY_PORT" && echo "  ✅ meta proxy on :$META_PROXY_PORT"
     ;;
 esac
 

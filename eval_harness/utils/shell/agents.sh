@@ -265,7 +265,7 @@ EOF
 # Runs the selected coding agent. Globals it reads when agent=codex:
 #   CODEX_HOME, OPENAI_PROXY_PORT, OTLP_PORT, CODEX_MODEL
 # Globals it reads when agent=muse-code:
-#   META_PROXY_PORT, MUSE_SETTINGS_ROOT, MUSE_DATA_ROOT
+#   MUSE_SETTINGS_ROOT, MUSE_DATA_ROOT
 # Also reads SCENARIO (default skills_available_unmentioned) and, only for the
 # "skills_available_mentioned" scenario, SKILL_MENTION (a skill id to name
 # explicitly in the prompt). "skills_unavailable" is the enforced
@@ -372,19 +372,23 @@ eval::run_coding_agent() { # agent root workspace prd_file out_dir [model] [muse
     local muse_settings_root="${MUSE_SETTINGS_ROOT:-}"
     local muse_data_root="${MUSE_DATA_ROOT:-}"
     local rc
+    # Keep Muse on its native Meta endpoint. Its custom --base-url path caused
+    # model-catalog 404s on EAS, while the same worker, key, model, and Muse
+    # version succeeded through the native endpoint. Native Muse sessions are
+    # collected below as the supported authoring trace.
     if [ -n "$muse_settings_root" ]; then
       ( cd "$workspace" && printf '%s\n' "$muse_api_key" | ( eval::_scrub_muse_agent_credentials; unset muse_api_key; \
           XDG_CONFIG_HOME="$muse_settings_root" XDG_DATA_HOME="$muse_data_root" \
           MUSE_NO_AUTO_UPDATE=1 $TO muse exec --json --api-key-stdin --provider meta \
             --model "${model:-muse-spark-1.2}" --workspace "$workspace" --yolo \
-            --no-foreign-personal-context --base-url "http://127.0.0.1:${META_PROXY_PORT:-8084}" "$prompt" ) ) \
+            --no-foreign-personal-context "$prompt" ) ) \
         2>&1 | tee "$out/c-agent.log"
       rc=${PIPESTATUS[0]}
     else
       ( cd "$workspace" && printf '%s\n' "$muse_api_key" | ( eval::_scrub_muse_agent_credentials; unset muse_api_key; \
           MUSE_NO_AUTO_UPDATE=1 $TO muse exec --json --api-key-stdin --provider meta \
             --model "${model:-muse-spark-1.2}" --workspace "$workspace" --yolo \
-            --no-foreign-personal-context --base-url "http://127.0.0.1:${META_PROXY_PORT:-8084}" "$prompt" ) ) \
+            --no-foreign-personal-context "$prompt" ) ) \
         2>&1 | tee "$out/c-agent.log"
       rc=${PIPESTATUS[0]}
     fi

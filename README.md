@@ -270,12 +270,14 @@ classification yet.
 
 The `authored-app` artifact contains `authored-app.tar.gz`. For a Muse Code run,
 its normalized author trace is
-`eval-out/<RUN_ID>/bundle/telemetry/traces/muse-code-authoring.json`; the
-redacted Meta proxy telemetry is
-`eval-out/<RUN_ID>/bundle/telemetry/meta.jsonl`. The bundle manifest records
-the `muse-code` agent, selected model, and Muse CLI version. Raw Muse XDG session
-data and the installed Muse binary are transient worker inputs and are excluded
-from the transport archive.
+`eval-out/<RUN_ID>/bundle/telemetry/traces/muse-code-authoring.json`. Muse talks
+directly to its native Meta endpoint: routing it through the harness's generic
+logging proxy caused model-catalog failures on EAS, while direct requests from
+the same worker succeeded. The normalized native Muse session is therefore the
+supported trace source. The bundle manifest records the `muse-code` agent,
+selected model, and Muse CLI version. Raw Muse XDG session data and the installed
+Muse binary are transient worker inputs and are excluded from the transport
+archive.
 
 ## Debug Workflows
 

@@ -154,7 +154,6 @@ fi
 # --- 3. telemetry: proxy I/O + OTLP exports ---
 [ -f "$TELEMETRY_DIR/anthropic.jsonl" ] && cp "$TELEMETRY_DIR/anthropic.jsonl" "$BUNDLE/telemetry/" 2>/dev/null
 [ -f "$TELEMETRY_DIR/openai.jsonl" ] && cp "$TELEMETRY_DIR/openai.jsonl" "$BUNDLE/telemetry/" 2>/dev/null
-[ -f "$TELEMETRY_DIR/meta.jsonl" ] && cp "$TELEMETRY_DIR/meta.jsonl" "$BUNDLE/telemetry/" 2>/dev/null
 [ -d "$TELEMETRY_DIR/otel" ] && cp -R "$TELEMETRY_DIR/otel" "$BUNDLE/telemetry/otel" 2>/dev/null
 
 # --- 4. evaluator traces (all current-run plans) + result.json ---
@@ -243,7 +242,6 @@ manifest = {
         "app": "app/",
         "proxy_anthropic": "telemetry/anthropic.jsonl",
         "proxy_openai": "telemetry/openai.jsonl",
-        "proxy_meta": "telemetry/meta.jsonl",
         "otel": "telemetry/otel/",
         "agent_traces": "telemetry/traces/",
         "eval_traces": "eval/traces/",

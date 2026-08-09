@@ -196,7 +196,7 @@ INSTALLER
   expect(readFileSync(join(out, "author.env"), "utf8")).toContain("MUSE_CLI_VERSION=");
 });
 
-test("Muse authoring streams its key, installs local skills, and records Expo MCP settings", () => {
+test("Muse authoring streams its key directly, installs local skills, and records Expo MCP settings", () => {
   const root = tempDir("muse-authoring-");
   const bin = join(root, "bin");
   const workspace = join(root, "workspace");
@@ -254,7 +254,7 @@ cp "$XDG_CONFIG_HOME/muse/settings.json" "$CAPTURE_SETTINGS"
 
   expect(result.exitCode).toBe(0);
   expect(readFileSync(capturedArgs, "utf8")).toContain("--api-key-stdin");
-  expect(readFileSync(capturedArgs, "utf8")).toContain("--base-url\nhttp://127.0.0.1:8765");
+  expect(readFileSync(capturedArgs, "utf8")).not.toContain("--base-url");
   expect(readFileSync(capturedArgs, "utf8")).toContain("--no-foreign-personal-context");
   expect(readFileSync(capturedArgs, "utf8")).not.toContain("meta-secret-only-on-stdin");
   expect(readFileSync(capturedStdin, "utf8")).toBe("meta-secret-only-on-stdin\n");
@@ -424,7 +424,7 @@ test("Muse cleanup preserves ambient XDG config and removes only harness-owned s
   expect(result.exitCode).toBe(0);
 });
 
-test("Muse artifact collection retains normalized telemetry without shipping raw session data", () => {
+test("Muse artifact collection retains its normalized trace without raw session or proxy data", () => {
   const root = tempDir("muse-artifacts-");
   const out = join(root, "out");
   const workspace = join(root, "workspace");
@@ -443,9 +443,10 @@ test("Muse artifact collection retains normalized telemetry without shipping raw
     test "$MUSE_DATA_ROOT" = "$DATA"
     bash "$COLLECT_ARTIFACTS" "$ROOT" "$RUN_ID" "$OUT" "$WORKSPACE" "$ROOT" "$OUT/telemetry"
     test ! -e "$OUT/bundle/telemetry/muse"
-    test -e "$OUT/bundle/telemetry/meta.jsonl"
+    test ! -e "$OUT/bundle/telemetry/meta.jsonl"
     test -e "$OUT/bundle/telemetry/traces/muse-code-authoring.json"
     grep -q '"muse_cli_version": "muse-test-version"' "$OUT/bundle/manifest.json"
+    ! grep -q '"proxy_meta"' "$OUT/bundle/manifest.json"
   `, {
     ROOT: REPO_ROOT,
     RUN_ID: "muse-artifacts-test",
