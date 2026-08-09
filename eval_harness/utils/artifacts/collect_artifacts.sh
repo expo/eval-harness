@@ -34,6 +34,10 @@ run_trace_py() {
   fi
 }
 
+run_trace_ts() {
+  (cd "$EVAL" && bun "$@")
+}
+
 echo "================= COLLECT: assembling bundle for run $RUN_ID ================="
 mkdir -p "$BUNDLE/app" "$BUNDLE/telemetry/traces" "$BUNDLE/eval/traces" "$BUNDLE/logs"
 
@@ -74,7 +78,7 @@ collect_author_trace() {
   fi
   if [ "$AGENT" = "codex" ]; then
     local dest="$BUNDLE/telemetry/traces/codex-authoring.json" tmp="$BUNDLE/telemetry/traces/codex-authoring.json.tmp"
-    run_trace_py "$ROOT/eval_harness/utils/telemetry/tracing/codex_rollout.py" \
+    run_trace_ts "$ROOT/eval_harness/utils/telemetry/tracing/codex_rollout.ts" \
       --sessions-dir "${CODEX_HOME:-$HOME/.codex}/sessions" \
       --out "$tmp" \
       --since-mtime "$RUN_START_MTIME" $before_args \
@@ -84,7 +88,7 @@ collect_author_trace() {
     _keep_better_trace "$tmp" "$dest"
   else
     local dest="$BUNDLE/telemetry/traces/claude-code-authoring.json" tmp="$BUNDLE/telemetry/traces/claude-code-authoring.json.tmp"
-    run_trace_py "$ROOT/eval_harness/utils/telemetry/tracing/cc_transcript.py" \
+    run_trace_ts "$ROOT/eval_harness/utils/telemetry/tracing/cc_transcript.ts" \
       --projects-dir "$HOME/.claude/projects" \
       --out "$tmp" \
       --since-mtime "$RUN_START_MTIME" $before_args \
@@ -97,7 +101,7 @@ collect_author_trace() {
 
 collect_evaluator_trace() {
   local since="${TRACE_SINCE_MTIME:-${EVAL_PHASE_START_MTIME:-$RUN_START_MTIME}}"
-  run_trace_py "$ROOT/eval_harness/utils/telemetry/tracing/cc_transcript.py" \
+  run_trace_ts "$ROOT/eval_harness/utils/telemetry/tracing/cc_transcript.ts" \
     --projects-dir "$HOME/.claude/projects" \
     --out "$BUNDLE/telemetry/traces/agentic-evaluator.json" \
     --since-mtime "$since" \

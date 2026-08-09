@@ -6,15 +6,15 @@ Answers "did the authored app actually follow this skill's guidance," as a casca
 
 | Tier | Answers | Implementation |
 |---|---|---|
-| Trigger detection | Was the skill invoked at all, per the agent's own trace? | `trigger.py` |
+| Trigger detection | Was the skill invoked at all, per the agent's own trace? | `trigger.ts` |
 | Lexical | Regex, comment-stripped source scan (`text`, `text_any`, `text_absent`, `import`) | `checks_data.json` |
 | Structural | Filesystem shape (`path_exists`, `path_absent`, `package_dependency`) | `checks_data.json` |
-| Syntax-tree | Real AST parsing, for rules a regex genuinely can't verify | `code_checks.py`, `../build_health/scripts/extract-ast-facts.js` |
+| Syntax-tree | Real AST parsing, for rules a regex genuinely can't verify | `code_checks.ts`, `../build_health/node_parser.ts` |
 | Route-graph | Real route graph | not built yet |
 
 Trigger detection isn't skill-content-specific — it's still "was this skill's guidance exercised," just answered from the trace instead of the source.
 
-Syntax-tree checks exist only where a properly tag-anchored lexical regex can't verify the rule, e.g. `expo-dom`'s exactly-one-default-export-and-no-native-JSX rule (`dom_single_default_export_and_no_native_jsx`). Uses the same Babel subprocess as build_health's syntax check, no `@babel/traverse` dependency — a plain recursive AST walk is enough for export-counting and import-bound JSX element names. Known gaps, not yet implemented: `expo-data-fetching`'s "`response.ok` must actually gate the parse" and `expo-tailwind-setup`'s "`className` usage must go through the wrapped component".
+Syntax-tree checks exist only where a properly tag-anchored lexical regex can't verify the rule, e.g. `expo-dom`'s exactly-one-default-export-and-no-native-JSX rule (`dom_single_default_export_and_no_native_jsx`). They use the same Babel parser as build_health's syntax check, no `@babel/traverse` dependency — a plain recursive AST walk is enough for export-counting and import-bound JSX element names. Known gaps, not yet implemented: `expo-data-fetching`'s "`response.ok` must actually gate the parse" and `expo-tailwind-setup`'s "`className` usage must go through the wrapped component".
 
 Route-graph checks would need the authored app's real `node_modules` (Expo's typed-routes generator), so unlike a syntax-tree check it can't run at analysis time — it would have to run at authoring time (a new `author-app.sh` stage, right after `npm install`), with the result persisted into the artifact for analysis to read later. Blocked on the generator having no simple standalone entrypoint outside a full Metro/Expo CLI run.
 
@@ -29,13 +29,13 @@ Not covered: native build + simulator + test-plan e2e (that's the existing `eval
 | `not_applicable` | the check's precondition doesn't hold for this app (e.g. a rule about API routes when the app has none) | no |
 | `unavailable` | evidence genuinely couldn't be collected (e.g. the AST parser couldn't run) | no |
 
-Only code-driven checks (`code_checks.py`) can return `not_applicable`/`unavailable` — the generic declarative dispatch (`checks_data.json`'s `import`/`text`/`text_any`/`text_absent`/`path_exists`/`path_absent`/`package_dependency`/`tsconfig_path_alias` kinds) always answers a global "does any file match" question with no conditional precondition, so it only ever produces `passed`/`failed`. `hosting_api_routes_use_typescript` and `data_fetching_expo_public_env_prefix` are code-driven specifically to get a `not_applicable` path (no `+api` routes / no client-side env var reads, respectively).
+Only code-driven checks (`code_checks.ts`) can return `not_applicable`/`unavailable` — the generic declarative dispatch (`checks_data.json`'s `import`/`text`/`text_any`/`text_absent`/`path_exists`/`path_absent`/`package_dependency`/`tsconfig_path_alias` kinds) always answers a global "does any file match" question with no conditional precondition, so it only ever produces `passed`/`failed`. `hosting_api_routes_use_typescript` and `data_fetching_expo_public_env_prefix` are code-driven specifically to get a `not_applicable` path (no `+api` routes / no client-side env var reads, respectively).
 
 This status model matters because a check that vacuously passes when its precondition doesn't hold inflates uptake for a rule the app never had reason to engage with, and a syntax-tree check that reports `passed` when the parser couldn't run at all lets an infra failure read as compliance — `not_applicable`/`unavailable` exist as distinct, non-scored statuses specifically to rule out both.
 
-`compute_skill_results` treats `unavailable` as outranking a mix of scored results: a skill with one passed check and one unavailable check reads `uptake_status="unavailable"`, not an unqualified "measured, 100%" — partial evidence shouldn't read as full confidence. `not_applicable` doesn't trigger this (it was successfully classified as irrelevant, not missing evidence).
+`computeSkillResults` treats `unavailable` as outranking a mix of scored results: a skill with one passed check and one unavailable check reads `uptake_status="unavailable"`, not an unqualified "measured, 100%" — partial evidence shouldn't read as full confidence. `not_applicable` doesn't trigger this (it was successfully classified as irrelevant, not missing evidence).
 
-Every result (all four statuses) stays in the per-skill `checks` list the HTML report reads — nothing is silently dropped, even though only `passed`/`failed` count toward `passed`/`total`/`uptake_rate`/`category_breakdown()` (see `UptakeResults`, `analysis.compute_skill_results`).
+Every result (all four statuses) stays in the per-skill `checks` list the HTML report reads — nothing is silently dropped, even though only `passed`/`failed` count toward `passed`/`total`/`uptake_rate`/`categoryBreakdown()` (see `UptakeResults`, `analysis.computeSkillResults`).
 
 ### Engagement gating for negative checks
 
@@ -81,12 +81,12 @@ The other 12 are deliberately unmapped: most because their guidance is a CLI/clo
 |---|---|
 | `checks_data.json` | Lexical + structural checks (declarative), each tagged with a `category`. Only ever produces `passed`/`failed`. |
 | `skill_map.json` | skill id → `[check id, ...]` |
-| `registry.py` | Loads both, runs checks, defines `CheckResult`'s status model, and is where a code-driven check registers via `@register(...)` |
-| `code_checks.py` | Code-driven checks: per-file-subset filtering, real AST parsing, or conditional (`not_applicable`-capable) rules the generic declarative dispatch can't express |
-| `trigger.py` | Trigger detection, trace-based + recall/precision scoring against `dataset/prd_skills.json` |
+| `registry.ts` | Loads both, runs checks, defines `CheckResult`'s status model, and exposes registration for code-driven checks |
+| `code_checks.ts` | Code-driven checks: per-file-subset filtering, real AST parsing, or conditional (`not_applicable`-capable) rules the generic declarative dispatch can't express |
+| `trigger.ts` | Trigger detection, trace-based + recall/precision scoring against `dataset/prd_skills.json` |
 
 ## Adding a check
 
-1. Add an entry to `checks_data.json` (or a `@register`-decorated function for a code-driven category).
+1. Add an entry to `checks_data.json` (or register a function in `code_checks.ts` for a code-driven category).
 2. Add its id to whichever skill(s) in `skill_map.json` should claim it.
 3. A skill absent from `skill_map.json`, or a mapped id missing from the registry, produces a warning in `metrics.json` rather than crashing — same degrade-don't-crash philosophy as the rest of this evaluator.

@@ -1,0 +1,129 @@
+{
+  "schema_version": 1,
+  "project": "eval-experiments",
+  "source": "human",
+  "status": "draft",
+  "saturation_note": "",
+  "properties": [
+    {
+      "id": "TRACE-001",
+      "title": "Claude tool results attach only to matching tool calls",
+      "discovery_source": "eval_harness/utils/telemetry/tracing/cc_transcript.ts",
+      "references": [
+        "eval_harness/utils/telemetry/tracing/cc_transcript.ts — module contract for matching tool-result blocks to tool-use blocks by ID",
+        "eval_harness/utils/telemetry/tracing/bt_emit.py — normalized tool_calls output fields"
+      ],
+      "claim": "For every valid Claude transcript turn, a tool result affects only the normalized tool call whose call ID equals the result's tool-use ID.",
+      "given": [
+        "One human turn containing assistant tool-use blocks with unique, non-empty call IDs.",
+        "A generated collection of result blocks containing any subset of those IDs in any order, optionally mixed with unknown IDs.",
+        "Each result contains a string or structured JSON value and may be marked as an error."
+      ],
+      "when": [
+        "The transcript is reconstructed into normalized turns, steps, and tool calls."
+      ],
+      "then": [
+        "Each result for a known ID becomes the output only of the tool call with that same ID.",
+        "A known result marked as an error sets the error only on its matching tool call.",
+        "A tool call without a matching result remains without an output or error.",
+        "A result with an unknown ID neither creates a tool call nor changes any known tool call."
+      ],
+      "oracle": "Build a dictionary directly from the generated result blocks keyed by tool-use ID and compare each generated call ID with only its dictionary entry; compare string outputs exactly and compare structured JSON outputs after parsing them back into semantic JSON values, without consulting either parser implementation's association logic."
+    },
+    {
+      "id": "SKILL-001",
+      "title": "Each skill resolves to exactly its declared uptake checks",
+      "discovery_source": "eval_harness/evaluator/skill_invocation/uptake_checks/README.md",
+      "references": [
+        "eval_harness/evaluator/skill_invocation/uptake_checks/README.md — Atomic checks are mapped to skills only through skill_map.json",
+        "AGENTS.md — Shared checks contribute to every mapped skill, while an unmapped expected skill is unsupported"
+      ],
+      "claim": "For every expected skill, check resolution returns exactly the ordered checks declared for that skill, and represents a skill absent from the map as unsupported rather than as a supported skill with zero checks.",
+      "given": [
+        "A registry of uniquely identified atomic uptake checks.",
+        "A skill map that assigns an ordered subset of those check IDs to each supported skill.",
+        "A generated list of expected supported and unsupported skills."
+      ],
+      "when": [
+        "Checks are resolved separately for each expected skill."
+      ],
+      "then": [
+        "Each supported skill receives exactly its mapped checks in declared order.",
+        "No check assigned only to another skill leaks into the result.",
+        "Each unsupported skill is represented distinctly from a supported skill whose mapped list is empty."
+      ],
+      "oracle": "Read the generated skill map directly: for each supported skill, use its declared ordered check-ID list as the expected result; for each absent skill, expect the explicit unsupported representation, without calling any production resolution helper to calculate the expectation."
+    },
+    {
+      "id": "SKILL-002",
+      "title": "Only scored statuses affect uptake metrics",
+      "discovery_source": "eval_harness/evaluator/skill_invocation/uptake_checks/README.md",
+      "references": [
+        "eval_harness/evaluator/skill_invocation/uptake_checks/README.md — not_applicable and unavailable checks remain visible but are excluded from scoring",
+        "AGENTS.md — Trigger and uptake are scored independently per expected skill"
+      ],
+      "claim": "Uptake counts, rates, and category totals include passed and failed check results only, while not-applicable and unavailable results remain visible without affecting any denominator.",
+      "given": [
+        "A generated collection of passed, failed, not-applicable, and unavailable check results.",
+        "A category assigned to every generated result."
+      ],
+      "when": [
+        "Uptake totals, pass counts, rates, and category breakdowns are calculated."
+      ],
+      "then": [
+        "The total equals the number of passed and failed results.",
+        "The pass count equals the number of passed results.",
+        "The uptake rate is the pass count divided by the scored total, or absent when the scored total is zero.",
+        "Category totals follow the same rule, and every original result remains available for reporting."
+      ],
+      "oracle": "Count the generated status labels directly, using the language-independent set {passed, failed} as the scored statuses; independently group those labels by their generated categories and divide the expected pass count by the expected scored count."
+    },
+    {
+      "id": "SKILL-003",
+      "title": "Trigger scoring partitions expected and observed skills",
+      "discovery_source": "AGENTS.md",
+      "references": [
+        "AGENTS.md — Trigger and uptake are scored per expected skill independently",
+        "eval_harness/evaluator/skill_invocation/uptake_checks/README.md — Trigger detection is tier zero of the uptake cascade"
+      ],
+      "claim": "After duplicate skill IDs are removed without changing first-occurrence order, trigger scoring partitions skills into matched, missing, and extra sets and computes recall and precision within the interval from zero to one.",
+      "given": [
+        "A generated sequence of expected skill IDs that may contain duplicates.",
+        "A generated sequence of observed skill IDs that may contain duplicates."
+      ],
+      "when": [
+        "Trigger quality is scored."
+      ],
+      "then": [
+        "Matched skills are exactly the expected skills also observed.",
+        "Missing skills are exactly the expected skills not observed.",
+        "Extra skills are exactly the observed skills not expected.",
+        "Duplicates do not inflate any count, and recall and precision remain between zero and one inclusive."
+      ],
+      "oracle": "Perform stable deduplication with an ordered key set, derive matched, missing, and extra groups with ordinary set intersection and difference, and divide the independent group counts by the corresponding deduplicated expected and observed counts."
+    },
+    {
+      "id": "SKILL-004",
+      "title": "Artifact extraction remains inside its destination",
+      "discovery_source": "eval_harness/evaluator/skill_invocation/utils.ts",
+      "references": [
+        "eval_harness/evaluator/skill_invocation/utils.ts — unpackArtifact extracts authored-app archives into a caller-provided directory",
+        "AGENTS.md — Artifact bundles are evaluator inputs and retain a stable manifest contract"
+      ],
+      "claim": "Extracting an artifact archive never creates or modifies a filesystem path outside the requested destination, including through parent-directory components, absolute paths, symbolic links, or hard links.",
+      "given": [
+        "An archive containing generated regular members, directories, symbolic links, or hard links.",
+        "A dedicated extraction destination whose parent is observable to the test."
+      ],
+      "when": [
+        "The artifact archive is validated and extraction is attempted."
+      ],
+      "then": [
+        "Every extracted path resolves to the destination itself or one of its descendants.",
+        "Every link target used during extraction resolves within the destination.",
+        "An unsafe member is rejected before any outside path is created or modified."
+      ],
+      "oracle": "Resolve every generated member path and link target against the destination using the host filesystem's path rules before invoking the extractor, classify containment from those independently resolved paths, and snapshot observable paths outside the destination to confirm they remain unchanged."
+    }
+  ]
+}

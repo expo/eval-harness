@@ -18,7 +18,7 @@ eval::boot_sim_and_runner() { # out_dir
       echo "--- boot attempt $attempt/$max_attempts ---"
       xcrun simctl boot "$dev_udid" || true
       xcrun simctl bootstatus "$dev_udid" -b || true
-      python3 "$_EVAL_STAGES_DIR/timeout_exec.py" "${EVAL_IOS_BOOT_TIMEOUT_SEC:-240}" \
+      bun "$_EVAL_STAGES_DIR/timeout_exec.ts" "${EVAL_IOS_BOOT_TIMEOUT_SEC:-240}" \
         agent-device boot --platform ios --device "$devname"
     } >>"$out/s4-boot.log" 2>&1
     rc=$?
@@ -33,7 +33,7 @@ eval::boot_sim_and_runner() { # out_dir
   fi
   local runner_timeout="${EVAL_IOS_RUNNER_TIMEOUT_SEC:-420}"
   echo "  preparing ios-runner (timeout ${runner_timeout}s)"
-  python3 "$_EVAL_STAGES_DIR/timeout_exec.py" "$runner_timeout" \
+  bun "$_EVAL_STAGES_DIR/timeout_exec.ts" "$runner_timeout" \
     agent-device prepare ios-runner --platform ios --device "$devname" --timeout "$AGENT_DEVICE_DAEMON_TIMEOUT_MS" \
     >"$out/s4-runner.log" 2>&1
   rc=$?; eval::gate $rc "agent-device prepare ios-runner"

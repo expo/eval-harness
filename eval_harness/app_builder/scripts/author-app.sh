@@ -138,8 +138,8 @@ echo "================= STAGE D: build-health bundle check ================="
 BH_TO=""
 if command -v gtimeout >/dev/null 2>&1; then BH_TO="gtimeout 240";
 elif command -v timeout >/dev/null 2>&1; then BH_TO="timeout 240";
-else BH_TO="python3 $ROOT/eval_harness/utils/shell/timeout_exec.py 240"; fi
-( cd "$ROOT" && $BH_TO uv run python -m eval_harness.evaluator.skill_invocation.build_health.bundle_check "$WORKSPACE" ) \
+else BH_TO="bun $ROOT/eval_harness/utils/shell/timeout_exec.ts 240"; fi
+( cd "$ROOT" && $BH_TO bun eval_harness/evaluator/skill_invocation/build_health/bundle_check.ts "$WORKSPACE" ) \
   || echo "  ⚠️  build-health bundle check failed to run (continuing; non-blocking)"
 
 exit 0
