@@ -123,6 +123,31 @@ test("Muse credential validation captures the key in non-exported shell state", 
   expect(result.exitCode).toBe(0);
 });
 
+test("authoring rejects failed agents and missing package manifests", () => {
+  const root = tempDir("authoring-result-");
+  const completeWorkspace = join(root, "complete");
+  const emptyWorkspace = join(root, "empty");
+  mkdirSync(completeWorkspace, { recursive: true });
+  mkdirSync(emptyWorkspace, { recursive: true });
+  writeFileSync(join(completeWorkspace, "package.json"), "{}\n");
+
+  const failedAgent = runBash(`source "$0"; eval::require_authored_app 17 "$WORKSPACE"`, {
+    WORKSPACE: completeWorkspace,
+  });
+  const missingPackage = runBash(`source "$0"; eval::require_authored_app 0 "$WORKSPACE"`, {
+    WORKSPACE: emptyWorkspace,
+  });
+  const complete = runBash(`source "$0"; eval::require_authored_app 0 "$WORKSPACE"`, {
+    WORKSPACE: completeWorkspace,
+  });
+
+  expect(failedAgent.exitCode).toBe(17);
+  expect(output(failedAgent)).toContain("coding agent failed");
+  expect(missingPackage.exitCode).toBe(1);
+  expect(output(missingPackage)).toContain("did not produce package.json");
+  expect(complete.exitCode).toBe(0);
+});
+
 test("Muse installer isolates credentials and writes a sourceable CLI version", () => {
   const root = tempDir("muse-install-key-boundary-");
   const bin = join(root, "bin");

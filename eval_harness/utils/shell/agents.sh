@@ -132,6 +132,19 @@ eval::_scrub_muse_agent_credentials() {
   unset EXPO_MCP_REFRESH_TOKEN EXPO_MCP_BEARER_TOKEN
 }
 
+eval::require_authored_app() { # agent_exit_code workspace
+  local agent_rc="$1" workspace="$2"
+  if [ "$agent_rc" != 0 ]; then
+    echo "  ❌ coding agent failed; authored-app diagnostics will still be collected"
+    return "$agent_rc"
+  fi
+  if [ ! -f "$workspace/package.json" ]; then
+    echo "  ❌ coding agent did not produce package.json; authored-app diagnostics will still be collected"
+    return 1
+  fi
+  echo "  ✅ authored package.json present"
+}
+
 # Configures Expo MCP auth for this run. mcp.expo.dev now accepts an Expo
 # Robot User access token (EXPO_TOKEN) directly as a Bearer token -- verified
 # live (initialize + tools/list both succeed) -- so this is a plain variable

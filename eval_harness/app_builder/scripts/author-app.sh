@@ -157,12 +157,8 @@ if [ "$AGENT" = "claude-code" ] || [ "$AGENT" = "codex" ]; then
 fi
 
 eval::run_coding_agent "$AGENT" "$ROOT" "$WORKSPACE" "$EVAL/$PRD" "$OUT" "$AGENT_MODEL" "${MUSE_API_KEY:-}"
-
-if [ ! -f "$WORKSPACE/package.json" ]; then
-  echo "  ❌ coding agent did not produce package.json; downstream eval will collect diagnostics only"
-else
-  echo "  ✅ authored package.json present"
-fi
+AGENT_RC=$?
+eval::require_authored_app "$AGENT_RC" "$WORKSPACE" || exit $?
 
 echo "================= STAGE D: build-health bundle check ================="
 # Needs the authored app's own node_modules (a real `expo export`), so this
