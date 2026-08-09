@@ -633,6 +633,103 @@ test("[REGRESSION] every declarative check kind preserves its basic result", asy
   });
 });
 
+test("[REGRESSION] Expo-shaped tsconfig aliases survive JSONC parsing", async () => {
+  // Oracle: @/* is visibly present as a compilerOptions.paths key in this
+  // valid tsconfig. Catches: treating comment markers inside JSON strings as
+  // actual comments and silently turning a valid alias check into a failure.
+  await withTempDirAsync(async (root) => {
+    writeAppFiles(root, {
+      "tsconfig.json": `{
+        "extends": "expo/tsconfig.base",
+        "compilerOptions": {
+          "paths": { "@/*": ["./src/*"], "@/assets/*": ["./assets/*"] }
+        },
+        "include": ["**/*.ts", "**/*.tsx", ".expo/types/**/*.ts"]
+      }`,
+    });
+    const checksDir = writeChecksDir(
+      join(root, "checks"),
+      [
+        {
+          id: "path-alias",
+          category: "structural",
+          kind: "tsconfig_path_alias",
+          target: "@/*",
+        },
+      ],
+      { "expo-router": ["path-alias"] },
+    );
+    const { checks } = resolveChecksForSkills(["expo-router"], checksDir);
+    const [aliasResult] = await runChecks(checks, root);
+
+    expect(aliasResult?.status).toBe("passed");
+  });
+});
+
+test("[REGRESSION] tsconfig alias checks still accept real JSONC comments", async () => {
+  // Oracle: comments are permitted in tsconfig JSONC, while @/* remains a
+  // literal key. Catches: parsing JSONC as strict JSON or stripping content
+  // that only resembles a comment because it occurs inside a string.
+  await withTempDirAsync(async (root) => {
+    writeAppFiles(root, {
+      "tsconfig.json": `{
+        // Alias used by Expo Router and Expo project structure.
+        "compilerOptions": {
+          /* Keep comment support while preserving strings. */
+          "paths": { "@/*": ["./src/*"] }
+        },
+        "include": ["**/*.ts"]
+      }`,
+    });
+    const checksDir = writeChecksDir(
+      join(root, "checks"),
+      [
+        {
+          id: "path-alias",
+          category: "structural",
+          kind: "tsconfig_path_alias",
+          target: "@/*",
+        },
+      ],
+      { "expo-router": ["path-alias"] },
+    );
+    const { checks } = resolveChecksForSkills(["expo-router"], checksDir);
+    const [aliasResult] = await runChecks(checks, root);
+
+    expect(aliasResult?.status).toBe("passed");
+  });
+});
+
+test("[REGRESSION] JSONC line comments stop at every supported line terminator", async () => {
+  // Oracle: ECMAScript and JSONC treat LF, CR, line separator, and paragraph
+  // separator as line endings. Catches: consuming the rest of a valid config
+  // after a // comment because only LF ends the comment.
+  await withTempDirAsync(async (root) => {
+    const checksDir = writeChecksDir(
+      join(root, "checks"),
+      [
+        {
+          id: "path-alias",
+          category: "structural",
+          kind: "tsconfig_path_alias",
+          target: "@/*",
+        },
+      ],
+      { "expo-router": ["path-alias"] },
+    );
+    const { checks } = resolveChecksForSkills(["expo-router"], checksDir);
+
+    for (const lineTerminator of ["\n", "\r", "\u2028", "\u2029"]) {
+      writeFileSync(
+        join(root, "tsconfig.json"),
+        `{${lineTerminator}// comment${lineTerminator}"compilerOptions":{"paths":{"@/*":["./src/*"]}}${lineTerminator}}`,
+      );
+      const [aliasResult] = await runChecks(checks, root);
+      expect(aliasResult?.status).toBe("passed");
+    }
+  });
+});
+
 test("[SPEC SKILL-004] parent traversal cannot escape artifact extraction", () => {
   // Property: extraction never creates or changes a path outside its requested
   // destination.

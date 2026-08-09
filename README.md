@@ -27,7 +27,6 @@ next to the rendered image.
 
 eval_harness/
   app_builder/
-    prompts/                  # coding-agent authoring prompt template
     scripts/                  # authoring + agent-skill-visibility entrypoints
   evaluator/
     ios_agentic/
@@ -47,6 +46,8 @@ eval_harness/
   utils/                      # artifacts, iOS, shell, and telemetry helpers (shared)
 
 dataset/
+  prompts/                    # coding-agent authoring prompt variants
+  prompts.json               # prompt-variant id -> prompt file registry
   prds/                       # Notes, Hot Chocolate, Wiki Reader, and Pool app PRDs (shared)
   test_plans/primitives/      # app-agnostic primitive plans
   prd_skills.json             # app -> expected skill ids (skill-eval ground truth)
@@ -146,6 +147,10 @@ eas workflow:run .eas/workflows/eval-e2e.yml \
 
 `--wait` keeps the terminal attached until the workflow finishes. It is
 optional; the EAS dashboard continues the run if you disconnect.
+
+Authoring uses the `baseline` prompt variant by default. To compare another
+registered prompt, add `-F prompt_variant=minimal`; the available ids and their
+files are documented in [`dataset/prompts/README.md`](dataset/prompts/README.md).
 
 For the richer iOS 27 native-navigation and glass fixture, change the agent to
 Codex and the PRD to Pool:

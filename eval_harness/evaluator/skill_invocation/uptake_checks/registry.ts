@@ -385,6 +385,77 @@ export function stripComments(text: string): string {
   return text.replace(/\/\*[\s\S]*?\*\//gu, "").replace(/\/\/.*$/gmu, "");
 }
 
+function isLineTerminator(character: string): boolean {
+  return (
+    character === "\n" ||
+    character === "\r" ||
+    character === "\u2028" ||
+    character === "\u2029"
+  );
+}
+
+function stripJsonComments(text: string): string {
+  let output = "";
+  let index = 0;
+  let inString = false;
+
+  while (index < text.length) {
+    const character = text.charAt(index);
+    if (inString) {
+      output += character;
+      if (character === "\\" && index + 1 < text.length) {
+        output += text.charAt(index + 1);
+        index += 2;
+        continue;
+      }
+      if (character === '"') inString = false;
+      index += 1;
+      continue;
+    }
+
+    if (character === '"') {
+      inString = true;
+      output += character;
+      index += 1;
+      continue;
+    }
+
+    if (character === "\u2028" || character === "\u2029") {
+      output += "\n";
+      index += 1;
+      continue;
+    }
+
+    if (character === "/" && text.charAt(index + 1) === "/") {
+      index += 2;
+      while (
+        index < text.length &&
+        !isLineTerminator(text.charAt(index))
+      ) {
+        index += 1;
+      }
+      continue;
+    }
+
+    if (character === "/" && text.charAt(index + 1) === "*") {
+      index += 2;
+      while (
+        index + 1 < text.length &&
+        !(text.charAt(index) === "*" && text.charAt(index + 1) === "/")
+      ) {
+        index += 1;
+      }
+      index += 2;
+      continue;
+    }
+
+    output += character;
+    index += 1;
+  }
+
+  return output;
+}
+
 function result(check: Check, passed: boolean, evidence: string): CheckResult {
   return new CheckResult({
     id: check.id,
@@ -516,7 +587,7 @@ function checkTsconfigPathAlias(check: Check, appTree: AppTree): CheckResult {
     const configPath = path.join(appTree.root, name);
     if (!existsSync(configPath)) continue;
     try {
-      const data = JSON.parse(stripComments(readFileSync(configPath, "utf8"))) as {
+      const data = JSON.parse(stripJsonComments(readFileSync(configPath, "utf8"))) as {
         compilerOptions?: { paths?: Record<string, unknown> };
       };
       if (Object.hasOwn(data.compilerOptions?.paths ?? {}, target)) {
