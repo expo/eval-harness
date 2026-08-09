@@ -17,6 +17,7 @@
 name: eval-e2e
 
 defaults:
+  image: sdk-57
   tools:
     bun: '1.3.14'
     node: '22.20.0'
