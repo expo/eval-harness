@@ -44,7 +44,10 @@ export type CheckStatus =
   | typeof STATUS_FAILED
   | typeof STATUS_NOT_APPLICABLE
   | typeof STATUS_UNAVAILABLE;
-const SCORED_STATUSES = new Set<CheckStatus>([STATUS_PASSED, STATUS_FAILED]);
+export const SCORED_STATUSES: ReadonlySet<CheckStatus> = new Set([
+  STATUS_PASSED,
+  STATUS_FAILED,
+]);
 const FATAL_UTF8_DECODER = new TextDecoder("utf-8", { fatal: true });
 
 export type CheckDefinition = {

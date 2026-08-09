@@ -18,7 +18,6 @@ test = [
 
 [project.scripts]
 agentic-evaluator = "eval_harness.evaluator.ios_agentic.main:main"
-agentic-skill-eval = "eval_harness.evaluator.skill_invocation.main:main"
 
 [build-system]
 requires = ["hatchling"]

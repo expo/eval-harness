@@ -45,6 +45,10 @@ export function readJson<T>(path: string): T {
   return JSON.parse(readFileSync(path, "utf8")) as T;
 }
 
+export async function readJsonAsync<T>(path: string): Promise<T> {
+  return JSON.parse(await Bun.file(path).text()) as T;
+}
+
 /**
  * Write readable JSON with Python-compatible deterministic key ordering.
  *
@@ -55,6 +59,13 @@ export function readJson<T>(path: string): T {
  */
 export function writeJson(data: JsonObject, path: string): void {
   writeFileSync(path, JSON.stringify(data, sortedJsonKeys(data), 2), "utf8");
+}
+
+export async function writeJsonAsync(
+  data: JsonObject,
+  path: string,
+): Promise<void> {
+  await Bun.write(path, JSON.stringify(data, sortedJsonKeys(data), 2));
 }
 
 function sortedJsonKeys(data: JsonValue): string[] {
@@ -76,6 +87,19 @@ function sortedJsonKeys(data: JsonValue): string[] {
 
 export function loadPrdSkills(path: string): Record<string, string[]> {
   const raw = readJson<Record<string, unknown>>(path);
+  return normalizePrdSkills(raw);
+}
+
+export async function loadPrdSkillsAsync(
+  path: string,
+): Promise<Record<string, string[]>> {
+  const raw = await readJsonAsync<Record<string, unknown>>(path);
+  return normalizePrdSkills(raw);
+}
+
+function normalizePrdSkills(
+  raw: Record<string, unknown>,
+): Record<string, string[]> {
   return Object.fromEntries(
     Object.entries(raw).map(([key, value]) => [
       String(key),
@@ -234,6 +258,9 @@ function validateTarEntry(
   if (tarEntry.type === undefined || !SAFE_TAR_ENTRY_TYPES.has(tarEntry.type)) {
     throw new UnsafeTarEntryError(`unsafe tar member type for ${entryPath}`);
   }
+  if (target === destRoot && tarEntry.type !== "Directory") {
+    throw new Error(`unsafe non-directory tar root member: ${entryPath}`);
+  }
   if (typeof tarEntry.linkpath !== "string") return true;
   if (tarEntry.type === "SymbolicLink") {
     const linkTarget = resolve(dirname(target), tarEntry.linkpath);
@@ -259,6 +286,7 @@ function assertNoArchiveSymlinkParent(
   entryPath: string,
   archiveSymlinkPaths: ReadonlySet<string>,
 ): void {
+  if (path === root) return;
   let current = dirname(path);
   while (current !== root) {
     if (archiveSymlinkPaths.has(current)) {
@@ -275,6 +303,12 @@ function assertNoArchiveSymlinkParent(
 }
 
 function assertNoSymlinkParent(path: string, root: string, label: string): void {
+  if (path === root) {
+    if (existsSync(root) && lstatSync(root).isSymbolicLink()) {
+      throw new Error(`unsafe ${label}: symbolic-link destination ${root}`);
+    }
+    return;
+  }
   let current = dirname(path);
   while (true) {
     if (existsSync(current) && lstatSync(current).isSymbolicLink()) {
@@ -327,10 +361,14 @@ export function roundRatio(
   if (!Number.isSafeInteger(digits) || digits < 0 || digits > 15) {
     throw new RangeError("digits must be a safe integer between 0 and 15");
   }
-  return roundPythonFloat(numerator / denominator, digits);
+  return roundFloat(numerator / denominator, digits);
 }
 
-function roundPythonFloat(value: number, digits: number): number {
+export function roundFloat(value: number, digits = 4): number {
+  if (!Number.isFinite(value)) return value;
+  if (!Number.isSafeInteger(digits) || digits < 0 || digits > 15) {
+    throw new RangeError("digits must be a safe integer between 0 and 15");
+  }
   const bytes = new ArrayBuffer(8);
   const view = new DataView(bytes);
   view.setFloat64(0, value, false);
