@@ -9,7 +9,8 @@
     "test:all": "bun run typecheck && bun run test:ts && bun run test:python"
   },
   "dependencies": {
-    "expo": "~56.0.12"
+    "@babel/parser": "7.29.8",
+    "tar": "^7.5.22"
   },
   "devDependencies": {
     "@types/bun": "1.3.14",

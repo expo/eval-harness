@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import shutil
 import tarfile
+import tempfile
 from typing import Any
 
 
@@ -36,15 +38,36 @@ def unpack_artifact(artifact_path: Path | str, dest_dir: Path | str) -> Path:
 
     artifact_path = Path(artifact_path)
     dest_dir = Path(dest_dir)
-    dest_dir.mkdir(parents=True, exist_ok=True)
     if artifact_path.is_dir():
         archive = first_archive(artifact_path)
         if archive:
-            extract_tar(archive, dest_dir)
+            _replace_with_extracted_archive(archive, dest_dir)
             return dest_dir
         return artifact_path
-    extract_tar(artifact_path, dest_dir)
+    _replace_with_extracted_archive(artifact_path, dest_dir)
     return dest_dir
+
+
+def _replace_with_extracted_archive(path: Path, dest_dir: Path) -> None:
+    """Extract safely, then replace the evaluator-owned destination."""
+
+    dest_dir.parent.mkdir(parents=True, exist_ok=True)
+    staging_dir = Path(
+        tempfile.mkdtemp(
+            prefix=f".{dest_dir.name}-extract-",
+            dir=dest_dir.parent,
+        )
+    )
+    try:
+        extract_tar(path, staging_dir)
+        if dest_dir.is_symlink() or dest_dir.is_file():
+            dest_dir.unlink()
+        elif dest_dir.exists():
+            shutil.rmtree(dest_dir)
+        staging_dir.replace(dest_dir)
+    except BaseException:
+        shutil.rmtree(staging_dir, ignore_errors=True)
+        raise
 
 
 def first_archive(path: Path) -> Path | None:
@@ -57,12 +80,55 @@ def first_archive(path: Path) -> Path | None:
 
 def extract_tar(path: Path, dest_dir: Path) -> None:
     dest_root = dest_dir.resolve()
+    dest_root.mkdir(parents=True, exist_ok=True)
+    if any(dest_root.iterdir()):
+        raise ValueError(
+            f"Refusing to extract into non-empty destination: {dest_root}"
+        )
     with tarfile.open(path) as archive:
-        for member in archive.getmembers():
+        members = archive.getmembers()
+        archive_symlink_paths = {
+            (dest_root / member.name).resolve()
+            for member in members
+            if member.issym()
+        }
+        for member in members:
+            if not (
+                member.isfile()
+                or member.isdir()
+                or member.issym()
+                or member.islnk()
+            ):
+                raise ValueError(
+                    f"Refusing to extract unsupported tar member: {member.name}"
+                )
             target = (dest_root / member.name).resolve()
-            if target != dest_root and dest_root not in target.parents:
+            if not _path_is_within(target, dest_root):
                 raise ValueError(f"Refusing to extract unsafe tar member: {member.name}")
-        archive.extractall(dest_root)
+            if any(parent in archive_symlink_paths for parent in target.parents):
+                raise ValueError(
+                    f"Refusing to extract through archive symlink: {member.name}"
+                )
+            if member.issym():
+                link_target = (target.parent / member.linkname).resolve()
+                if not _path_is_within(link_target, dest_root):
+                    raise ValueError(
+                        f"Refusing to extract unsafe tar link: {member.name} -> {member.linkname}"
+                    )
+            elif member.islnk():
+                link_target = (dest_root / member.linkname).resolve()
+                if not _path_is_within(link_target, dest_root):
+                    raise ValueError(
+                        f"Refusing to extract unsafe tar link: {member.name} -> {member.linkname}"
+                    )
+        try:
+            archive.extractall(dest_root, filter="data")
+        except tarfile.FilterError as exc:
+            raise ValueError(f"Refusing to extract unsafe tar member: {exc}") from exc
+
+
+def _path_is_within(path: Path, root: Path) -> bool:
+    return path == root or root in path.parents
 
 
 def flatten_strings(value: Any) -> list[str]:
