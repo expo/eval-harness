@@ -361,8 +361,9 @@ eval::run_coding_agent() { # agent root workspace prd_file out_dir [model] [muse
         else
           ( cd "$workspace" && npx -y skills add expo/skills --yes )
         fi
-        echo "muse skills list --source project --enabled-only --json"
-        ( cd "$workspace" && env -u META_API_KEY muse skills list --source project --enabled-only --json )
+        echo "muse skills list --source project --enabled-only --workspace $workspace --trust-workspace --json"
+        ( cd "$workspace" && env -u META_API_KEY muse skills list --source project --enabled-only \
+            --workspace "$workspace" --trust-workspace --json )
       ) >"$out/c-plugin.log" 2>&1 || \
         echo "  ⚠️  Muse Expo skill setup failed (continuing; see c-plugin.log)"
     else

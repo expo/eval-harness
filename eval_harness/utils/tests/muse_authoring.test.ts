@@ -263,7 +263,9 @@ cp "$XDG_CONFIG_HOME/muse/settings.json" "$CAPTURE_SETTINGS"
   expect(readFileSync(capturedSettings, "utf8")).toContain('"transport": "streamable_http"');
   expect(readFileSync(capturedSettings, "utf8")).toContain("expo-bearer-token");
   expect(existsSync(join(workspace, ".agents", "skills", "expo-router", "SKILL.md"))).toBe(true);
-  expect(readFileSync(join(out, "c-plugin.log"), "utf8")).toContain("muse skills list --source project --enabled-only --json");
+  expect(readFileSync(join(out, "c-plugin.log"), "utf8")).toContain(
+    `muse skills list --source project --enabled-only --workspace ${workspace} --trust-workspace --json`,
+  );
 });
 
 test("Muse skill setup subprocesses cannot see the key and exec receives it only on stdin", () => {
