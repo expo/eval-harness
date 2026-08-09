@@ -117,7 +117,19 @@ eval::install_muse_cli() { # out_dir
   eval::gate $? "muse-code CLI version" || return $?
   MUSE_CLI_VERSION="$(head -n 1 "$out/a-muse-version.log")"
   export MUSE_CLI_VERSION
-  printf 'MUSE_CLI_VERSION=%s\n' "$MUSE_CLI_VERSION" >>"$out/author.env"
+  printf 'MUSE_CLI_VERSION=%q\n' "$MUSE_CLI_VERSION" >>"$out/author.env"
+}
+
+eval::_scrub_muse_agent_credentials() {
+  # EXPO_TOKEN is intentionally retained: the authored app can use it for the
+  # EAS setup/build checks required by the authoring prompt. The selected Meta
+  # key is supplied only through --api-key-stdin, while credentials belonging
+  # to telemetry, storage, and the other authoring agents must not reach Muse
+  # or any shell command that Muse starts.
+  unset META_API_KEY MUSE_API_KEY
+  unset CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN OPENAI_API_KEY
+  unset BRAINTRUST_API_KEY GCP_SA_KEY GOOGLE_APPLICATION_CREDENTIALS
+  unset EXPO_MCP_REFRESH_TOKEN EXPO_MCP_BEARER_TOKEN
 }
 
 # Configures Expo MCP auth for this run. mcp.expo.dev now accepts an Expo
@@ -347,7 +359,7 @@ eval::run_coding_agent() { # agent root workspace prd_file out_dir [model] [muse
     local muse_data_root="${MUSE_DATA_ROOT:-}"
     local rc
     if [ -n "$muse_settings_root" ]; then
-      ( cd "$workspace" && printf '%s\n' "$muse_api_key" | ( unset META_API_KEY MUSE_API_KEY muse_api_key; \
+      ( cd "$workspace" && printf '%s\n' "$muse_api_key" | ( eval::_scrub_muse_agent_credentials; unset muse_api_key; \
           XDG_CONFIG_HOME="$muse_settings_root" XDG_DATA_HOME="$muse_data_root" \
           MUSE_NO_AUTO_UPDATE=1 $TO muse exec --json --api-key-stdin --provider meta \
             --model "${model:-muse-spark-1.2}" --workspace "$workspace" --yolo \
@@ -355,7 +367,7 @@ eval::run_coding_agent() { # agent root workspace prd_file out_dir [model] [muse
         2>&1 | tee "$out/c-agent.log"
       rc=${PIPESTATUS[0]}
     else
-      ( cd "$workspace" && printf '%s\n' "$muse_api_key" | ( unset META_API_KEY MUSE_API_KEY muse_api_key; \
+      ( cd "$workspace" && printf '%s\n' "$muse_api_key" | ( eval::_scrub_muse_agent_credentials; unset muse_api_key; \
           MUSE_NO_AUTO_UPDATE=1 $TO muse exec --json --api-key-stdin --provider meta \
             --model "${model:-muse-spark-1.2}" --workspace "$workspace" --yolo \
             --no-foreign-personal-context --base-url "http://127.0.0.1:${META_PROXY_PORT:-8084}" "$prompt" ) ) \

@@ -123,7 +123,7 @@ test("Muse credential validation captures the key in non-exported shell state", 
   expect(result.exitCode).toBe(0);
 });
 
-test("Muse installer and version subprocesses cannot see the provider key", () => {
+test("Muse installer isolates credentials and writes a sourceable CLI version", () => {
   const root = tempDir("muse-install-key-boundary-");
   const bin = join(root, "bin");
   const out = join(root, "out");
@@ -140,7 +140,7 @@ mkdir -p "$MUSE_INSTALL_DIR"
 cat > "$MUSE_INSTALL_DIR/muse" <<'MUSE'
 #!/usr/bin/env bash
 printf '%s|%s' "\${META_API_KEY-absent}" "\${MUSE_API_KEY-absent}" > "$CAPTURE_VERSION_ENVIRONMENT"
-printf 'muse-test-version\n'
+printf 'Muse Code 0.1.0 (0.1.0-R708.1)\n'
 MUSE
 chmod +x "$MUSE_INSTALL_DIR/muse"
 INSTALLER
@@ -153,6 +153,9 @@ INSTALLER
     eval::gate() { return "$1"; }
     eval::require_authoring_credentials muse-code "$ROOT"
     eval::install_muse_cli "$OUT"
+    unset MUSE_CLI_VERSION
+    source "$OUT/author.env"
+    test "$MUSE_CLI_VERSION" = "Muse Code 0.1.0 (0.1.0-R708.1)"
   `, {
     ROOT: REPO_ROOT,
     OUT: out,
@@ -165,7 +168,7 @@ INSTALLER
   expect(result.exitCode).toBe(0);
   expect(readFileSync(installerEnvironment, "utf8")).toBe("absent|absent");
   expect(readFileSync(versionEnvironment, "utf8")).toBe("absent|absent");
-  expect(readFileSync(join(out, "author.env"), "utf8")).toContain("MUSE_CLI_VERSION=muse-test-version");
+  expect(readFileSync(join(out, "author.env"), "utf8")).toContain("MUSE_CLI_VERSION=");
 });
 
 test("Muse authoring streams its key, installs local skills, and records Expo MCP settings", () => {
@@ -261,7 +264,14 @@ if [ "$1" = "skills" ]; then
   printf '{"skills":[]}'
   exit 0
 fi
-printf '%s|%s' "\${META_API_KEY-absent}" "\${MUSE_API_KEY-absent}" > "$CAPTURE_EXEC_ENVIRONMENT"
+printf '%s|%s|%s|%s|%s|%s|%s' \
+  "\${META_API_KEY-absent}" \
+  "\${MUSE_API_KEY-absent}" \
+  "\${CLAUDE_CODE_OAUTH_TOKEN-absent}" \
+  "\${ANTHROPIC_API_KEY-absent}" \
+  "\${OPENAI_API_KEY-absent}" \
+  "\${BRAINTRUST_API_KEY-absent}" \
+  "\${GCP_SA_KEY-absent}" > "$CAPTURE_EXEC_ENVIRONMENT"
 cat > "$CAPTURE_EXEC_STDIN"
 `);
   chmodSync(join(bin, "npx"), 0o755);
@@ -281,6 +291,11 @@ cat > "$CAPTURE_EXEC_STDIN"
     PRD: join(root, "prd.txt"),
     PATH: `${bin}:${process.env.PATH}`,
     META_API_KEY: "meta-secret-only-on-stdin",
+    CLAUDE_CODE_OAUTH_TOKEN: "unrelated-claude-secret",
+    ANTHROPIC_API_KEY: "unrelated-anthropic-secret",
+    OPENAI_API_KEY: "unrelated-openai-secret",
+    BRAINTRUST_API_KEY: "unrelated-braintrust-secret",
+    GCP_SA_KEY: "unrelated-gcp-secret",
     CAPTURE_NPX_ENVIRONMENT: npxEnvironment,
     CAPTURE_SKILLS_ENVIRONMENT: skillsEnvironment,
     CAPTURE_EXEC_ENVIRONMENT: execEnvironment,
@@ -290,7 +305,9 @@ cat > "$CAPTURE_EXEC_STDIN"
   expect(result.exitCode).toBe(0);
   expect(readFileSync(npxEnvironment, "utf8")).toBe("absent|absent");
   expect(readFileSync(skillsEnvironment, "utf8")).toBe("absent|absent");
-  expect(readFileSync(execEnvironment, "utf8")).toBe("absent|absent");
+  expect(readFileSync(execEnvironment, "utf8")).toBe(
+    "absent|absent|absent|absent|absent|absent|absent",
+  );
   expect(readFileSync(execStdin, "utf8")).toBe("meta-secret-only-on-stdin\n");
 });
 
