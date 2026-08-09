@@ -2,8 +2,9 @@
 """
 Optional Braintrust emission for reconstructed agent traces.
 
-Both the Codex (codex_rollout.py) and Claude Code (cc_transcript.py) parsers
-produce the SAME normalized shape:
+Both Bun parsers (codex_rollout.ts and cc_transcript.ts) call this module
+through a transitional Python subprocess bridge and produce the SAME
+normalized shape:
 
     {"session_meta": {...},
      "turns": [{"turn_index", "turn_id", "user_input", "final_output",
@@ -13,8 +14,9 @@ produce the SAME normalized shape:
 
 This module turns that into a Braintrust span tree (trace-claude-code span
 shape) when BRAINTRUST_API_KEY is present. It is import-light: `braintrust` is
-imported lazily so the parsers work as pure stdlib JSON emitters when Braintrust
-isn't installed. Everything is fail-open — tracing never blocks a run.
+imported lazily so the Bun parsers still work when Braintrust isn't installed.
+Everything is fail-open — tracing never blocks a run. Span conversion and
+emission will migrate in a later telemetry slice.
 
 `run_id` is attached to the session span metadata so a Braintrust trace can be
 correlated back to the harness run that produced it.
