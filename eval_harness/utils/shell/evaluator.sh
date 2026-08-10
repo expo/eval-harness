@@ -20,6 +20,24 @@ for field in ("score", "full_points", "macro_avg_pct"):
     if type(result.get(field)) not in (int, float):
         print(f"  ❌ evaluator result.json lacks numeric {field}")
         raise SystemExit(1)
+
+if result.get("status") != "completed":
+    print(f"  ❌ evaluator result.json is incomplete (status={result.get('status')!r})")
+    raise SystemExit(1)
+
+expected = result.get("expected_plan_count")
+terminal = result.get("terminal_plan_count")
+if type(expected) is not int or type(terminal) is not int or expected != terminal:
+    print(
+        "  ❌ evaluator result.json does not contain one terminal result per "
+        f"expected plan (expected={expected!r}, terminal={terminal!r})"
+    )
+    raise SystemExit(1)
+
+errors = result.get("evaluator_errors")
+if not isinstance(errors, list) or errors:
+    print(f"  ❌ evaluator result.json contains evaluator errors: {errors!r}")
+    raise SystemExit(1)
 PY
 }
 

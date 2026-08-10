@@ -61,7 +61,9 @@ class EvalIosScriptTests(unittest.TestCase):
         Catches: status-zero evaluator exits with missing or diagnostic JSON.
         """
         valid = validate_result(
-            '{"score": 5, "full_points": 10, "macro_avg_pct": 50.0}',
+            '{"status":"completed","expected_plan_count":1,'
+            '"terminal_plan_count":1,"evaluator_errors":[],'
+            '"score":5,"full_points":10,"macro_avg_pct":50.0}',
         )
         missing = validate_result(None)
         incomplete = validate_result('{"status": "diagnostic"}')
@@ -69,6 +71,22 @@ class EvalIosScriptTests(unittest.TestCase):
         self.assertEqual(valid.returncode, 0, valid.stderr)
         self.assertNotEqual(missing.returncode, 0)
         self.assertNotEqual(incomplete.returncode, 0)
+
+    def test_regression_incomplete_subset_is_a_failed_eas_result(self) -> None:
+        """Regression: partial plan output cannot satisfy the EAS success gate.
+
+        Oracle: every expected plan must terminate without evaluator errors.
+        Catches: accepting numeric aggregate fields from a partially run suite.
+        """
+        partial = validate_result(
+            '{"status":"incomplete","expected_plan_count":2,'
+            '"terminal_plan_count":2,"evaluator_errors":['
+            '{"test_plan":"test_delete.txt","stage":"restart"}],'
+            '"score":3,"full_points":3,"macro_avg_pct":100.0}',
+        )
+
+        self.assertNotEqual(partial.returncode, 0)
+        self.assertIn("incomplete", partial.stdout)
 
 
 if __name__ == "__main__":

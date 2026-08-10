@@ -140,6 +140,9 @@ class AgentDeviceEvaluator:
             err = reset.error or reset.output or "(no error detail)"
             print(f"\n  ❌ restart_app failed: {err}")
             tracer.log("plan_aborted", reason="restart_app_failed", error=err)
+            result.status = "evaluator_error"
+            result.error_stage = "restart"
+            result.error_reason = err
             tracer.close()
             return result
 
@@ -195,10 +198,7 @@ class AgentDeviceEvaluator:
                 )
 
                 await client.query(_seed_prompt(seeding_clean, self.seed_iterations, self.prd_text))
-                async for message in client.receive_response():
-                    self._process_message(message, turn_agg, agg_usage)
-                    if isinstance(message, ResultMessage):
-                        break
+                await self._receive_phase_response(client, state, turn_agg, agg_usage)
 
                 turn_agg.flush(reason="seed_end")
                 tracer.log(
@@ -210,6 +210,35 @@ class AgentDeviceEvaluator:
                 )
                 prd_already_injected = bool(self.prd_text.strip())
 
+                if state.aborted:
+                    result.status = "evaluator_error"
+                    result.error_stage = "seed"
+                    result.error_reason = (
+                        f"{state.abort_category}: {state.abort_reason}"
+                        if state.abort_category
+                        else state.abort_reason
+                    )
+                    tracer.log(
+                        "plan_aborted",
+                        reason="agent_aborted_seed",
+                        category=state.abort_category,
+                        error=state.abort_reason,
+                    )
+                    tracer.close()
+                    return result
+
+                if not state.completed:
+                    result.status = "evaluator_error"
+                    result.error_stage = "seed"
+                    result.error_reason = "seed response ended without complete_step or abort_step"
+                    tracer.log(
+                        "plan_aborted",
+                        reason="seed_ended_without_terminal_tool",
+                        error=result.error_reason,
+                    )
+                    tracer.close()
+                    return result
+
                 # N/A short-circuit: if the seed-phase complete_step summary
                 # starts with "N/A" (the escape clause that generic primitive
                 # plans embed for apps where the primitive doesn't apply), skip
@@ -219,6 +248,17 @@ class AgentDeviceEvaluator:
                 # fatally — polluting the macro % with structural zeros for
                 # genuinely-not-applicable cells.
                 seed_summary = (state.complete_summary or "").strip()
+                if seed_summary.upper().startswith("SETUP BLOCKED:"):
+                    result.status = "evaluator_error"
+                    result.error_stage = "seed"
+                    result.error_reason = seed_summary
+                    tracer.log(
+                        "plan_aborted",
+                        reason="legacy_setup_blocked",
+                        error=seed_summary,
+                    )
+                    tracer.close()
+                    return result
                 if state.completed and seed_summary.upper().startswith("N/A"):
                     print(f"\n{'='*60}")
                     print(f"  N/A short-circuit  —  {seed_summary[:120]}")
@@ -230,6 +270,7 @@ class AgentDeviceEvaluator:
                         steps_skipped=len(plan["steps"]),
                     )
                     result.not_applicable = True
+                    result.status = "not_applicable"
                     result.na_reason = seed_summary
                     tracer.close()
                     return result
@@ -256,13 +297,34 @@ class AgentDeviceEvaluator:
                 # (see above) and persist in the SDK session's context, so step
                 # prompts no longer re-inject them.
                 await client.query(_step_prompt(i, len(plan["steps"]), step, self.max_iterations))
-
-                async for message in client.receive_response():
-                    self._process_message(message, turn_agg, agg_usage)
-                    if isinstance(message, ResultMessage):
-                        break
+                await self._receive_phase_response(client, state, turn_agg, agg_usage)
 
                 turn_agg.flush(reason="step_end")
+
+                if state.aborted or not state.completed:
+                    result.status = "evaluator_error"
+                    result.error_stage = f"step_{i}"
+                    if state.aborted:
+                        result.error_reason = (
+                            f"{state.abort_category}: {state.abort_reason}"
+                            if state.abort_category
+                            else state.abort_reason
+                        )
+                        abort_reason = "agent_aborted_step"
+                    else:
+                        result.error_reason = (
+                            "step response ended without complete_step or abort_step"
+                        )
+                        abort_reason = "step_ended_without_terminal_tool"
+                    tracer.log(
+                        "plan_aborted",
+                        reason=abort_reason,
+                        step_number=i,
+                        category=state.abort_category,
+                        error=result.error_reason,
+                    )
+                    tracer.close()
+                    return result
 
                 step_result = score_step(step, state.assertions, state.soft_assertions, state.completed, state.turns_used)
                 result.steps.append(step_result)
@@ -291,6 +353,7 @@ class AgentDeviceEvaluator:
         print(f"\n{'━'*60}")
         print(f"  PLAN SCORE: {result.score}/{result.full_points}")
         print(f"{'━'*60}")
+        result.status = "completed"
 
         tracer.write_summary({
             "plan": test_plan_path.name,
@@ -317,6 +380,33 @@ class AgentDeviceEvaluator:
         return result
 
     # ----- Message processing -----
+
+    async def _receive_phase_response(
+        self,
+        client,
+        state: StepState,
+        turn_agg: TurnAggregator,
+        agg_usage: UsageAccumulator,
+    ) -> None:
+        """Process one SDK response and stop model work at a terminal tool call.
+
+        MCP tools mutate ``state`` before their tool-result UserMessage reaches
+        this loop. Once complete_step or abort_step has done so, interrupt the
+        streaming response exactly once. Drain messages through ResultMessage so
+        the SDK is ready for the next query, but ignore post-terminal model work.
+        """
+        interrupted = False
+        async for message in client.receive_response():
+            if interrupted and not isinstance(message, ResultMessage):
+                continue
+
+            self._process_message(message, turn_agg, agg_usage)
+            if isinstance(message, ResultMessage):
+                break
+
+            if (state.completed or state.aborted) and not interrupted:
+                await client.interrupt()
+                interrupted = True
 
     def _process_message(
         self,

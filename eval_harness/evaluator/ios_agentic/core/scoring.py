@@ -18,6 +18,10 @@ Scoring contract (primitive-scoped convention):
 """
 
 from dataclasses import dataclass, field
+from typing import Literal
+
+
+PlanStatus = Literal["in_progress", "completed", "not_applicable", "evaluator_error"]
 
 
 @dataclass
@@ -52,6 +56,9 @@ class TestPlanResult:
     score: int
     full_points: int
     steps: list[StepResult] = field(default_factory=list)
+    status: PlanStatus = "in_progress"
+    error_stage: str = ""
+    error_reason: str = ""
     not_applicable: bool = False  # True when seed phase signaled N/A; formal steps skipped
     na_reason: str = ""  # the agent's N/A justification (from the seed complete_step summary)
 

@@ -25,6 +25,9 @@ class StepState:
     turns_used: int = 0
     completed: bool = False
     complete_summary: str = ""  # captured from complete_step's summary arg
+    aborted: bool = False
+    abort_category: str = ""
+    abort_reason: str = ""
     fatal_failed: bool = False
     last_command_failed: bool = False  # set by action tools on error
 

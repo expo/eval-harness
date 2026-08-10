@@ -402,6 +402,35 @@ def build_tools(ctx: ToolContext):
         return _ok(f"step marked complete: {new_summary}")
 
     @tool(
+        "abort_step",
+        "Stop the current evaluator phase because the evaluator cannot finish it. "
+        "Use this for terminal driver/tool errors, an unreachable app, or repeated "
+        "recovery attempts with no observable progress. Do NOT use it merely because "
+        "the app failed a verification; record the failed assertion and complete the "
+        "step normally in that case. This produces an evaluator error rather than an "
+        "app score.",
+        {
+            "type": "object",
+            "properties": {
+                "category": {
+                    "type": "string",
+                    "enum": ["driver_error", "setup_blocked", "app_unreachable", "other"],
+                },
+                "reason": {"type": "string"},
+            },
+            "required": ["category", "reason"],
+        },
+    )
+    async def abort_step(args: dict) -> dict:
+        ctx.state.aborted = True
+        ctx.state.abort_category = args["category"]
+        ctx.state.abort_reason = args["reason"]
+        return _ok(
+            f"evaluator phase aborted ({ctx.state.abort_category}): "
+            f"{ctx.state.abort_reason}"
+        )
+
+    @tool(
         "confirm_dialog",
         "Tap the destructive / primary action button of the currently-visible "
         "iOS system alert (e.g. the 'Delete' button in a delete-confirmation, "
@@ -440,7 +469,7 @@ def build_tools(ctx: ToolContext):
         wait_for_animation, press_back, hide_keyboard, restart_app,
         assert_visible, assert_not_visible, record_soft_assertion,
         confirm_dialog, cancel_dialog,
-        complete_step,
+        complete_step, abort_step,
     ]
     server = create_sdk_mcp_server(name="adaptive", version="1.0.0", tools=tool_funcs)
     tool_names = [f.name for f in tool_funcs]
