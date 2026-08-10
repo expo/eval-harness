@@ -115,16 +115,21 @@ collect_author_trace
 
 # Keep the authored source, but remove reproducible build products and
 # credential-bearing harness configuration before it becomes transport data.
+# Installed skill trees are authoring context, not app source; their trigger
+# evidence is already retained in the normalized author trace.
 rm -rf -- \
   "$WORKSPACE/node_modules" "$WORKSPACE/.expo" "$WORKSPACE/.git" \
   "$WORKSPACE/.cache" "$WORKSPACE/.eval-bundle-export-tmp" \
   "$WORKSPACE/.mcp.json" \
+  "$WORKSPACE/.agents/skills" "$WORKSPACE/.claude/skills" "$WORKSPACE/agent/skills" \
   "$WORKSPACE/ios/Pods" "$WORKSPACE/ios/build" "$WORKSPACE/ios/DerivedData" \
   "$WORKSPACE/android/.gradle" "$WORKSPACE/android/build" "$WORKSPACE/android/app/build" \
   "$OUT/codex-home" "$OUT/muse-xdg-data" "$OUT/muse-data" \
   "$OUT/muse-bin" "$OUT/muse-settings" "$OUT/muse-xdg-config" \
   "$OUT/bundle" \
   2>/dev/null
+rm -f -- "$WORKSPACE/skills-lock.json" 2>/dev/null
+rmdir "$WORKSPACE/.agents" "$WORKSPACE/.claude" "$WORKSPACE/agent" 2>/dev/null || true
 rm -f -- "$OUT/$RUN_ID.tgz" 2>/dev/null
 rm -f -- "$OUT/telemetry/meta.jsonl" 2>/dev/null
 

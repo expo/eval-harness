@@ -347,6 +347,92 @@ printf '%s\n' '{"n_sessions":1,"sessions":[]}' > "$out"
                 f"author-agent-metadata/{run_id}/logs/d-expo-export.log",
             )
 
+    def test_collector_excludes_installed_skill_context_but_preserves_app_files(self) -> None:
+        """Skills installer outputs must not make the authored app unsafe to materialize."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            run_id = "installed-skill-context"
+            workspace_root = root / "author-agent-workspace"
+            metadata_root = root / "author-agent-metadata"
+            workspace = workspace_root / run_id
+            metadata = metadata_root / run_id
+            artifact = root / "authored-app"
+
+            write(workspace / "package.json", '{"name":"fixture"}')
+            write(workspace / "src" / "App.tsx", "export default function App() {}")
+            write(workspace / ".agents" / "skills" / "expo-ui" / "SKILL.md")
+            write(workspace / "agent" / "skills" / "expo-ui" / "SKILL.md")
+            (workspace / ".claude" / "skills").mkdir(parents=True)
+            (workspace / ".claude" / "skills" / "expo-ui").symlink_to(
+                Path("../../.agents/skills/expo-ui"), target_is_directory=True
+            )
+            write(workspace / "skills-lock.json", '{"skills":{}}')
+
+            # These similarly named paths belong to the authored app and must survive.
+            write(workspace / ".claude" / "app-rules.md", "keep")
+            write(workspace / "agent" / "runtime.ts", "export const keep = true")
+            write(metadata / "author.env", f"RUN_ID={run_id}\n")
+
+            fake_bin = root / "bin"
+            write(
+                fake_bin / "bun",
+                """#!/usr/bin/env bash
+set -eu
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "--out" ]; then
+    mkdir -p "$(dirname "$2")"
+    printf '%s\n' '{"n_sessions":1,"sessions":[]}' > "$2"
+    exit 0
+  fi
+  shift
+done
+exit 0
+""",
+            )
+            (fake_bin / "bun").chmod(0o755)
+
+            env = os.environ.copy()
+            env.update(
+                {
+                    "PATH": f"{fake_bin}:{env['PATH']}",
+                    "AGENT": "muse-code",
+                    "RUN_START_MTIME": "0",
+                    "MUSE_DATA_ROOT": str(metadata / "muse-xdg-data"),
+                }
+            )
+            result = subprocess.run(
+                [
+                    "bash",
+                    str(COLLECTOR),
+                    str(root),
+                    run_id,
+                    str(workspace_root),
+                    str(metadata_root),
+                    str(artifact),
+                ],
+                cwd=ROOT,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            collected = artifact / "author-agent-workspace" / run_id
+            self.assertFalse((collected / ".agents" / "skills").exists())
+            self.assertFalse((collected / ".claude" / "skills").exists())
+            self.assertFalse((collected / "agent" / "skills").exists())
+            self.assertFalse((collected / "skills-lock.json").exists())
+            self.assertTrue((collected / "src" / "App.tsx").is_file())
+            self.assertEqual(
+                (collected / ".claude" / "app-rules.md").read_text(encoding="utf-8"),
+                "keep",
+            )
+            self.assertEqual(
+                (collected / "agent" / "runtime.ts").read_text(encoding="utf-8"),
+                "export const keep = true",
+            )
+
     def test_collector_rejects_artifact_root_outside_repository(self) -> None:
         """A caller-supplied artifact path must not delete an unrelated directory."""
         with tempfile.TemporaryDirectory() as td:
