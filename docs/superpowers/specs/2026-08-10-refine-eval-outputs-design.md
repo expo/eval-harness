@@ -1,7 +1,7 @@
 # Refined Single-Run Eval Outputs
 
-**Date:** 2026-08-10  
-**Branch:** `codex/refine-eval-outputs`  
+**Date:** 2026-08-10
+**Branch:** `codex/refine-eval-outputs`
 **Status:** Approved v3 visual direction and technical design
 
 ## Goal
