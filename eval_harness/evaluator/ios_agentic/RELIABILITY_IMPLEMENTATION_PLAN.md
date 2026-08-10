@@ -296,18 +296,18 @@ new failing tests first.
 - Update the PR description or comment with summarized evidence; do not add raw
   EAS logs to the repository.
 
-- [ ] **Step 1: Run one Notes release replay**
+- [x] **Step 1: Run one Notes release replay**
 
 Use the known healthy Notes authored-app artifact and `eval-ios-app.yml` with
 `ios_app_mode=release`. Download and inspect result, traces, and logs.
 
-- [ ] **Step 2: Classify any failure before changing code**
+- [x] **Step 2: Classify any failure before changing code**
 
 Separate authored-app defects, agent judgment variance, driver/restart faults,
 SDK/quota faults, and harness classification faults. Add a reproducing test
 before each code fix.
 
-- [ ] **Step 3: Repeat Notes until three consecutive complete runs**
+- [x] **Step 3: Repeat Notes until three consecutive complete runs**
 
 Every expected Notes plan must be completed or N/A. Record duration and turns
 per seed/step without requiring equal scores.
@@ -324,7 +324,38 @@ time, seed time, formal-step time, and tool-error recovery. Do not reduce
 budgets in this PR unless every observed valid phase has ample measured margin
 and the user approves the new limits.
 
-- [ ] **Step 6: Report remaining semantic work separately**
+- [x] **Step 6: Report remaining semantic work separately**
 
 Summarize what belongs to the later ground-up seeding/test-plan strategy rather
 than this reliability PR.
+
+## Execution evidence (2026-08-10)
+
+Tasks 1 through 6 were implemented with the planned red/green tests. Final
+local verification at commit `54f410d` passed 121 Bun tests, 50 Python tests,
+all shell syntax checks, and all four EAS workflow validations. An independent
+Codex review found four substantive cleanup/contract gaps and one unsupported
+CLI option; each was fixed and re-verified.
+
+Release replay evidence against unchanged, previously authored artifacts:
+
+| App | Workflow run | Terminal plans | Evaluator errors | Score | Archive |
+|---|---|---:|---:|---:|---:|
+| Notes | `019fe9d0-a534-7f7f-90cc-dd5914fd3095` | 11/11 | 0 | 59/60 | 32.6 MB |
+| Notes | `019fe9f0-ecd7-7bd2-9931-561c8545356f` | 11/11 | 0 | 57/60 | 33.5 MB |
+| Notes | `019fea11-b533-742c-866d-ddc2e308a231` | 11/11 | 0 | 57/60 | 33.4 MB |
+| Pool | `019fea31-3a31-70a3-b313-bf16d9d2e89c` | 8/8 | 0 | 69/80 | 57.8 MB |
+
+The three consecutive Notes runs provide the repeated driver/lifecycle
+acceptance evidence. The Pool stress replay also completed every plan, where
+the earlier run had lost progress during plan four. It finished close to the
+1800-second evaluator guard, and its final theme-selection plan used 33 turns
+in one step. Additional Pool repeats are deferred until the separate
+seed/plan/time-budget analysis, because this result identifies plan duration
+rather than app-driving reliability as the next bottleneck.
+
+One EAS API detail was also observed: replaying the older Notes artifact via
+its artifact object ID returned `EAS_WORKFLOWS_ARTIFACT_NOT_FOUND`, while a
+fresh signed URL returned by `eas workflow:view` downloaded the same retained
+artifact successfully. The acceptance runs therefore used freshly generated
+signed URLs.
