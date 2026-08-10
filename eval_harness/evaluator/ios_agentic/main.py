@@ -343,7 +343,7 @@ def _build_parser() -> argparse.ArgumentParser:
              "(default: dataset/test_plans/primitives)",
     )
     parser.add_argument("-o", "--output", type=Path, default=Path("evaluation-finished.json"), help="Output JSON path")
-    parser.add_argument("-p", "--platform", choices=["ios", "android"], default="ios")
+    parser.add_argument("-p", "--platform", choices=["ios"], default="ios")
     parser.add_argument(
         "-d",
         "--driver",

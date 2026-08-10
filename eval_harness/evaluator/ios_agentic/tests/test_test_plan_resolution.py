@@ -27,6 +27,10 @@ class TestPlanResolutionTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             _build_parser().parse_args(["--driver", "maestro"])
 
+    def test_spec_cli_does_not_advertise_unimplemented_android_evaluation(self):
+        with self.assertRaises(SystemExit):
+            _build_parser().parse_args(["--platform", "android"])
+
     def test_app_name_from_prd_extracts_app_segment(self):
         self.assertEqual(_app_name_from_prd("dataset/prds/notes/prd/mvp.txt"), "notes")
         self.assertIsNone(_app_name_from_prd("some/other/path.txt"))
