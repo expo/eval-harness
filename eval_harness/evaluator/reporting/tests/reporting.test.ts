@@ -1170,7 +1170,7 @@ describe("renderReport", () => {
     expect(html).toContain("Versions");
     expect(html).toContain("Muse Code 0.1.0");
     expect(html).toContain("Machine data paths");
-    expect(html.match(/Scored steps/g) ?? []).toHaveLength(0);
+    expect(html.match(/Scored steps/g) ?? []).toHaveLength(1);
     expect(html.toLowerCase()).not.toContain("<script");
   });
 });

@@ -334,6 +334,7 @@ function renderEvaluationDetails(skills: unknown[], plans: unknown[]): string {
       <summary><span>iOS · <code>${escapeHtml(text(plan.test_plan, "Unknown"))}</code> · run ${escapeHtml(text(plan.run_index, "—"))}</span>${statusBadge(planStatus(plan))}</summary>
       <div class="detail-content">
         ${renderKeyValues(Object.entries(plan).filter(([key]) => key !== "steps"))}
+        <h4>Scored steps</h4>
         ${steps.length === 0
           ? `<p class="muted">No scored steps were emitted.</p>`
           : steps.map((rawStep, index) => {
