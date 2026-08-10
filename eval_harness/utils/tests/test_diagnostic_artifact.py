@@ -115,6 +115,49 @@ class DiagnosticArtifactTests(unittest.TestCase):
         self.assertEqual(metrics["skills"], {})
         self.assertIn("preflight: missing <credential> & unavailable", metrics["warnings"])
 
+    def test_ios_completion_only_fills_a_missing_report_without_calling_it_failed(self) -> None:
+        """Completing a partial artifact must preserve a valid result and report its true status."""
+        output = self.root / "ios-eval-report"
+        output.mkdir()
+        write_json(
+            output / "result.json",
+            {
+                "status": "completed",
+                "expected_plan_count": 1,
+                "terminal_plan_count": 1,
+                "macro_avg_pct": 100,
+                "evaluator_errors": [],
+                "test_plans": [],
+            },
+        )
+        (output / "logs").mkdir()
+        (output / "logs" / "s7-eval.log").write_text("keep", encoding="utf-8")
+
+        command = [
+            "python3",
+            str(SCRIPT),
+            "--kind",
+            "ios",
+            "--author-artifact-root",
+            str(self.author),
+            "--out-dir",
+            str(output),
+            "--stage",
+            "preflight",
+            "--reason",
+            "fallback reason",
+            "--preserve-existing",
+        ]
+        result = subprocess.run(command, cwd=ROOT, text=True, capture_output=True, check=False)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads((output / "result.json").read_text(encoding="utf-8"))
+        self.assertEqual(payload["status"], "completed")
+        self.assertEqual((output / "logs" / "s7-eval.log").read_text(encoding="utf-8"), "keep")
+        report = (output / "report.html").read_text(encoding="utf-8")
+        self.assertIn("iOS evaluation completed", report)
+        self.assertNotIn("iOS evaluation failed", report)
+
 
 if __name__ == "__main__":
     unittest.main()

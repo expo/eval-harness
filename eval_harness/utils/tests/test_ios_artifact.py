@@ -145,13 +145,14 @@ printf '%s\n' '{"n_sessions":1,"sessions":[]}' > "$out"
             self.assertEqual(manifest["build_health"]["app_authored"]["status"], "passed")
             self.assertEqual(manifest["build_health"]["expo_export"]["status"], "warning")
 
-    def test_evaluator_phase_clears_stale_output_before_an_early_failure(self) -> None:
-        """A failed evaluator startup must not publish result data from a prior run."""
+    def test_evaluator_phase_replaces_stale_output_with_an_early_failure_result(self) -> None:
+        """A failed evaluator startup must publish this run's diagnostic, never stale data."""
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             run_id = "stale-output"
             script = root / "eval_harness/evaluator/ios_agentic/scripts/eval-ios-app.sh"
             collector = root / "eval_harness/utils/artifacts/collect_ios_artifact.sh"
+            diagnostic = root / "eval_harness/utils/artifacts/create_diagnostic_artifact.py"
             stages = root / "eval_harness/utils/shell/eval_stages.sh"
             author_env = root / "author-agent-metadata" / run_id / "author.env"
             workspace = root / "author-agent-workspace" / run_id
@@ -160,6 +161,10 @@ printf '%s\n' '{"n_sessions":1,"sessions":[]}' > "$out"
             collector.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(EVAL_SCRIPT, script)
             shutil.copy2(COLLECTOR, collector)
+            shutil.copy2(
+                ROOT / "eval_harness/utils/artifacts/create_diagnostic_artifact.py",
+                diagnostic,
+            )
             write(
                 stages,
                 """eval::resolve_reasoning_effort() { printf '%s' "${1:-high}"; }
@@ -202,16 +207,137 @@ SCENARIO=skills_available_unmentioned
             )
 
             self.assertEqual(result.returncode, 23, result.stderr)
-            self.assertFalse((artifact / "result.json").exists())
-            self.assertFalse((artifact / "report.html").exists())
+            self.assertTrue((artifact / "result.json").is_file())
+            self.assertTrue((artifact / "report.html").is_file())
             self.assertFalse((artifact / "traces" / "agentic-evaluator.json").exists())
             self.assertFalse((artifact / "telemetry" / "anthropic.jsonl").exists())
+            payload = json.loads((artifact / "result.json").read_text(encoding="utf-8"))
+            self.assertEqual(payload["status"], "failed")
+            self.assertIsNone(payload["macro_avg_pct"])
+            self.assertEqual(
+                payload["evaluator_errors"],
+                [
+                    {
+                        "stage": "preflight",
+                        "reason": "iOS evaluator exited before producing result.json (exit status 23)",
+                    }
+                ],
+            )
             manifest = json.loads((artifact / "manifest.json").read_text(encoding="utf-8"))
             self.assertIsNone(manifest["score"])
             self.assertEqual(manifest["build_health"]["dependency_install"]["status"], "not_run")
             self.assertEqual(manifest["build_health"]["native_build"]["status"], "not_run")
             self.assertEqual(manifest["build_health"]["app_launch"]["status"], "not_run")
             self.assertEqual(manifest["build_health"]["evaluation"]["status"], "not_run")
+
+    def test_missing_expo_ios_config_is_a_structured_native_build_failure(self) -> None:
+        """Config preflight failure must remain exact, scored nowhere, and leave later stages unrun."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            run_id = "missing-ios-config"
+            script = root / "eval_harness/evaluator/ios_agentic/scripts/eval-ios-app.sh"
+            collector = root / "eval_harness/utils/artifacts/collect_ios_artifact.sh"
+            diagnostic = root / "eval_harness/utils/artifacts/create_diagnostic_artifact.py"
+            stages = root / "eval_harness/utils/shell/eval_stages.sh"
+            author_env = root / "author-agent-metadata" / run_id / "author.env"
+            workspace = root / "author-agent-workspace" / run_id
+            artifact = root / "ios-eval-report"
+            script.parent.mkdir(parents=True, exist_ok=True)
+            collector.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(EVAL_SCRIPT, script)
+            shutil.copy2(COLLECTOR, collector)
+            shutil.copy2(
+                ROOT / "eval_harness/utils/artifacts/create_diagnostic_artifact.py",
+                diagnostic,
+            )
+            write(
+                stages,
+                """eval::resolve_reasoning_effort() { printf '%s' "${1:-high}"; }
+eval::fix_java_home() { :; }
+eval::env_banner() { :; }
+eval::stop_proxies() { :; }
+eval::install_agent_device() { :; }
+eval::install_maestro() { :; }
+eval::install_uv_and_evaluator() { :; }
+eval::launch_proxy() { :; }
+eval::wait_for_port() { return 0; }
+eval::launch_otlp_receiver() { :; }
+eval::npm_install() { return 0; }
+eval::configure_ios_app_mode() { EVAL_IOS_APP_MODE=release; export EVAL_IOS_APP_MODE; }
+""",
+            )
+            write(
+                author_env,
+                f"""RUN_ID={run_id}
+RUN_START_MTIME=0
+AGENT=muse-code
+AGENT_MODEL=muse-spark-1.2
+AGENT_REASONING_EFFORT=high
+PRD=dataset/prds/notes/prd/mvp.txt
+METRO_MODE=release
+SCENARIO=skills_available_unmentioned
+""",
+            )
+            write(workspace / "package.json", "{}")
+            fake_bin = root / "bin"
+            write(
+                fake_bin / "bun",
+                """#!/usr/bin/env bash
+set -eu
+out=""
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "--out" ]; then out="$2"; break; fi
+  shift
+done
+[ -z "$out" ] || { mkdir -p "$(dirname "$out")"; printf '{}\n' > "$out"; }
+""",
+            )
+            write(
+                fake_bin / "npx",
+                """#!/usr/bin/env bash
+printf '%s\n' '{"scheme":"notes","ios":{}}'
+""",
+            )
+            (fake_bin / "bun").chmod(0o755)
+            (fake_bin / "npx").chmod(0o755)
+            env = os.environ.copy()
+            env.update({"PATH": f"{fake_bin}:{env['PATH']}", "AUTHOR_ENV": str(author_env)})
+
+            result = subprocess.run(
+                ["bash", str(script)],
+                cwd=root,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 1, result.stderr)
+            payload = json.loads((artifact / "result.json").read_text(encoding="utf-8"))
+            self.assertEqual(payload["status"], "failed")
+            self.assertIsNone(payload["macro_avg_pct"])
+            self.assertEqual(
+                payload["evaluator_errors"],
+                [
+                    {
+                        "stage": "native_build",
+                        "reason": "authored app is missing required Expo config "
+                        "(ios.bundleIdentifier and scheme are required)",
+                    }
+                ],
+            )
+            manifest = json.loads((artifact / "manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["build_health"]["dependency_install"]["status"], "passed")
+            self.assertEqual(manifest["build_health"]["native_build"]["status"], "failed")
+            self.assertEqual(
+                manifest["build_health"]["native_build"]["detail"],
+                "authored app is missing required Expo config "
+                "(ios.bundleIdentifier and scheme are required)",
+            )
+            self.assertEqual(manifest["build_health"]["app_launch"]["status"], "not_run")
+            self.assertEqual(manifest["build_health"]["evaluation"]["status"], "not_run")
+            report = (artifact / "report.html").read_text(encoding="utf-8")
+            self.assertIn("ios.bundleIdentifier and scheme are required", report)
 
     def test_collector_rejects_output_root_outside_repository(self) -> None:
         """The collector must not mutate an arbitrary caller-supplied directory."""

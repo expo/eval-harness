@@ -28,6 +28,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--run-id", default="")
     parser.add_argument("--evaluator-model", default="")
     parser.add_argument("--evaluator-reasoning-effort", default="")
+    parser.add_argument(
+        "--preserve-existing",
+        action="store_true",
+        help="fill missing iOS result/report files without replacing producer diagnostics",
+    )
     return parser.parse_args()
 
 
@@ -67,26 +72,59 @@ def write_json(path: Path, value: Any) -> None:
     path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
 
 
-def report_html(title: str, detail: str) -> str:
+def report_html(
+    title: str,
+    detail: str,
+    note: str = "This diagnostic contains no evaluator score.",
+) -> str:
     return (
         "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
         f"<title>{html.escape(title)}</title></head><body><main>"
         f"<h1>{html.escape(title)}</h1><p>{html.escape(detail)}</p>"
-        "<p>This diagnostic contains no evaluator score.</p></main></body></html>\n"
+        f"<p>{html.escape(note)}</p></main></body></html>\n"
     )
+
+
+def ios_failure_result(stage_name: str, reason: str) -> dict[str, Any]:
+    return {
+        "status": "failed",
+        "expected_plan_count": 0,
+        "terminal_plan_count": 0,
+        "macro_avg_pct": None,
+        "evaluator_errors": [{"stage": stage_name, "reason": reason}],
+        "test_plans": [],
+    }
+
+
+def ensure_ios_result_and_report(out: Path, stage_name: str, reason: str) -> None:
+    result_path = out / "result.json"
+    report_path = out / "report.html"
+    result: dict[str, Any]
+    if not result_path.exists():
+        result = ios_failure_result(stage_name, reason)
+        write_json(result_path, result)
+    else:
+        try:
+            candidate = json.loads(result_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            candidate = None
+        result = candidate if isinstance(candidate, dict) else {}
+    if not report_path.exists():
+        if result.get("status") == "completed":
+            title = "iOS evaluation completed"
+            detail = "The standalone evaluator report was unavailable; result.json is authoritative."
+            note = "See result.json for scores and per-plan evidence."
+        else:
+            title = "iOS evaluation failed"
+            detail = f"{stage_name}: {reason}"
+            note = "This diagnostic contains no evaluator score."
+        report_path.write_text(report_html(title, detail, note), encoding="utf-8")
 
 
 def create_ios(out: Path, author: dict[str, Any], args: argparse.Namespace) -> None:
     run_id = author.get("run_id") if isinstance(author.get("run_id"), str) else args.run_id
     detail = f"{args.stage}: {args.reason}"
-    result = {
-        "status": "failed",
-        "expected_plan_count": 0,
-        "terminal_plan_count": 0,
-        "macro_avg_pct": None,
-        "evaluator_errors": [{"stage": args.stage, "reason": args.reason}],
-        "test_plans": [],
-    }
+    result = ios_failure_result(args.stage, args.reason)
     author_health = author.get("build_health") if isinstance(author.get("build_health"), dict) else {}
     build_health = {
         "dependency_install": stage("not_run"),
@@ -176,6 +214,13 @@ def main() -> int:
         raise ValueError("unsafe diagnostic output directory")
     parent = destination.parent
     parent.mkdir(parents=True, exist_ok=True)
+    if args.preserve_existing:
+        if args.kind != "ios":
+            raise ValueError("--preserve-existing is only valid for iOS diagnostics")
+        if not destination.is_dir():
+            raise ValueError("preserved diagnostic output must already be a directory")
+        ensure_ios_result_and_report(destination, args.stage, args.reason)
+        return 0
     staging = Path(tempfile.mkdtemp(prefix=f".{destination.name}-diagnostic-", dir=parent))
     try:
         if args.kind == "ios":

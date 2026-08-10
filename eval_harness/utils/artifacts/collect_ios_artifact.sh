@@ -78,6 +78,31 @@ for log_file in "$OUT"/*.log; do
   mv -f "$log_file" "$OUT/logs/"
 done
 
+# The EXIT trap reaches this collector even when evaluator setup/build fails
+# before main.py can write its normal result. A canonical producer artifact
+# must never advertise authoritative files that do not exist.
+if [ ! -f "$OUT/result.json" ] || [ ! -f "$OUT/report.html" ]; then
+  FAILURE_STAGE="${IOS_FAILURE_STAGE:-preflight}"
+  FAILURE_REASON="${IOS_FAILURE_REASON:-}"
+  if [ -z "$FAILURE_REASON" ]; then
+    if [ -n "${IOS_EVALUATOR_EXIT_STATUS:-}" ]; then
+      FAILURE_REASON="iOS evaluator exited before producing result.json (exit status ${IOS_EVALUATOR_EXIT_STATUS})"
+    else
+      FAILURE_REASON="iOS evaluator exited before producing result.json"
+    fi
+  fi
+  "$PY" "$ROOT/eval_harness/utils/artifacts/create_diagnostic_artifact.py" \
+    --kind ios \
+    --author-artifact-root "${AUTHORED_ARTIFACT_ROOT:-$ROOT}" \
+    --out-dir "$OUT" \
+    --stage "$FAILURE_STAGE" \
+    --reason "$FAILURE_REASON" \
+    --run-id "$RUN_ID" \
+    --evaluator-model "${EVALUATOR_MODEL:-}" \
+    --evaluator-reasoning-effort "${EVALUATOR_REASONING_EFFORT:-}" \
+    --preserve-existing
+fi
+
 GIT_SHA="$(cd "$ROOT" && git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 RESULT_JSON="$OUT/result.json" RUN_ID="$RUN_ID" GIT_SHA="$GIT_SHA" \
 AGENT="${AGENT:-claude-code}" AGENT_MODEL="${AGENT_MODEL:-}" \
@@ -91,6 +116,7 @@ IOS_NATIVE_BUILD_STATUS="${IOS_NATIVE_BUILD_STATUS:-not_run}" \
 IOS_NATIVE_BUILD_LOG="${IOS_NATIVE_BUILD_LOG:-}" \
 IOS_APP_LAUNCH_STATUS="${IOS_APP_LAUNCH_STATUS:-not_run}" \
 IOS_EVALUATION_STATUS="${IOS_EVALUATION_STATUS:-not_run}" \
+IOS_FAILURE_STAGE="${IOS_FAILURE_STAGE:-}" IOS_FAILURE_REASON="${IOS_FAILURE_REASON:-}" \
 "$PY" - "$OUT/manifest.json" <<'PYEOF'
 import json
 import os
@@ -115,11 +141,17 @@ if agent == "claude":
 allowed_statuses = {"passed", "warning", "failed", "not_run"}
 
 
-def stage(status, log):
+failure_stage = os.environ.get("IOS_FAILURE_STAGE")
+failure_reason = os.environ.get("IOS_FAILURE_REASON") or None
+
+
+def stage(name, status, log):
     normalized_status = status if status in allowed_statuses else "not_run"
     return {
         "status": normalized_status,
-        "detail": None,
+        "detail": failure_reason
+        if normalized_status == "failed" and name == failure_stage
+        else None,
         "log": log if normalized_status != "not_run" else None,
     }
 
@@ -145,14 +177,20 @@ def preserved_author_stage(name):
 
 build_health = {
     "dependency_install": stage(
+        "dependency_install",
         os.environ.get("IOS_DEPENDENCY_INSTALL_STATUS"), "logs/s5-npm.log"
     ),
     "native_build": stage(
+        "native_build",
         os.environ.get("IOS_NATIVE_BUILD_STATUS"),
         os.environ.get("IOS_NATIVE_BUILD_LOG") or None,
     ),
-    "app_launch": stage(os.environ.get("IOS_APP_LAUNCH_STATUS"), "logs/s6b-open.log"),
-    "evaluation": stage(os.environ.get("IOS_EVALUATION_STATUS"), "logs/s7-eval.log"),
+    "app_launch": stage(
+        "app_launch", os.environ.get("IOS_APP_LAUNCH_STATUS"), "logs/s6b-open.log"
+    ),
+    "evaluation": stage(
+        "evaluation", os.environ.get("IOS_EVALUATION_STATUS"), "logs/s7-eval.log"
+    ),
 }
 for author_stage in ("app_authored", "expo_export"):
     preserved = preserved_author_stage(author_stage)

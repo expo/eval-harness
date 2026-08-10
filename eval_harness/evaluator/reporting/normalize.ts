@@ -444,6 +444,10 @@ function evaluationStage(
 ): BuildHealthStage {
   const manifestStage = producerStage("evaluation", manifestHealth?.evaluation);
   if (manifestStage.status === "failed") return manifestStage;
+  // A producer can fail before the agentic evaluator starts (for example,
+  // during Expo config or native build). Its structured result still carries
+  // the exact error, but must not make the evaluation rung look attempted.
+  if (manifestStage.status === "not_run") return manifestStage;
   const failure = evaluationFailureDetail(result);
   if (failure !== null || result?.status === "failed") {
     return stage(
@@ -964,8 +968,8 @@ async function normalizeInto(inputs: ReportInputs): Promise<ConsolidatedSummary>
     iosResult?.raw !== null && iosResult !== null,
     iosResultValid,
   );
-  if (inputs.iosJobStatus === "failure") {
-    evaluatorStage = stage("evaluation", "failed", "The EAS iOS evaluator job failed.", evaluatorStage.log);
+  if (inputs.iosJobStatus === "failure" && iosRoot === null) {
+    evaluatorStage = stage("evaluation", "failed", "The EAS iOS evaluator job failed and produced no usable artifact.", evaluatorStage.log);
   } else if (inputs.iosJobStatus === "success" && iosRoot === null) {
     evaluatorStage = stage("evaluation", "failed", "The successful EAS iOS evaluator job artifact is unavailable.");
   } else if (inputs.iosJobStatus === "skipped") {

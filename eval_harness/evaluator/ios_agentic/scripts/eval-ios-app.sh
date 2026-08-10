@@ -71,8 +71,19 @@ IOS_NATIVE_BUILD_STATUS=not_run
 IOS_NATIVE_BUILD_LOG=""
 IOS_APP_LAUNCH_STATUS=not_run
 IOS_EVALUATION_STATUS=not_run
+IOS_FAILURE_STAGE=""
+IOS_FAILURE_REASON=""
 export RUN_ID RUN_START_MTIME OUT WORKSPACE TELEMETRY_DIR EVAL_PHASE_START_MTIME METRO_MODE AGENT AGENT_MODEL AGENT_REASONING_EFFORT PRD TEST_PLAN SCENARIO EVALUATOR_MODEL EVALUATOR_REASONING_EFFORT \
-  AUTHOR_MANIFEST AUTHORED_ARTIFACT_ROOT IOS_DEPENDENCY_INSTALL_STATUS IOS_NATIVE_BUILD_STATUS IOS_NATIVE_BUILD_LOG IOS_APP_LAUNCH_STATUS IOS_EVALUATION_STATUS
+  AUTHOR_MANIFEST AUTHORED_ARTIFACT_ROOT IOS_DEPENDENCY_INSTALL_STATUS IOS_NATIVE_BUILD_STATUS IOS_NATIVE_BUILD_LOG IOS_APP_LAUNCH_STATUS IOS_EVALUATION_STATUS \
+  IOS_FAILURE_STAGE IOS_FAILURE_REASON
+
+eval_fail() { # stage reason [exit_status]
+  IOS_FAILURE_STAGE="$1"
+  IOS_FAILURE_REASON="$2"
+  export IOS_FAILURE_STAGE IOS_FAILURE_REASON
+  echo "  ❌ $IOS_FAILURE_REASON"
+  exit "${3:-1}"
+}
 
 ANTHROPIC_PROXY_PORT=8082
 OTLP_PORT=4318
@@ -89,7 +100,7 @@ echo "RUN_ID=$RUN_ID  WORKSPACE=$WORKSPACE"
 
 EVAL_PROXY_PIDS=()
 EVAL_METRO_PID=""
-trap 'eval::stop_proxies; kill "${EVAL_METRO_PID:-}" 2>/dev/null || true; bash "$ROOT/eval_harness/utils/artifacts/collect_ios_artifact.sh" "$ROOT" "$RUN_ID" "$OUT"' EXIT
+trap 'eval_status=$?; eval::stop_proxies; kill "${EVAL_METRO_PID:-}" 2>/dev/null || true; IOS_EVALUATOR_EXIT_STATUS="$eval_status" bash "$ROOT/eval_harness/utils/artifacts/collect_ios_artifact.sh" "$ROOT" "$RUN_ID" "$OUT"' EXIT
 
 echo "================= STAGE D0: macOS eval toolchain ================="
 eval::install_agent_device "$OUT"
@@ -110,19 +121,20 @@ export OTEL_METRICS_EXPORTER=otlp OTEL_LOGS_EXPORTER=otlp OTEL_TRACES_EXPORTER=o
 export OTEL_RESOURCE_ATTRIBUTES="run.id=$RUN_ID,phase=evaluate,service.name=eval-harness"
 
 if [ ! -f "$WORKSPACE/package.json" ]; then
-  echo "  ❌ authored workspace has no package.json; skipping build/eval and collecting diagnostics"
-  exit 1
+  eval_fail preflight "authored workspace has no package.json; skipping build/eval"
 fi
 
 echo "================= STAGE D: npm install + resolve app config + native iOS build ================="
 IOS_DEPENDENCY_INSTALL_STATUS=failed
 if ! eval::npm_install "$WORKSPACE" "$OUT"; then
-  echo "  ❌ authored app failed a clean npm install on the eval worker; skipping build/eval and collecting diagnostics"
-  exit 1
+  eval_fail dependency_install "authored app failed a clean npm install on the eval worker; skipping build/eval"
 fi
 IOS_DEPENDENCY_INSTALL_STATUS=passed
 
-eval::configure_ios_app_mode || exit $?
+eval::configure_ios_app_mode || {
+  status=$?
+  eval_fail preflight "iOS app mode configuration failed" "$status"
+}
 echo "  iOS app mode: $EVAL_IOS_APP_MODE"
 if [ "$EVAL_IOS_APP_MODE" = "dev-client" ]; then
   echo "  ensuring expo-dev-client is installed (dev-build deep-link handshake)"
@@ -135,15 +147,22 @@ if [ "$EVAL_IOS_APP_MODE" = "dev-client" ]; then
   cat "$OUT/d-devclient-config.log"
 fi
 
-BUNDLE_ID=""; SCHEME=""
+BUNDLE_ID=""; SCHEME=""; EXPO_CONFIG_RESOLVED=0
 if ( cd "$WORKSPACE" && npx --yes expo config --json >"$OUT/d-expo-config.json" 2>"$OUT/d-expo-config.err" ); then
+  EXPO_CONFIG_RESOLVED=1
   BUNDLE_ID="$(python3 -c "import json; d=json.load(open('$OUT/d-expo-config.json')); print((d.get('ios') or {}).get('bundleIdentifier') or '')" 2>/dev/null)"
   SCHEME="$(python3 -c "import json; d=json.load(open('$OUT/d-expo-config.json')); s=d.get('scheme'); print((s[0] if isinstance(s,list) else s) or '')" 2>/dev/null)"
 fi
 echo "  resolved bundleIdentifier='$BUNDLE_ID'  scheme='$SCHEME'"
+if [ "$EXPO_CONFIG_RESOLVED" -ne 1 ]; then
+  IOS_NATIVE_BUILD_STATUS=failed
+  IOS_NATIVE_BUILD_LOG="logs/d-expo-config.err"
+  eval_fail native_build "authored app Expo config could not be resolved; see logs/d-expo-config.err"
+fi
 if [ -z "$BUNDLE_ID" ] || [ -z "$SCHEME" ]; then
-  echo "  ❌ authored app is missing required Expo config (ios.bundleIdentifier and scheme are required); skipping build/eval"
-  exit 1
+  IOS_NATIVE_BUILD_STATUS=failed
+  IOS_NATIVE_BUILD_LOG="logs/d-expo-config.err"
+  eval_fail native_build "authored app is missing required Expo config (ios.bundleIdentifier and scheme are required)"
 fi
 if [ -n "$BUNDLE_ID" ]; then
   export EVAL_APP_BUNDLE_ID="$BUNDLE_ID"
@@ -157,15 +176,13 @@ if [ "$EVAL_IOS_APP_MODE" = "release" ]; then
   export EVAL_APP_USE_SIMCTL_LAUNCH=1
   unset EVAL_APP_DEEP_LINK
   eval::build_release_ios_app "$WORKSPACE" "$OUT" "$EVAL_DEVNAME" || {
-    echo "  ❌ release app build/install failed; skipping eval and collecting diagnostics"
-    exit 1
+    eval_fail native_build "release app build/install failed; skipping evaluation"
   }
 else
   IOS_NATIVE_BUILD_STATUS=failed
   IOS_NATIVE_BUILD_LOG="logs/s6-devbuild.log"
   if ! eval::start_metro_dev_build "$WORKSPACE" "$OUT" "$EVAL_DEVNAME"; then
-    echo "  ❌ dev-client app build/install failed; skipping eval and collecting diagnostics"
-    exit 1
+    eval_fail native_build "dev-client app build/install failed; skipping evaluation"
   fi
   eval::capture_dev_client_deep_link "$OUT" || {
     DEV_CLIENT_URL="${DEV_CLIENT_URL:-http://127.0.0.1:8081}"
@@ -176,8 +193,7 @@ fi
 IOS_NATIVE_BUILD_STATUS=passed
 IOS_APP_LAUNCH_STATUS=failed
 if ! eval::probe_snapshot "$OUT" "${EVAL_APP_BUNDLE_ID:-host.exp.Exponent}"; then
-  echo "  ❌ authored app failed launch readiness probe; skipping evaluator"
-  exit 1
+  eval_fail app_launch "authored app failed launch readiness probe; skipping evaluator"
 fi
 IOS_APP_LAUNCH_STATUS=passed
 
@@ -186,13 +202,12 @@ export TRACE_SINCE_MTIME="$(date +%s)"
 IOS_EVALUATION_STATUS=failed
 if ! eval::run_evaluator "$EVAL" "$TEST_PLAN" "$PRD" "$OUT/result.json" "$OUT" \
   --model "$EVALUATOR_MODEL" --reasoning-effort "$EVALUATOR_REASONING_EFFORT"; then
-  echo "  ❌ evaluator failed; artifacts will still be collected by the EXIT trap"
-  exit 1
+  eval_fail evaluation "evaluator failed; artifacts were collected by the EXIT trap"
 fi
 
 echo "================= RESULT ================="
 if ! eval::require_evaluator_result "$OUT/result.json"; then
-  exit 1
+  eval_fail evaluation "evaluator result was missing, incomplete, or structurally invalid"
 fi
 IOS_EVALUATION_STATUS=passed
 cat "$OUT/result.json"

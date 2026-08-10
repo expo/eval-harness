@@ -137,7 +137,7 @@ describe("normalizeRun", () => {
     expect(diagnosticSummary.scores.ios_macro_pct).toBeNull();
     expect(diagnosticSummary.build_health.at(-1)).toMatchObject({
       status: "failed",
-      detail: "The EAS iOS evaluator job failed.",
+      detail: "preflight: missing credential",
     });
 
     const successMissingRoot = tempRoot();
@@ -162,6 +162,43 @@ describe("normalizeRun", () => {
     });
     expect(renderReport(skippedSummary)).toContain("iOS job</dt><dd>Skipped");
     expect(renderReport(skippedSummary)).toContain("Skill job</dt><dd>Skipped");
+  });
+
+  test("keeps an early native-build diagnostic on its actual ladder rung", async () => {
+    // Catches a failed EAS job replacing exact producer evidence with a generic
+    // evaluation-stage failure after the evaluator never ran.
+    const root = tempRoot();
+    const args = inputs(root, { skill: false, ios: true });
+    args.iosJobStatus = "failure";
+    args.skillJobStatus = "skipped";
+    const reason = "authored app is missing required Expo config (ios.bundleIdentifier and scheme are required)";
+    writeJson(join(args.iosArtifact!, "result.json"), {
+      status: "failed",
+      expected_plan_count: 0,
+      terminal_plan_count: 0,
+      macro_avg_pct: null,
+      evaluator_errors: [{ stage: "native_build", reason }],
+      test_plans: [],
+    });
+    const manifest = readJson(join(args.iosArtifact!, "manifest.json"));
+    const health = manifest.build_health as Record<string, unknown>;
+    health.native_build = { status: "failed", detail: reason, log: "logs/d-expo-config.err" };
+    health.app_launch = { status: "not_run", detail: null, log: null };
+    health.evaluation = { status: "not_run", detail: null, log: null };
+    writeJson(join(args.iosArtifact!, "manifest.json"), manifest);
+
+    const summary = await normalizeRun(args);
+
+    expect(summary.status).toBe("failed");
+    expect(summary.scores.ios_macro_pct).toBeNull();
+    expect(summary.build_health.find((stage) => stage.id === "native_build"))
+      .toMatchObject({ status: "failed", detail: reason });
+    expect(summary.build_health.find((stage) => stage.id === "app_launch"))
+      .toMatchObject({ status: "not_run", detail: null });
+    expect(summary.build_health.find((stage) => stage.id === "evaluation"))
+      .toMatchObject({ status: "not_run", detail: null });
+    expect(summary.warnings).toContain(`iOS evaluator failed: native_build: ${reason}`);
+    expect(renderReport(summary)).toContain("ios.bundleIdentifier and scheme are required");
   });
 
   test("rejects authoritative JSON symlinks, hardlinks, and FIFOs", async () => {
