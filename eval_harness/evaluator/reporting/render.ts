@@ -60,9 +60,9 @@ function scoreStatus(value: number | null, ratio: boolean): StageStatus {
   return "failed";
 }
 
-function statusBadge(status: StageStatus): string {
+function statusBadge(status: StageStatus, label = STATUS_META[status].label): string {
   const meta = STATUS_META[status];
-  return `<span class="status status-${status}"><span aria-hidden="true">${meta.symbol}</span> ${meta.label}</span>`;
+  return `<span class="status status-${status}"><span aria-hidden="true">${meta.symbol}</span> ${escapeHtml(label)}</span>`;
 }
 
 function renderScoreCard(
@@ -70,9 +70,10 @@ function renderScoreCard(
   value: string,
   status: StageStatus,
   note: string,
+  statusLabel?: string,
 ): string {
   return `<article class="score-card score-${status}">
-    <div class="score-card-top"><p class="score-label">${escapeHtml(label)}</p>${statusBadge(status)}</div>
+    <div class="score-card-top"><p class="score-label">${escapeHtml(label)}</p>${statusBadge(status, statusLabel)}</div>
     <p class="score-value">${escapeHtml(value)}</p>
     <p class="score-note">${escapeHtml(note)}</p>
   </article>`;
@@ -272,6 +273,22 @@ function assertionTitle(assertion: JsonRecord, index: number): string {
   );
 }
 
+function checkStatus(check: JsonRecord): StageStatus {
+  switch (check.status) {
+    case "passed":
+      return "passed";
+    case "failed":
+      return "failed";
+    case "not_applicable":
+      return "not_run";
+    case "unavailable":
+      return "warning";
+  }
+  if (check.passed === true || check.ok === true) return "passed";
+  if (check.passed === false || check.ok === false) return "failed";
+  return "warning";
+}
+
 function renderAssertions(step: JsonRecord): string {
   const groups: Array<[string, unknown[]]> = [
     ["Hard assertions", Array.isArray(step.hard_assertions) ? step.hard_assertions : []],
@@ -304,7 +321,7 @@ function renderEvaluationDetails(skills: unknown[], plans: unknown[]): string {
           ? `<p class="muted">No individual check records were emitted.</p>`
           : `<ol class="check-list">${checks.map((rawCheck, index) => {
             const check: JsonRecord = record(rawCheck) ?? { value: rawCheck };
-            const status: StageStatus = check.passed === false || check.ok === false ? "failed" : "passed";
+            const status = checkStatus(check);
             return `<li>${statusBadge(status)}<div><strong>${escapeHtml(text(check.id ?? check.name, `Check ${index + 1}`))}</strong>${renderKeyValues(Object.entries(check).filter(([key]) => !["id", "name"].includes(key)))}</div></li>`;
           }).join("")}</ol>`}
       </div>
@@ -317,7 +334,6 @@ function renderEvaluationDetails(skills: unknown[], plans: unknown[]): string {
       <summary><span>iOS · <code>${escapeHtml(text(plan.test_plan, "Unknown"))}</code> · run ${escapeHtml(text(plan.run_index, "—"))}</span>${statusBadge(planStatus(plan))}</summary>
       <div class="detail-content">
         ${renderKeyValues(Object.entries(plan).filter(([key]) => key !== "steps"))}
-        <h4>Scored steps</h4>
         ${steps.length === 0
           ? `<p class="muted">No scored steps were emitted.</p>`
           : steps.map((rawStep, index) => {
@@ -365,6 +381,11 @@ export function renderReport(summary: ConsolidatedSummary): string {
   const recallStatus = scoreStatus(summary.scores.skill_trigger_recall, true);
   const uptakeStatus = scoreStatus(summary.scores.skill_uptake_rate, true);
   const overallStatus = runStatus(summary);
+  const overallLabel = summary.status === "complete"
+    ? "Complete"
+    : summary.status === "partial"
+    ? "Partial"
+    : "Failed";
   const prd = text(run.prd, "Unknown product brief");
   const versions = record(run.versions);
 
@@ -541,7 +562,7 @@ export function renderReport(summary: ConsolidatedSummary): string {
       ${renderScoreCard("iOS quality", percent(summary.scores.ios_macro_pct, false), iosStatus, "Macro average across applicable plans")}
       ${renderScoreCard("Skill recall", percent(summary.scores.skill_trigger_recall, true), recallStatus, "Expected Expo skills read")}
       ${renderScoreCard("Skill uptake", percent(summary.scores.skill_uptake_rate, true), uptakeStatus, "Mapped guidance reflected in source")}
-      ${renderScoreCard("Run status", STATUS_META[overallStatus].label, overallStatus, `${failedEvidence} failed final-state screenshot${failedEvidence === 1 ? "" : "s"}`)}
+      ${renderScoreCard("Run status", overallLabel, overallStatus, `${failedEvidence} failed final-state screenshot${failedEvidence === 1 ? "" : "s"}`, overallLabel)}
     </div>
 
     <section aria-labelledby="ladder-title">

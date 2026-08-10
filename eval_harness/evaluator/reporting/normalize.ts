@@ -472,7 +472,7 @@ function runDetails(
   const cliVersion = authorTelemetry.cliVersion ?? stringOrNull(author?.muse_cli_version);
   if (cliVersion !== null) authorDetails.cli_version = cliVersion;
   if (authorTelemetry.toolCalls !== null) authorDetails.tool_calls = authorTelemetry.toolCalls;
-  if (authorTelemetry.skillReads.length > 0) {
+  if (authorTelemetry.skillReads !== null) {
     authorDetails.skill_reads = authorTelemetry.skillReads;
   }
   return {
@@ -555,7 +555,7 @@ export function validateConsolidatedSummary(
 type AuthorTraceTelemetry = {
   usage: Record<string, number | null>;
   toolCalls: number | null;
-  skillReads: string[];
+  skillReads: string[] | null;
   cliVersion: string | null;
 };
 
@@ -566,7 +566,7 @@ async function authorTraceTelemetry(
   const unavailable = (): AuthorTraceTelemetry => ({
     usage: {},
     toolCalls: null,
-    skillReads: [],
+    skillReads: null,
     cliVersion: null,
   });
   const tracePath = stringOrNull(record(manifest?.artifacts)?.author_trace);

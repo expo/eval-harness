@@ -963,6 +963,25 @@ describe("renderReport", () => {
     return summary;
   }
 
+  function telemetryCard(html: string, heading: string): string {
+    const escaped = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const match = html.match(
+      new RegExp(`<article class="telemetry-card"><h3>${escaped}</h3>([\\s\\S]*?)</article>`),
+    );
+    expect(match).not.toBeNull();
+    return match?.[1] ?? "";
+  }
+
+  function elementContaining(html: string, tag: "article" | "li", marker: string): string {
+    const markerIndex = html.indexOf(marker);
+    expect(markerIndex).toBeGreaterThanOrEqual(0);
+    const start = html.lastIndexOf(`<${tag}`, markerIndex);
+    const end = html.indexOf(`</${tag}>`, markerIndex);
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(markerIndex);
+    return html.slice(start, end + tag.length + 3);
+  }
+
   test("renders the approved postmortem hierarchy and explicit status text", async () => {
     // Catches a generic dashboard replacing the ordered dossier and status-readable run spine.
     const summary = await fixtureSummary();
@@ -1002,6 +1021,102 @@ describe("renderReport", () => {
       .toBeLessThan(html.indexOf("PASSED: Insert a note"));
     expect(html.indexOf("Failed final state"))
       .toBeLessThan(html.indexOf("Passed final state"));
+  });
+
+  test("keeps run completion semantics independent from partial quality scores", async () => {
+    // Catches a terminal run being mislabeled Passed despite partial behavioral/skill scores.
+    const summary = await fixtureSummary();
+    summary.status = "complete";
+    summary.scores.ios_macro_pct = 82.5;
+    summary.scores.skill_trigger_recall = 0.5;
+    summary.scores.skill_uptake_rate = 0.75;
+
+    const complete = renderReport(summary);
+    summary.status = "partial";
+    const partial = renderReport(summary);
+    summary.status = "failed";
+    const failed = renderReport(summary);
+
+    const completeCard = elementContaining(complete, "article", "Run status");
+    const partialCard = elementContaining(partial, "article", "Run status");
+    const failedCard = elementContaining(failed, "article", "Run status");
+    expect(completeCard).toContain("score-card score-passed");
+    expect(completeCard).toContain("> Complete</span>");
+    expect(completeCard).toContain('<p class="score-value">Complete</p>');
+    expect(completeCard).not.toContain("Passed");
+    expect(partialCard).toContain("score-card score-warning");
+    expect(partialCard).toContain("> Partial</span>");
+    expect(partialCard).toContain('<p class="score-value">Partial</p>');
+    expect(failedCard).toContain("score-card score-failed");
+    expect(failedCard).toContain("> Failed</span>");
+    expect(failedCard).toContain('<p class="score-value">Failed</p>');
+  });
+
+  test("renders all producer check states without passing unscored checks", async () => {
+    // Catches passed:null checks falling through to a green Passed badge.
+    const summary = await fixtureSummary();
+    const skill = summary.skills[0] as Record<string, unknown>;
+    skill.checks = [
+      { id: "check-passed", status: "passed", passed: true },
+      { id: "check-failed", status: "failed", passed: false },
+      { id: "check-not-applicable", status: "not_applicable", passed: null },
+      { id: "check-unavailable", status: "unavailable", passed: null },
+    ];
+
+    const html = renderReport(summary);
+
+    const passed = elementContaining(html, "li", "<strong>check-passed</strong>");
+    const failed = elementContaining(html, "li", "<strong>check-failed</strong>");
+    const notApplicable = elementContaining(
+      html,
+      "li",
+      "<strong>check-not-applicable</strong>",
+    );
+    const unavailable = elementContaining(html, "li", "<strong>check-unavailable</strong>");
+    expect(passed).toContain("status-passed");
+    expect(passed).toContain("Passed");
+    expect(failed).toContain("status-failed");
+    expect(failed).toContain("Failed");
+    expect(notApplicable).toContain("status-not_run");
+    expect(notApplicable).toContain("Not run");
+    expect(notApplicable).not.toContain("status-passed");
+    expect(unavailable).toContain("status-warning");
+    expect(unavailable).toContain("Warning");
+    expect(unavailable).not.toContain("status-passed");
+  });
+
+  test("distinguishes an observed empty skill-read set from a missing trace", async () => {
+    // Catches a valid zero-read trace being rendered as missing telemetry.
+    const observedRoot = tempRoot();
+    const observedArgs = inputs(observedRoot, { skill: false, ios: false });
+    writeJson(
+      join(
+        observedArgs.authoredArtifact,
+        "author-agent-metadata/run-fixture-1/telemetry/traces/muse-code-authoring.json",
+      ),
+      {
+        sessions: [{
+          session_meta: { cli_version: "0.1.0" },
+          turns: [{
+            total_usage: { prompt_tokens: 1 },
+            steps: [{ tool_calls: [{ name: "bash", args: { command: "pwd" } }] }],
+          }],
+        }],
+      },
+    );
+    const observed = await normalizeRun(observedArgs);
+    const observedAuthor = observed.run.author as Record<string, unknown>;
+
+    const missingRoot = tempRoot();
+    const missingArgs = inputs(missingRoot, { skill: false, ios: false });
+    const missing = await normalizeRun(missingArgs);
+    const missingAuthor = missing.run.author as Record<string, unknown>;
+
+    expect(observedAuthor.skill_reads).toEqual([]);
+    expect(telemetryCard(renderReport(observed), "Skill reads")).toContain("<dd>None</dd>");
+    expect("skill_reads" in missingAuthor).toBe(false);
+    expect(telemetryCard(renderReport(missing), "Skill reads"))
+      .toContain("<dd>Not recorded</dd>");
   });
 
   test("escapes adversarial data and emits no executable or remote content", async () => {
@@ -1055,6 +1170,7 @@ describe("renderReport", () => {
     expect(html).toContain("Versions");
     expect(html).toContain("Muse Code 0.1.0");
     expect(html).toContain("Machine data paths");
+    expect(html.match(/Scored steps/g) ?? []).toHaveLength(0);
     expect(html.toLowerCase()).not.toContain("<script");
   });
 });
