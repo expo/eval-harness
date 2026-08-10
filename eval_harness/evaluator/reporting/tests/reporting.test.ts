@@ -88,6 +88,82 @@ function inputs(root: string, options: {
 }
 
 describe("normalizeRun", () => {
+  test("preserves evaluator job terminal state and gates missing or failed outputs", async () => {
+    const failedMissingRoot = tempRoot();
+    const failedMissing = inputs(failedMissingRoot, { skill: false, ios: false });
+    failedMissing.iosJobStatus = "failure";
+    failedMissing.skillJobStatus = "skipped";
+    const failedMissingSummary = await normalizeRun(failedMissing);
+    expect(failedMissingSummary.status).toBe("failed");
+    expect(failedMissingSummary.scores.ios_macro_pct).toBeNull();
+    expect(failedMissingSummary.run.jobs).toEqual({ ios: "failure", skill: "skipped" });
+    expect(failedMissingSummary.warnings).toContain("iOS evaluator job failed and produced no usable artifact");
+
+    const failedArtifactRoot = tempRoot();
+    const failedArtifact = inputs(failedArtifactRoot, { skill: true, ios: true });
+    failedArtifact.iosJobStatus = "failure";
+    failedArtifact.skillJobStatus = "failure";
+    const failedArtifactSummary = await normalizeRun(failedArtifact);
+    expect(failedArtifactSummary.status).toBe("failed");
+    expect(failedArtifactSummary.scores).toEqual({
+      ios_macro_pct: null,
+      skill_trigger_recall: null,
+      skill_uptake_rate: null,
+    });
+    expect(failedArtifactSummary.warnings).toContain("iOS evaluator job failed");
+    expect(failedArtifactSummary.warnings).toContain("skill evaluator job failed");
+
+    const diagnosticRoot = tempRoot();
+    const diagnostic = inputs(diagnosticRoot, { skill: false, ios: true });
+    diagnostic.iosJobStatus = "failure";
+    diagnostic.skillJobStatus = "skipped";
+    writeJson(join(diagnostic.iosArtifact!, "result.json"), {
+      status: "failed",
+      expected_plan_count: 0,
+      terminal_plan_count: 0,
+      macro_avg_pct: null,
+      evaluator_errors: [{ stage: "preflight", reason: "missing credential" }],
+      test_plans: [],
+    });
+    const diagnosticManifest = readJson(join(diagnostic.iosArtifact!, "manifest.json"));
+    (diagnosticManifest.build_health as Record<string, unknown>).evaluation = {
+      status: "failed",
+      detail: "preflight: missing credential",
+      log: null,
+    };
+    writeJson(join(diagnostic.iosArtifact!, "manifest.json"), diagnosticManifest);
+    const diagnosticSummary = await normalizeRun(diagnostic);
+    expect(diagnosticSummary.status).toBe("failed");
+    expect(diagnosticSummary.scores.ios_macro_pct).toBeNull();
+    expect(diagnosticSummary.build_health.at(-1)).toMatchObject({
+      status: "failed",
+      detail: "The EAS iOS evaluator job failed.",
+    });
+
+    const successMissingRoot = tempRoot();
+    const successMissing = inputs(successMissingRoot, { skill: false, ios: false });
+    successMissing.iosJobStatus = "success";
+    successMissing.skillJobStatus = "success";
+    const successMissingSummary = await normalizeRun(successMissing);
+    expect(successMissingSummary.status).toBe("failed");
+    expect(successMissingSummary.warnings).toContain("successful iOS evaluator job artifact is unavailable");
+    expect(successMissingSummary.warnings).toContain("successful skill evaluator job artifact is unavailable");
+
+    const skippedRoot = tempRoot();
+    const skipped = inputs(skippedRoot, { skill: false, ios: false });
+    skipped.iosJobStatus = "skipped";
+    skipped.skillJobStatus = "skipped";
+    const skippedSummary = await normalizeRun(skipped);
+    expect(skippedSummary.status).toBe("complete");
+    expect(skippedSummary.scores).toEqual({
+      ios_macro_pct: null,
+      skill_trigger_recall: null,
+      skill_uptake_rate: null,
+    });
+    expect(renderReport(skippedSummary)).toContain("iOS job</dt><dd>Skipped");
+    expect(renderReport(skippedSummary)).toContain("Skill job</dt><dd>Skipped");
+  });
+
   test("rejects authoritative JSON symlinks, hardlinks, and FIFOs", async () => {
     // Catches producer JSON reads retaining arbitrary host or special-file content.
     const symlinkRoot = tempRoot();
@@ -986,6 +1062,27 @@ describe("reporting CLI", () => {
       iosArtifact: null,
       outDir: "report",
     });
+  });
+
+  test("parses and validates optional EAS evaluator job statuses", () => {
+    expect(parseArgs([
+      "--authored-artifact", "/author",
+      "--out-dir", "/out",
+      "--ios-job-status", "failure",
+      "--skill-job-status", "skipped",
+    ])).toEqual({
+      authoredArtifact: "/author",
+      skillArtifact: null,
+      iosArtifact: null,
+      outDir: "/out",
+      iosJobStatus: "failure",
+      skillJobStatus: "skipped",
+    });
+    expect(parseArgs([
+      "--authored-artifact", "/author",
+      "--out-dir", "/out",
+      "--ios-job-status", "cancelled",
+    ])).toBe(2);
   });
 
   test("writes the exact complete artifact through the real Bun entrypoint", () => {

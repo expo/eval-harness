@@ -21,6 +21,83 @@ def write(path: Path, contents: str = "fixture") -> None:
 
 
 class AuthorArtifactTests(unittest.TestCase):
+    def test_invalid_prompt_preflight_still_collects_failed_author_artifact(self) -> None:
+        """A fallible preflight must run inside the diagnostic collection lifetime."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            run_id = "invalid-prompt-preflight"
+            author_script = root / "eval_harness/app_builder/scripts/author-app.sh"
+            collector = root / "eval_harness/utils/artifacts/collect_author_artifact.sh"
+            prompt_resolver = root / "eval_harness/utils/shell/resolve_prompt.sh"
+            stages = root / "eval_harness/utils/shell/eval_stages.sh"
+            fake_bin = root / "bin"
+            for source, target in (
+                (AUTHOR_SCRIPT, author_script),
+                (COLLECTOR, collector),
+                (PROMPT_RESOLVER, prompt_resolver),
+            ):
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source, target)
+            (root / "dataset").symlink_to(ROOT / "dataset", target_is_directory=True)
+            write(
+                stages,
+                """eval::normalize_authoring_agent() { printf '%s\\n' "$1"; }
+eval::resolve_authoring_model() { printf '%s\\n' "${2:-sonnet}"; }
+eval::resolve_reasoning_effort() { printf '%s\\n' "${1:-high}"; }
+eval::stop_proxies() { :; }
+eval::cleanup_muse_settings() { :; }
+""",
+            )
+            write(
+                fake_bin / "bun",
+                """#!/usr/bin/env bash
+set -eu
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "--out" ]; then
+    mkdir -p "$(dirname "$2")"
+    printf '%s\\n' '{"n_sessions":0,"sessions":[]}' > "$2"
+    exit 0
+  fi
+  shift
+done
+exit 0
+""",
+            )
+            (fake_bin / "bun").chmod(0o755)
+
+            env = os.environ.copy()
+            env.update(
+                {
+                    "PATH": f"{fake_bin}:{env['PATH']}",
+                    "RUN_ID": run_id,
+                    "PROMPT_VARIANT": "not-a-real-prompt",
+                    "HOME": str(root / "home"),
+                }
+            )
+            result = subprocess.run(
+                ["bash", str(author_script)],
+                cwd=root,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            artifact = root / "authored-app"
+            manifest_path = artifact / "manifest.json"
+            self.assertTrue(manifest_path.is_file(), result.stderr)
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            self.assertEqual(manifest["run_id"], run_id)
+            self.assertEqual(manifest["build_health"]["app_authored"]["status"], "failed")
+            self.assertIsNone(manifest["prompt_variant"])
+            self.assertEqual(manifest["requested_prompt_variant"], "not-a-real-prompt")
+            self.assertIsNone(manifest["prompt_file"])
+            self.assertTrue(
+                (artifact / "author-agent-metadata" / run_id / "author.env").is_file()
+            )
+            self.assertFalse(any(artifact.rglob(".mcp.json")))
+
     def test_authoring_records_a_failed_structured_export_as_warning(self) -> None:
         """An `ok: false` export result must not become a passed manifest stage."""
         with tempfile.TemporaryDirectory() as td:

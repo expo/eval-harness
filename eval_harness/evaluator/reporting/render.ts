@@ -393,6 +393,7 @@ export function renderReport(summary: ConsolidatedSummary): string {
   const run = record(summary.run) ?? {};
   const author = record(run.author) ?? {};
   const evaluator = record(run.evaluator) ?? {};
+  const jobs = record(run.jobs) ?? {};
   const evidence = collectEvidence(summary.ios.test_plans);
   const failedEvidence = evidence.filter((item) => item.failed).length;
   const iosStatus = scoreStatus(summary.scores.ios_macro_pct, false);
@@ -616,6 +617,7 @@ export function renderReport(summary: ConsolidatedSummary): string {
         <article class="telemetry-card"><h3>Tool calls</h3>${renderKeyValues([["Author", author.tool_calls], ["Evaluator", evaluator.tool_calls]])}</article>
         <article class="telemetry-card"><h3>Skill reads</h3>${renderKeyValues([["Observed", author.skill_reads]])}</article>
         <article class="telemetry-card"><h3>Versions</h3>${renderKeyValues([["Author harness", author.cli_version], ["Evaluator harness", evaluator.cli_version], ...Object.entries(versions ?? {})])}</article>
+        <article class="telemetry-card"><h3>Workflow jobs</h3>${renderKeyValues([["iOS job", humanize(text(jobs.ios))], ["Skill job", humanize(text(jobs.skill))]])}</article>
         <article class="telemetry-card"><h3>Machine data paths</h3>${renderKeyValues(Object.entries(summary.artifacts).map(([key, value]) => [humanize(key), value]))}</article>
       </div>
       <div class="panel warning-panel"><h3>Warnings</h3>${renderWarnings(summary.warnings)}</div>

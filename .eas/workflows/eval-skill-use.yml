@@ -93,9 +93,15 @@ jobs:
           curl --fail --location --show-error "$IOS_EVAL_REPORT_URL" --output ios-eval-report-download/ios-eval-report.tar.gz
           set-output artifact_path "$(pwd)/ios-eval-report-download/ios-eval-report.tar.gz"
 
+      - name: Materialize authored app safely
+        run: |
+          artifact_path='${{ steps.download_author.outputs.artifact_path || steps.download_author_from_url.outputs.artifact_path }}'
+          bun eval_harness/utils/artifacts/materialize.ts \
+            --artifact "$artifact_path" --dest "$PWD/authored-app-input" --root-name authored-app
+
       - name: Analyze skill-eval artifacts
         run: |
-          AUTHORED_ARTIFACT='${{ steps.download_author.outputs.artifact_path || steps.download_author_from_url.outputs.artifact_path }}'
+          AUTHORED_ARTIFACT="$PWD/authored-app-input"
           EVAL_ARTIFACT='${{ steps.download_ios_eval.outputs.artifact_path || steps.download_ios_eval_from_url.outputs.artifact_path }}'
           if [ "$EVAL_ARTIFACT" = "undefined" ] || [ "$EVAL_ARTIFACT" = "null" ]; then
             EVAL_ARTIFACT=""
@@ -110,8 +116,11 @@ jobs:
         if: ${{ always() }}
         run: |
           if [ ! -f skill-eval-report/manifest.json ]; then
-            mkdir -p skill-eval-report
-            printf '%s\n' '{"schema_version":2,"artifact_type":"skill-eval-report","run_id":null,"artifacts":{"metrics":"metrics.json","report":"report.html"}}' > skill-eval-report/manifest.json
+            python3 eval_harness/utils/artifacts/create_diagnostic_artifact.py \
+              --kind skill --author-artifact-root "$PWD/authored-app-input" \
+              --out-dir "$PWD/skill-eval-report" --run-id '${{ workflow.id }}' \
+              --scenario '${{ inputs.scenario }}' --stage workflow_preflight \
+              --reason 'skill evaluator did not produce a canonical artifact; inspect job logs'
           fi
           bash eval_harness/utils/artifacts/package_artifact.sh skill-eval-report skill-eval-report.tar.gz skill-eval-report.tar.gz
 

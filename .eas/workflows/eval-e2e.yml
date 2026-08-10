@@ -160,54 +160,35 @@ jobs:
     steps:
       - uses: eas/checkout
 
-      - name: Check Claude subscription OAuth
-        run: bash ./eval_harness/utils/shell/check_claude_auth.sh
-
       - name: Download authored app
         uses: eas/download_artifact
         id: download_author
         with:
           name: authored-app
 
-      - name: Unpack authored app
+      - name: Materialize authored app safely
         run: |
           artifact_path="${{ steps.download_author.outputs.artifact_path }}"
-          rm -rf authored-app
-          mkdir -p authored-app
-          if [ -d "$artifact_path" ]; then
-            if [ -f "$artifact_path/authored-app.tar.gz" ]; then
-              tar -xzf "$artifact_path/authored-app.tar.gz" -C authored-app
-            elif [ -f "$artifact_path/authored-app/manifest.json" ]; then
-              cp -R "$artifact_path/authored-app"/. authored-app/
-            else
-              cp -R "$artifact_path"/. authored-app/
-            fi
-          else
-            tar -xzf "$artifact_path" -C authored-app
-          fi
-          if [ -f authored-app/manifest.json ]; then
-            for runtime_root in authored-app/author-*; do
-              [ -d "$runtime_root" ] || continue
-              mv "$runtime_root" .
-            done
-          else
-            for downloaded_root in authored-app/*; do
-              [ -e "$downloaded_root" ] || continue
-              mv "$downloaded_root" .
-            done
-            rmdir authored-app
-          fi
+          bun eval_harness/utils/artifacts/materialize.ts \
+            --artifact "$artifact_path" --dest "$PWD/authored-app-input" --root-name authored-app
+
+      - name: Check Claude subscription OAuth
+        run: bash ./eval_harness/utils/shell/check_claude_auth.sh
 
       - name: Build, run, and evaluate authored app
-        run: bash ./eval_harness/evaluator/ios_agentic/scripts/eval-ios-app.sh
+        run: AUTHORED_ARTIFACT_ROOT="$PWD/authored-app-input" bash ./eval_harness/evaluator/ios_agentic/scripts/eval-ios-app.sh
 
       - name: Package iOS eval report
         if: ${{ always() }}
         run: |
           if [ ! -f ios-eval-report/manifest.json ]; then
-            mkdir -p ios-eval-report
-            RUN_ID='${{ workflow.id }}' \
-              bash eval_harness/utils/artifacts/collect_ios_artifact.sh "$PWD" '${{ workflow.id }}' "$PWD/ios-eval-report"
+            python3 eval_harness/utils/artifacts/create_diagnostic_artifact.py \
+              --kind ios --author-artifact-root "$PWD/authored-app-input" \
+              --out-dir "$PWD/ios-eval-report" --run-id '${{ workflow.id }}' \
+              --stage workflow_preflight \
+              --reason 'iOS evaluator did not produce a canonical artifact; inspect job logs' \
+              --evaluator-model "$EVALUATOR_MODEL" \
+              --evaluator-reasoning-effort "$EVALUATOR_REASONING_EFFORT"
           fi
           bash eval_harness/utils/artifacts/package_artifact.sh ios-eval-report ios-eval-report.tar.gz ios-eval-report.tar.gz
 
@@ -233,9 +214,15 @@ jobs:
         with:
           name: authored-app
 
+      - name: Materialize authored app safely
+        run: |
+          artifact_path='${{ steps.download_author.outputs.artifact_path }}'
+          bun eval_harness/utils/artifacts/materialize.ts \
+            --artifact "$artifact_path" --dest "$PWD/authored-app-input" --root-name authored-app
+
       - name: Analyze authored app for skill eval
         run: |
-          AUTHORED_ARTIFACT='${{ steps.download_author.outputs.artifact_path }}' \
+          AUTHORED_ARTIFACT="$PWD/authored-app-input" \
           SCENARIO='${{ inputs.skill_scenario }}' \
           OUT_DIR=skill-eval-report \
           bash ./eval_harness/evaluator/skill_invocation/scripts/eval-skill-use.sh
@@ -244,8 +231,11 @@ jobs:
         if: ${{ always() }}
         run: |
           if [ ! -f skill-eval-report/manifest.json ]; then
-            mkdir -p skill-eval-report
-            printf '%s\n' '{"schema_version":2,"artifact_type":"skill-eval-report","run_id":null,"artifacts":{"metrics":"metrics.json","report":"report.html"}}' > skill-eval-report/manifest.json
+            python3 eval_harness/utils/artifacts/create_diagnostic_artifact.py \
+              --kind skill --author-artifact-root "$PWD/authored-app-input" \
+              --out-dir "$PWD/skill-eval-report" --run-id '${{ workflow.id }}' \
+              --scenario '${{ inputs.skill_scenario }}' --stage workflow_preflight \
+              --reason 'skill evaluator did not produce a canonical artifact; inspect job logs'
           fi
           bash eval_harness/utils/artifacts/package_artifact.sh skill-eval-report skill-eval-report.tar.gz skill-eval-report.tar.gz
 
@@ -286,39 +276,30 @@ jobs:
       - name: Build consolidated report
         if: ${{ always() }}
         run: |
-          materialize() {
-            artifact_path="$1" archive_name="$2" root_name="$3" destination="$4"
-            [ -n "$artifact_path" ] && [ "$artifact_path" != undefined ] && [ "$artifact_path" != null ] || return 1
-            rm -rf "$destination"
-            mkdir -p "$destination"
-            if [ -d "$artifact_path" ]; then
-              if [ -f "$artifact_path/$archive_name" ]; then
-                tar -xzf "$artifact_path/$archive_name" -C "$destination"
-              elif [ -f "$artifact_path/$root_name/manifest.json" ]; then
-                cp -R "$artifact_path/$root_name"/. "$destination/"
-              else
-                cp -R "$artifact_path"/. "$destination/"
-              fi
-            elif [ -f "$artifact_path" ]; then
-              tar -xzf "$artifact_path" -C "$destination"
-            else
-              return 1
-            fi
-            [ -f "$destination/manifest.json" ]
-          }
-
-          mkdir -p report-inputs
-          materialize '${{ steps.report_author.outputs.artifact_path }}' authored-app.tar.gz authored-app report-inputs/author || {
+          author_path='${{ steps.report_author.outputs.artifact_path }}'
+          [ -n "$author_path" ] && [ "$author_path" != undefined ] && [ "$author_path" != null ] || {
             echo 'authored-app artifact is unavailable; cannot build the required report' >&2
             exit 1
           }
-          report_args=(--authored-artifact report-inputs/author --out-dir eval-report)
-          if materialize '${{ steps.report_skill.outputs.artifact_path }}' skill-eval-report.tar.gz skill-eval-report report-inputs/skill; then
+          bun eval_harness/utils/artifacts/materialize.ts \
+            --artifact "$author_path" --dest "$PWD/report-inputs/author" --root-name authored-app
+          report_args=(
+            --authored-artifact report-inputs/author --out-dir eval-report
+            --ios-job-status '${{ after.eval_ios.status }}'
+            --skill-job-status '${{ after.eval_skill.status }}'
+          )
+          skill_path='${{ steps.report_skill.outputs.artifact_path }}'
+          if [ -n "$skill_path" ] && [ "$skill_path" != undefined ] && [ "$skill_path" != null ]; then
+            bun eval_harness/utils/artifacts/materialize.ts \
+              --artifact "$skill_path" --dest "$PWD/report-inputs/skill" --root-name skill-eval-report
             report_args+=(--skill-artifact report-inputs/skill)
           else
             echo 'skill-eval artifact disabled or unavailable; continuing without it'
           fi
-          if materialize '${{ steps.report_ios.outputs.artifact_path }}' ios-eval-report.tar.gz ios-eval-report report-inputs/ios; then
+          ios_path='${{ steps.report_ios.outputs.artifact_path }}'
+          if [ -n "$ios_path" ] && [ "$ios_path" != undefined ] && [ "$ios_path" != null ]; then
+            bun eval_harness/utils/artifacts/materialize.ts \
+              --artifact "$ios_path" --dest "$PWD/report-inputs/ios" --root-name ios-eval-report
             report_args+=(--ios-artifact report-inputs/ios)
           else
             echo 'iOS eval artifact disabled or unavailable; continuing without it'

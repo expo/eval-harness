@@ -1,4 +1,5 @@
 export type StageStatus = "passed" | "warning" | "failed" | "not_run";
+export type EvalJobStatus = "success" | "failure" | "skipped";
 
 export type BuildHealthStage = {
   id: string;
@@ -13,6 +14,8 @@ export type ReportInputs = {
   skillArtifact: string | null;
   iosArtifact: string | null;
   outDir: string;
+  iosJobStatus?: EvalJobStatus;
+  skillJobStatus?: EvalJobStatus;
 };
 
 export type ConsolidatedSummary = {

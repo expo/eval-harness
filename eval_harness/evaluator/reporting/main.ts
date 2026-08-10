@@ -6,6 +6,8 @@ import type { ReportInputs } from "./types.ts";
 
 const HELP = `usage: bun eval_harness/evaluator/reporting/main.ts \\
   --authored-artifact PATH [--skill-artifact PATH] [--ios-artifact PATH] \\
+  [--skill-job-status success|failure|skipped] \\
+  [--ios-job-status success|failure|skipped] \\
   --out-dir PATH`;
 
 function usageError(message: string): 2 {
@@ -23,6 +25,8 @@ export function parseArgs(argv: string[]): ReportInputs | 2 | 0 {
     "--authored-artifact",
     "--skill-artifact",
     "--ios-artifact",
+    "--skill-job-status",
+    "--ios-job-status",
     "--out-dir",
   ]);
   for (let index = 0; index < argv.length; index += 2) {
@@ -42,11 +46,26 @@ export function parseArgs(argv: string[]): ReportInputs | 2 | 0 {
   if (authoredArtifact === undefined || outDir === undefined) {
     return usageError("--authored-artifact and --out-dir are required");
   }
+  const supportedJobStatuses = new Set(["success", "failure", "skipped"]);
+  const skillJobStatus = values.get("--skill-job-status");
+  const iosJobStatus = values.get("--ios-job-status");
+  if (skillJobStatus !== undefined && !supportedJobStatuses.has(skillJobStatus)) {
+    return usageError("--skill-job-status must be success, failure, or skipped");
+  }
+  if (iosJobStatus !== undefined && !supportedJobStatuses.has(iosJobStatus)) {
+    return usageError("--ios-job-status must be success, failure, or skipped");
+  }
   return {
     authoredArtifact,
     skillArtifact: values.get("--skill-artifact") ?? null,
     iosArtifact: values.get("--ios-artifact") ?? null,
     outDir,
+    ...(skillJobStatus === undefined ? {} : {
+      skillJobStatus: skillJobStatus as "success" | "failure" | "skipped",
+    }),
+    ...(iosJobStatus === undefined ? {} : {
+      iosJobStatus: iosJobStatus as "success" | "failure" | "skipped",
+    }),
   };
 }
 

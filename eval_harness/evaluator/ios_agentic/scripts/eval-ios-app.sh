@@ -8,12 +8,18 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 EVAL="$ROOT"
+AUTHORED_ARTIFACT_ROOT="${AUTHORED_ARTIFACT_ROOT:-$ROOT}"
+if [ ! -d "$AUTHORED_ARTIFACT_ROOT" ] || [ -L "$AUTHORED_ARTIFACT_ROOT" ]; then
+  echo "  ❌ authored artifact root must be a physical directory: $AUTHORED_ARTIFACT_ROOT"
+  exit 1
+fi
+AUTHORED_ARTIFACT_ROOT="$(cd "$AUTHORED_ARTIFACT_ROOT" && pwd -P)"
 # shellcheck source=eval_harness/utils/shell/eval_stages.sh
 source "$ROOT/eval_harness/utils/shell/eval_stages.sh"
 
 AUTHOR_ENV="${AUTHOR_ENV:-}"
 if [ -z "$AUTHOR_ENV" ]; then
-  for f in "$ROOT"/author-agent-metadata/*/author.env "$ROOT"/eval-out/*/author.env; do
+  for f in "$AUTHORED_ARTIFACT_ROOT"/author-agent-metadata/*/author.env "$AUTHORED_ARTIFACT_ROOT"/eval-out/*/author.env; do
     [ -f "$f" ] || continue
     AUTHOR_ENV="$f"
     break
@@ -32,17 +38,17 @@ OUT="$ROOT/ios-eval-report"
 rm -rf -- "$OUT" || { echo "  ❌ could not reset iOS artifact root: $OUT"; exit 1; }
 mkdir -p "$OUT" || { echo "  ❌ could not create iOS artifact root: $OUT"; exit 1; }
 AUTHOR_MANIFEST=""
-if [ -f "$ROOT/authored-app/manifest.json" ]; then
-  AUTHOR_MANIFEST="$ROOT/authored-app/manifest.json"
+if [ -f "$AUTHORED_ARTIFACT_ROOT/manifest.json" ]; then
+  AUTHOR_MANIFEST="$AUTHORED_ARTIFACT_ROOT/manifest.json"
 fi
-if [ -d "$ROOT/author-agent-workspace/$RUN_ID" ]; then
-  WORKSPACE="$ROOT/author-agent-workspace/$RUN_ID"
-elif [ -d "$ROOT/agent-workspace/$RUN_ID" ]; then
-  WORKSPACE="$ROOT/agent-workspace/$RUN_ID"
-elif [ -d "$ROOT/eval-out/$RUN_ID/bundle/app" ]; then
-  WORKSPACE="$ROOT/eval-out/$RUN_ID/bundle/app"
+if [ -d "$AUTHORED_ARTIFACT_ROOT/author-agent-workspace/$RUN_ID" ]; then
+  WORKSPACE="$AUTHORED_ARTIFACT_ROOT/author-agent-workspace/$RUN_ID"
+elif [ -d "$AUTHORED_ARTIFACT_ROOT/agent-workspace/$RUN_ID" ]; then
+  WORKSPACE="$AUTHORED_ARTIFACT_ROOT/agent-workspace/$RUN_ID"
+elif [ -d "$AUTHORED_ARTIFACT_ROOT/eval-out/$RUN_ID/bundle/app" ]; then
+  WORKSPACE="$AUTHORED_ARTIFACT_ROOT/eval-out/$RUN_ID/bundle/app"
 else
-  WORKSPACE="$ROOT/author-agent-workspace/$RUN_ID"
+  WORKSPACE="$AUTHORED_ARTIFACT_ROOT/author-agent-workspace/$RUN_ID"
 fi
 TELEMETRY_DIR="$OUT/telemetry"; mkdir -p "$TELEMETRY_DIR/otel"
 EVAL_PHASE_START_MTIME="$(date +%s)"
@@ -66,7 +72,7 @@ IOS_NATIVE_BUILD_LOG=""
 IOS_APP_LAUNCH_STATUS=not_run
 IOS_EVALUATION_STATUS=not_run
 export RUN_ID RUN_START_MTIME OUT WORKSPACE TELEMETRY_DIR EVAL_PHASE_START_MTIME METRO_MODE AGENT AGENT_MODEL AGENT_REASONING_EFFORT PRD TEST_PLAN SCENARIO EVALUATOR_MODEL EVALUATOR_REASONING_EFFORT \
-  AUTHOR_MANIFEST IOS_DEPENDENCY_INSTALL_STATUS IOS_NATIVE_BUILD_STATUS IOS_NATIVE_BUILD_LOG IOS_APP_LAUNCH_STATUS IOS_EVALUATION_STATUS
+  AUTHOR_MANIFEST AUTHORED_ARTIFACT_ROOT IOS_DEPENDENCY_INSTALL_STATUS IOS_NATIVE_BUILD_STATUS IOS_NATIVE_BUILD_LOG IOS_APP_LAUNCH_STATUS IOS_EVALUATION_STATUS
 
 ANTHROPIC_PROXY_PORT=8082
 OTLP_PORT=4318

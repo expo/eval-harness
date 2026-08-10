@@ -1,0 +1,197 @@
+#!/usr/bin/env python3
+"""Create a small, truthful evaluator artifact after a workflow preflight failure."""
+
+from __future__ import annotations
+
+import argparse
+import html
+import json
+import os
+import shutil
+import stat
+import tempfile
+from pathlib import Path
+from typing import Any
+
+
+STAGE_STATUSES = {"passed", "warning", "failed", "not_run"}
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--kind", choices=("ios", "skill"), required=True)
+    parser.add_argument("--author-artifact-root", required=True)
+    parser.add_argument("--out-dir", required=True)
+    parser.add_argument("--stage", required=True)
+    parser.add_argument("--reason", required=True)
+    parser.add_argument("--scenario", default="")
+    parser.add_argument("--run-id", default="")
+    parser.add_argument("--evaluator-model", default="")
+    parser.add_argument("--evaluator-reasoning-effort", default="")
+    return parser.parse_args()
+
+
+def read_author_manifest(root: Path) -> dict[str, Any]:
+    manifest = root / "manifest.json"
+    try:
+        metadata = manifest.lstat()
+    except FileNotFoundError:
+        return {}
+    if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+        raise ValueError("author manifest must be a physical single-link regular file")
+    physical_root = root.resolve(strict=True)
+    physical_manifest = manifest.resolve(strict=True)
+    if physical_root not in physical_manifest.parents:
+        raise ValueError("author manifest resolves outside its artifact")
+    value = json.loads(manifest.read_text(encoding="utf-8"))
+    return value if isinstance(value, dict) else {}
+
+
+def valid_stage(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict) or value.get("status") not in STAGE_STATUSES:
+        return None
+    detail = value.get("detail")
+    log = value.get("log")
+    if detail is not None and not isinstance(detail, str):
+        return None
+    if log is not None and not isinstance(log, str):
+        return None
+    return {"status": value["status"], "detail": detail, "log": log}
+
+
+def stage(status: str, detail: str | None = None) -> dict[str, Any]:
+    return {"status": status, "detail": detail, "log": None}
+
+
+def write_json(path: Path, value: Any) -> None:
+    path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
+
+
+def report_html(title: str, detail: str) -> str:
+    return (
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
+        f"<title>{html.escape(title)}</title></head><body><main>"
+        f"<h1>{html.escape(title)}</h1><p>{html.escape(detail)}</p>"
+        "<p>This diagnostic contains no evaluator score.</p></main></body></html>\n"
+    )
+
+
+def create_ios(out: Path, author: dict[str, Any], args: argparse.Namespace) -> None:
+    run_id = author.get("run_id") if isinstance(author.get("run_id"), str) else args.run_id
+    detail = f"{args.stage}: {args.reason}"
+    result = {
+        "status": "failed",
+        "expected_plan_count": 0,
+        "terminal_plan_count": 0,
+        "macro_avg_pct": None,
+        "evaluator_errors": [{"stage": args.stage, "reason": args.reason}],
+        "test_plans": [],
+    }
+    author_health = author.get("build_health") if isinstance(author.get("build_health"), dict) else {}
+    build_health = {
+        "dependency_install": stage("not_run"),
+        "native_build": stage("not_run"),
+        "app_launch": stage("not_run"),
+        "evaluation": stage("failed", detail),
+    }
+    for name in ("app_authored", "expo_export"):
+        preserved = valid_stage(author_health.get(name))
+        if preserved is not None:
+            build_health[name] = preserved
+    manifest = {
+        "schema_version": 2,
+        "artifact_type": "ios-eval-report",
+        "run_id": run_id or "unavailable-author-run",
+        "git_sha": author.get("git_sha"),
+        "prd": author.get("prd"),
+        "agent": author.get("agent"),
+        "agent_model": author.get("agent_model"),
+        "agent_reasoning_effort": author.get("agent_reasoning_effort"),
+        "evaluator_model": args.evaluator_model or None,
+        "evaluator_reasoning_effort": args.evaluator_reasoning_effort or None,
+        "score": None,
+        "full_points": None,
+        "macro_avg_pct": None,
+        "micro_pct": None,
+        "build_health": build_health,
+        "artifacts": {
+            "result": "result.json",
+            "report": "report.html",
+            "evaluator_trace": "traces/agentic-evaluator.json",
+            "test_plan_traces": "traces/test-plans/",
+            "proxy_anthropic": "telemetry/anthropic.jsonl",
+            "otel": "telemetry/otel/",
+            "logs": "logs/",
+        },
+    }
+    write_json(out / "result.json", result)
+    write_json(out / "manifest.json", manifest)
+    (out / "report.html").write_text(report_html("iOS evaluation failed", detail), encoding="utf-8")
+
+
+def create_skill(out: Path, author: dict[str, Any], args: argparse.Namespace) -> None:
+    run_id = author.get("run_id") if isinstance(author.get("run_id"), str) else args.run_id or None
+    scenario = (
+        author.get("scenario")
+        if isinstance(author.get("scenario"), str) and author.get("scenario")
+        else args.scenario or "skills_available_unmentioned"
+    )
+    detail = f"{args.stage}: {args.reason}"
+    metrics = {
+        "summary": "Skill evaluation did not run",
+        "app": None,
+        "expected_skills": [],
+        "scenario": scenario,
+        "outcome_status": "pending",
+        "warnings": [detail],
+        "score": {
+            "trigger_quality": {"recall": None},
+            "context_uptake": {"uptake_rate": None},
+        },
+        "static_checks": [],
+        "check_category_breakdown": {},
+        "build_health": {"syntax": None, "bundle": None},
+        "runs": [],
+        "skills": {},
+        "artifacts": {},
+        "braintrust_refs": [],
+    }
+    manifest = {
+        "schema_version": 2,
+        "artifact_type": "skill-eval-report",
+        "run_id": run_id,
+        "artifacts": {"metrics": "metrics.json", "report": "report.html"},
+    }
+    write_json(out / "metrics.json", metrics)
+    write_json(out / "manifest.json", manifest)
+    (out / "report.html").write_text(report_html("Skill evaluation did not run", detail), encoding="utf-8")
+
+
+def main() -> int:
+    args = parse_args()
+    author_root = Path(args.author_artifact_root)
+    author = read_author_manifest(author_root) if author_root.is_dir() else {}
+    destination = Path(args.out_dir).absolute()
+    if destination == Path(destination.anchor) or destination.is_symlink():
+        raise ValueError("unsafe diagnostic output directory")
+    parent = destination.parent
+    parent.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(prefix=f".{destination.name}-diagnostic-", dir=parent))
+    try:
+        if args.kind == "ios":
+            create_ios(staging, author, args)
+        else:
+            create_skill(staging, author, args)
+        if destination.exists():
+            if destination.is_symlink() or not destination.is_dir():
+                raise ValueError("unsafe diagnostic output directory")
+            shutil.rmtree(destination)
+        os.replace(staging, destination)
+    except Exception:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -26,6 +26,7 @@ class WorkflowContractTests(unittest.TestCase):
                 self.assertNotIn("agent-workspace", contents)
                 self.assertNotIn("eval-out", contents)
                 self.assertNotIn("eval-e2e-output", contents)
+                self.assertNotIn("tar -xzf", contents)
 
     def test_author_workflows_expose_and_pass_reasoning_effort(self) -> None:
         for name in ("eval-e2e.yml", "author-app.yml"):
@@ -84,6 +85,8 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("name: eval-report", body)
         self.assertIn("path: eval-report.tar.gz", body)
         self.assertIn("--authored-artifact", body)
+        self.assertIn("--ios-job-status '${{ after.eval_ios.status }}'", body)
+        self.assertIn("--skill-job-status '${{ after.eval_skill.status }}'", body)
         self.assertNotRegex(body, r"--(?:skill|ios)-artifact\s+[^\n]*undefined")
         self.assertIn(
             "if: ${{ always() && inputs.run_eval_ios && after.eval_ios.status != 'skipped' }}",
@@ -94,6 +97,20 @@ class WorkflowContractTests(unittest.TestCase):
             body,
         )
         self.assertGreaterEqual(body.count("if: ${{ always() }}"), 3)
+        self.assertGreaterEqual(contents.count("artifacts/materialize.ts"), 2)
+        self.assertIn("artifacts/create_diagnostic_artifact.py", contents)
+
+    def test_ios_workflows_materialize_before_auth_and_emit_truthful_diagnostics(self) -> None:
+        for name in ("eval-e2e.yml", "eval-ios-app.yml"):
+            with self.subTest(workflow=name):
+                contents = workflow(name)
+                materialize = contents.index("artifacts/materialize.ts")
+                auth = contents.index("utils/shell/check_claude_auth.sh")
+                evaluate = contents.index("ios_agentic/scripts/eval-ios-app.sh")
+                diagnostic = contents.index("artifacts/create_diagnostic_artifact.py")
+                self.assertLess(materialize, auth)
+                self.assertLess(auth, evaluate)
+                self.assertLess(evaluate, diagnostic)
 
     def test_all_producers_use_the_shared_packager_and_stable_names(self) -> None:
         expected = {

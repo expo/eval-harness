@@ -147,6 +147,7 @@ AGENT_MODEL="${AGENT_MODEL:-}" AGENT_REASONING_EFFORT="${AGENT_REASONING_EFFORT:
 MUSE_CLI_VERSION="${MUSE_CLI_VERSION:-}" METRO_MODE="${METRO_MODE:-}" \
 PRD="${PRD:-}" EXPO_MCP_AUTH_STATUS="${EXPO_MCP_AUTH_STATUS:-}" \
 SCENARIO="${SCENARIO:-}" PROMPT_VARIANT="${PROMPT_VARIANT:-}" PROMPT_FILE="${PROMPT_FILE:-}" \
+REQUESTED_PROMPT_VARIANT="${REQUESTED_PROMPT_VARIANT:-}" \
 AUTHOR_APP_AUTHORED_STATUS="${AUTHOR_APP_AUTHORED_STATUS:-not_run}" \
 AUTHOR_EXPO_EXPORT_STATUS="${AUTHOR_EXPO_EXPORT_STATUS:-not_run}" \
 "$PY" - "$ARTIFACT_ROOT/manifest.json" <<'PYEOF'
@@ -187,8 +188,9 @@ manifest = {
     "prd": os.environ.get("PRD") or "dataset/prds/hot_chocolate/prd/mvp.txt",
     "expo_mcp_auth_status": os.environ.get("EXPO_MCP_AUTH_STATUS") or "not_attempted",
     "scenario": os.environ.get("SCENARIO") or None,
-    "prompt_variant": os.environ.get("PROMPT_VARIANT") or "baseline",
-    "prompt_file": os.environ.get("PROMPT_FILE") or "dataset/prompts/baseline.md",
+    "prompt_variant": os.environ.get("PROMPT_VARIANT") or None,
+    "requested_prompt_variant": os.environ.get("REQUESTED_PROMPT_VARIANT") or None,
+    "prompt_file": os.environ.get("PROMPT_FILE") or None,
     "build_health": {
         "app_authored": stage(
             os.environ.get("AUTHOR_APP_AUTHORED_STATUS"), f"{metadata}/logs/c-agent.log"

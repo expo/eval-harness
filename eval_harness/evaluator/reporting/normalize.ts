@@ -535,6 +535,7 @@ function runDetails(
   skill: JsonRecord | null,
   iosManifest: JsonRecord | null,
   authorTelemetry: AuthorTraceTelemetry,
+  inputs: ReportInputs,
 ): Record<string, unknown> {
   const authorDetails: Record<string, unknown> = {
     agent: stringOrNull(author?.agent),
@@ -553,6 +554,14 @@ function runDetails(
     prd: stringOrNull(author?.prd),
     prompt_variant: stringOrNull(author?.prompt_variant),
     skill_scenario: stringOrNull(skill?.scenario) ?? stringOrNull(author?.scenario),
+    ...(inputs.iosJobStatus === undefined && inputs.skillJobStatus === undefined
+      ? {}
+      : {
+        jobs: {
+          ios: inputs.iosJobStatus ?? null,
+          skill: inputs.skillJobStatus ?? null,
+        },
+      }),
     author: authorDetails,
     evaluator: {
       model: stringOrNull(iosManifest?.evaluator_model),
@@ -789,10 +798,10 @@ async function publishFromCleanStage<T>(
 
 async function normalizeInto(inputs: ReportInputs): Promise<ConsolidatedSummary> {
   const authoredRoot = await ensureArtifactRoot(inputs.authoredArtifact, "authored");
-  const skillRoot = inputs.skillArtifact === null
+  const skillRoot = inputs.skillArtifact === null || inputs.skillJobStatus === "skipped"
     ? null
     : await ensureArtifactRoot(inputs.skillArtifact, "skill");
-  const iosRoot = inputs.iosArtifact === null
+  const iosRoot = inputs.iosArtifact === null || inputs.iosJobStatus === "skipped"
     ? null
     : await ensureArtifactRoot(inputs.iosArtifact, "iOS");
 
@@ -801,6 +810,28 @@ async function normalizeInto(inputs: ReportInputs): Promise<ConsolidatedSummary>
 
   const warnings: string[] = [];
   let status: ConsolidatedSummary["status"] = "complete";
+
+  const applyJobStatus = (
+    label: "iOS evaluator" | "skill evaluator",
+    jobStatus: ReportInputs["iosJobStatus"],
+    artifactRoot: string | null,
+  ): void => {
+    if (jobStatus === "failure") {
+      status = "failed";
+      warnings.push(
+        artifactRoot === null
+          ? `${label} job failed and produced no usable artifact`
+          : `${label} job failed`,
+      );
+    } else if (jobStatus === "success" && artifactRoot === null) {
+      status = "failed";
+      warnings.push(`successful ${label} job artifact is unavailable`);
+    } else if (jobStatus === "skipped") {
+      warnings.push(`${label} job was skipped`);
+    }
+  };
+  applyJobStatus("iOS evaluator", inputs.iosJobStatus, iosRoot);
+  applyJobStatus("skill evaluator", inputs.skillJobStatus, skillRoot);
 
   const authorManifest = await readJson(authoredRoot, "manifest.json");
   const authorManifestError = validateManifest(authorManifest, "authored-app");
@@ -911,6 +942,19 @@ async function normalizeInto(inputs: ReportInputs): Promise<ConsolidatedSummary>
   const metrics = skillMetrics?.value ?? null;
   const result = iosResult?.value ?? null;
   const iosHealth = record(iosManifest?.value?.build_health);
+  let evaluatorStage = evaluationStage(
+    iosHealth,
+    result,
+    iosResult?.raw !== null && iosResult !== null,
+    iosResultValid,
+  );
+  if (inputs.iosJobStatus === "failure") {
+    evaluatorStage = stage("evaluation", "failed", "The EAS iOS evaluator job failed.", evaluatorStage.log);
+  } else if (inputs.iosJobStatus === "success" && iosRoot === null) {
+    evaluatorStage = stage("evaluation", "failed", "The successful EAS iOS evaluator job artifact is unavailable.");
+  } else if (inputs.iosJobStatus === "skipped") {
+    evaluatorStage = stage("evaluation", "not_run", "The EAS iOS evaluator job was disabled.");
+  }
   const buildHealth: BuildHealthStage[] = [
     authoredStage,
     producerStage("dependency_install", iosHealth?.dependency_install),
@@ -918,12 +962,7 @@ async function normalizeInto(inputs: ReportInputs): Promise<ConsolidatedSummary>
     expoExportStage(metrics, authorHealth),
     producerStage("native_build", iosHealth?.native_build),
     producerStage("app_launch", iosHealth?.app_launch),
-    evaluationStage(
-      iosHealth,
-      result,
-      iosResult?.raw !== null && iosResult !== null,
-      iosResultValid,
-    ),
+    evaluatorStage,
   ];
 
   if (buildHealth.some((item) => item.status === "failed")) status = "failed";
@@ -954,9 +993,10 @@ async function normalizeInto(inputs: ReportInputs): Promise<ConsolidatedSummary>
   const summary: ConsolidatedSummary = {
     schema_version: 1,
     status,
-    run: runDetails(author, metrics, iosManifest?.value ?? null, authorTelemetry),
+    run: runDetails(author, metrics, iosManifest?.value ?? null, authorTelemetry, inputs),
     scores: {
-      ios_macro_pct: iosResultValid && result?.status === "completed" &&
+      ios_macro_pct: inputs.iosJobStatus !== "failure" && inputs.iosJobStatus !== "skipped" &&
+          iosResultValid && result?.status === "completed" &&
           !allIosPlansNotApplicable(result) &&
           [buildHealth[1], buildHealth[4], buildHealth[5]].every(
             (item) => item?.status === "passed",
@@ -964,8 +1004,12 @@ async function normalizeInto(inputs: ReportInputs): Promise<ConsolidatedSummary>
           (buildHealth[6]?.status === "passed" || buildHealth[6]?.status === "warning")
         ? finiteNumberOrNull(result.macro_avg_pct)
         : null,
-      skill_trigger_recall: finiteNumberOrNull(triggerQuality?.recall),
-      skill_uptake_rate: finiteNumberOrNull(contextUptake?.uptake_rate),
+      skill_trigger_recall: inputs.skillJobStatus === "failure" || inputs.skillJobStatus === "skipped"
+        ? null
+        : finiteNumberOrNull(triggerQuality?.recall),
+      skill_uptake_rate: inputs.skillJobStatus === "failure" || inputs.skillJobStatus === "skipped"
+        ? null
+        : finiteNumberOrNull(contextUptake?.uptake_rate),
     },
     build_health: buildHealth,
     skills: normalizedSkills(skillMetricsValid ? metrics : null),
@@ -1010,10 +1054,10 @@ async function normalizeInto(inputs: ReportInputs): Promise<ConsolidatedSummary>
 
 export async function normalizeRun(inputs: ReportInputs): Promise<ConsolidatedSummary> {
   const authoredRoot = await ensureArtifactRoot(inputs.authoredArtifact, "authored");
-  const skillRoot = inputs.skillArtifact === null
+  const skillRoot = inputs.skillArtifact === null || inputs.skillJobStatus === "skipped"
     ? null
     : await ensureArtifactRoot(inputs.skillArtifact, "skill");
-  const iosRoot = inputs.iosArtifact === null
+  const iosRoot = inputs.iosArtifact === null || inputs.iosJobStatus === "skipped"
     ? null
     : await ensureArtifactRoot(inputs.iosArtifact, "iOS");
   const roots = [authoredRoot, skillRoot, iosRoot].filter(
@@ -1025,6 +1069,8 @@ export async function normalizeRun(inputs: ReportInputs): Promise<ConsolidatedSu
       skillArtifact: skillRoot,
       iosArtifact: iosRoot,
       outDir: stagingDir,
+      ...(inputs.skillJobStatus === undefined ? {} : { skillJobStatus: inputs.skillJobStatus }),
+      ...(inputs.iosJobStatus === undefined ? {} : { iosJobStatus: inputs.iosJobStatus }),
     })
   );
 }
@@ -1411,10 +1457,10 @@ export async function normalizeRunWithEvidence(
   renderer: (summary: ConsolidatedSummary) => string = renderReport,
 ): Promise<ConsolidatedSummary> {
   const authoredRoot = await ensureArtifactRoot(inputs.authoredArtifact, "authored");
-  const skillRoot = inputs.skillArtifact === null
+  const skillRoot = inputs.skillArtifact === null || inputs.skillJobStatus === "skipped"
     ? null
     : await ensureArtifactRoot(inputs.skillArtifact, "skill");
-  const iosRoot = inputs.iosArtifact === null
+  const iosRoot = inputs.iosArtifact === null || inputs.iosJobStatus === "skipped"
     ? null
     : await ensureArtifactRoot(inputs.iosArtifact, "iOS");
   const roots = [authoredRoot, skillRoot, iosRoot].filter(
@@ -1426,6 +1472,8 @@ export async function normalizeRunWithEvidence(
       skillArtifact: skillRoot,
       iosArtifact: iosRoot,
       outDir: stagingDir,
+      ...(inputs.skillJobStatus === undefined ? {} : { skillJobStatus: inputs.skillJobStatus }),
+      ...(inputs.iosJobStatus === undefined ? {} : { iosJobStatus: inputs.iosJobStatus }),
     });
     if (iosRoot !== null) {
       await copyScreenshotEvidenceInto(summary, iosRoot, stagingDir);
