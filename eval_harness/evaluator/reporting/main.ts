@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 
 import { normalizeRunWithEvidence } from "./normalize.ts";
+import { renderReport } from "./render.ts";
 import type { ReportInputs } from "./types.ts";
 
 const HELP = `usage: bun eval_harness/evaluator/reporting/main.ts \\
@@ -52,8 +53,8 @@ export function parseArgs(argv: string[]): ReportInputs | 2 | 0 {
 export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
   const inputs = parseArgs(argv);
   if (typeof inputs === "number") return inputs;
-  await normalizeRunWithEvidence(inputs);
-  process.stdout.write(`eval report machine data: ${inputs.outDir}\n`);
+  await normalizeRunWithEvidence(inputs, renderReport);
+  process.stdout.write(`eval report: ${inputs.outDir}\n`);
   return 0;
 }
 

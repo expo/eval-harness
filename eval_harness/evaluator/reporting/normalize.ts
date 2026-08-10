@@ -29,6 +29,7 @@ import type {
   ReportInputs,
   StageStatus,
 } from "./types.ts";
+import { renderReport } from "./render.ts";
 
 type JsonRecord = Record<string, unknown>;
 type ReadJsonResult = {
@@ -461,18 +462,26 @@ function runDetails(
   author: JsonRecord | null,
   skill: JsonRecord | null,
   iosManifest: JsonRecord | null,
+  authorTelemetry: AuthorTraceTelemetry,
 ): Record<string, unknown> {
+  const authorDetails: Record<string, unknown> = {
+    agent: stringOrNull(author?.agent),
+    model: stringOrNull(author?.agent_model),
+    effort: stringOrNull(author?.agent_reasoning_effort),
+  };
+  const cliVersion = authorTelemetry.cliVersion ?? stringOrNull(author?.muse_cli_version);
+  if (cliVersion !== null) authorDetails.cli_version = cliVersion;
+  if (authorTelemetry.toolCalls !== null) authorDetails.tool_calls = authorTelemetry.toolCalls;
+  if (authorTelemetry.skillReads.length > 0) {
+    authorDetails.skill_reads = authorTelemetry.skillReads;
+  }
   return {
     run_id: stringOrNull(author?.run_id),
     git_sha: stringOrNull(author?.git_sha),
     prd: stringOrNull(author?.prd),
     prompt_variant: stringOrNull(author?.prompt_variant),
     skill_scenario: stringOrNull(skill?.scenario) ?? stringOrNull(author?.scenario),
-    author: {
-      agent: stringOrNull(author?.agent),
-      model: stringOrNull(author?.agent_model),
-      effort: stringOrNull(author?.agent_reasoning_effort),
-    },
+    author: authorDetails,
     evaluator: {
       model: stringOrNull(iosManifest?.evaluator_model),
       effort: stringOrNull(iosManifest?.evaluator_reasoning_effort),
@@ -543,31 +552,69 @@ export function validateConsolidatedSummary(
   }
 }
 
-async function authorUsage(root: string, manifest: JsonRecord | null): Promise<Record<string, number | null>> {
+type AuthorTraceTelemetry = {
+  usage: Record<string, number | null>;
+  toolCalls: number | null;
+  skillReads: string[];
+  cliVersion: string | null;
+};
+
+async function authorTraceTelemetry(
+  root: string,
+  manifest: JsonRecord | null,
+): Promise<AuthorTraceTelemetry> {
+  const unavailable = (): AuthorTraceTelemetry => ({
+    usage: {},
+    toolCalls: null,
+    skillReads: [],
+    cliVersion: null,
+  });
   const tracePath = stringOrNull(record(manifest?.artifacts)?.author_trace);
-  if (tracePath === null) return {};
+  if (tracePath === null) return unavailable();
   try {
     const traceBytes = await secureRegularBytes(root, tracePath, "author trace", true);
-    if (traceBytes === null) return {};
+    if (traceBytes === null) return unavailable();
     const trace = JSON.parse(traceBytes.toString("utf8")) as unknown;
     const traceRecord = record(trace);
     const sessions = Array.isArray(traceRecord?.sessions) ? traceRecord.sessions : [];
     const totals: Record<string, number> = {};
+    const skillReads = new Set<string>();
+    let toolCalls = 0;
+    let cliVersion: string | null = null;
     for (const rawSession of sessions) {
       const session = record(rawSession);
+      cliVersion ??= stringOrNull(record(session?.session_meta)?.cli_version);
       const turns = Array.isArray(session?.turns) ? session.turns : [];
       for (const rawTurn of turns) {
-        for (const [key, value] of Object.entries(numericUsage(record(rawTurn)?.total_usage))) {
+        const turn = record(rawTurn);
+        for (const [key, value] of Object.entries(numericUsage(turn?.total_usage))) {
           if (value !== null) totals[key] = (totals[key] ?? 0) + value;
+        }
+        const steps = Array.isArray(turn?.steps) ? turn.steps : [];
+        for (const rawStep of steps) {
+          const step = record(rawStep);
+          const calls = Array.isArray(step?.tool_calls)
+            ? step.tool_calls as unknown[]
+            : [];
+          toolCalls += calls.length;
+          for (const rawCall of calls) {
+            const call = record(rawCall);
+            const skillId = call?.name === "Skill"
+              ? stringOrNull(record(call.args)?.skill)
+              : null;
+            if (skillId !== null && !skillId.startsWith("bundled:")) {
+              skillReads.add(skillId);
+            }
+          }
         }
       }
     }
-    return totals;
+    return { usage: totals, toolCalls, skillReads: [...skillReads], cliVersion };
   } catch (error) {
     if (error instanceof Error && error.message.startsWith("unsafe author trace")) {
       throw error;
     }
-    return {};
+    return unavailable();
   }
 }
 
@@ -828,10 +875,11 @@ async function normalizeInto(inputs: ReportInputs): Promise<ConsolidatedSummary>
   const skillScore = skillMetricsValid ? record(metrics?.score) : null;
   const triggerQuality = record(skillScore?.trigger_quality);
   const contextUptake = record(skillScore?.context_uptake);
+  const authorTelemetry = await authorTraceTelemetry(authoredRoot, author);
   const summary: ConsolidatedSummary = {
     schema_version: 1,
     status,
-    run: runDetails(author, metrics, iosManifest?.value ?? null),
+    run: runDetails(author, metrics, iosManifest?.value ?? null, authorTelemetry),
     scores: {
       ios_macro_pct: iosResultValid && result?.status === "completed" &&
           !allIosPlansNotApplicable(result) &&
@@ -848,7 +896,7 @@ async function normalizeInto(inputs: ReportInputs): Promise<ConsolidatedSummary>
     skills: normalizedSkills(skillMetricsValid ? metrics : null),
     ios: { test_plans: normalizedPlans(iosResultValid ? result : null) },
     usage: {
-      author: await authorUsage(authoredRoot, author),
+      author: authorTelemetry.usage,
       evaluator: await evaluatorUsage(iosRoot, iosManifest?.value ?? null),
     },
     warnings,
@@ -1303,6 +1351,7 @@ export async function copyScreenshotEvidence(
 
 export async function normalizeRunWithEvidence(
   inputs: ReportInputs,
+  renderer: (summary: ConsolidatedSummary) => string = renderReport,
 ): Promise<ConsolidatedSummary> {
   const authoredRoot = await ensureArtifactRoot(inputs.authoredArtifact, "authored");
   const skillRoot = inputs.skillArtifact === null
@@ -1325,6 +1374,7 @@ export async function normalizeRunWithEvidence(
       await copyScreenshotEvidenceInto(summary, iosRoot, stagingDir);
     }
     validateConsolidatedSummary(summary);
+    await writeFile(join(stagingDir, "report.html"), renderer(summary), "utf8");
     return summary;
   });
 }

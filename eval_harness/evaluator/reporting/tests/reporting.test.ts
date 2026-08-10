@@ -22,6 +22,7 @@ import {
   validateConsolidatedSummary,
 } from "../normalize.ts";
 import { parseArgs } from "../main.ts";
+import { renderReport } from "../render.ts";
 import type { ConsolidatedSummary, ReportInputs } from "../types.ts";
 
 const FIXTURES = join(import.meta.dir, "fixtures");
@@ -742,9 +743,22 @@ describe("normalizeRun", () => {
       ),
       {
         sessions: [{
+          session_meta: { cli_version: "0.1.0-R708.1" },
           turns: [
-            { total_usage: { prompt_tokens: 4, completion_tokens: 2 } },
-            { total_usage: { prompt_tokens: 3, completion_tokens: 1, ignored: "7" } },
+            {
+              total_usage: { prompt_tokens: 4, completion_tokens: 2 },
+              steps: [{ tool_calls: [
+                { name: "bash", args: { command: "bun install" } },
+                { name: "Skill", args: { skill: "expo-router" } },
+              ] }],
+            },
+            {
+              total_usage: { prompt_tokens: 3, completion_tokens: 1, ignored: "7" },
+              steps: [{ tool_calls: [
+                { name: "Skill", args: { skill: "expo-router" } },
+                { name: "Skill", args: { skill: "bundled:read-session" } },
+              ] }],
+            },
           ],
         }],
       },
@@ -776,6 +790,14 @@ describe("normalizeRun", () => {
       input_tokens: 12,
       output_tokens: 6,
       total_cost_usd: 0.25,
+    });
+    expect(summary.run.author).toEqual({
+      agent: "muse-code",
+      model: "muse-spark-1.2",
+      effort: "high",
+      cli_version: "0.1.0-R708.1",
+      tool_calls: 4,
+      skill_reads: ["expo-router"],
     });
   });
 
@@ -866,8 +888,8 @@ describe("reporting CLI", () => {
     });
   });
 
-  test("writes the machine-data artifact through the real Bun entrypoint", () => {
-    // Catches the exported adapter working while the documented executable CLI is broken.
+  test("writes the exact complete artifact through the real Bun entrypoint", () => {
+    // Catches the CLI omitting the human report or leaking stale/non-contract files.
     const root = tempRoot();
     const args = inputs(root);
     const result = Bun.spawnSync([
@@ -884,6 +906,156 @@ describe("reporting CLI", () => {
     expect(readJson(join(args.outDir, "manifest.json"))).toEqual(
       expect.objectContaining({ artifact_type: "eval-report", run_id: "run-fixture-1" }),
     );
+    expect(readdirSync(args.outDir).sort()).toEqual([
+      "data", "evidence", "manifest.json", "report.html", "summary.json",
+    ]);
+    expect(readFileSync(join(args.outDir, "report.html"), "utf8"))
+      .toContain("Build and evaluation ladder");
+  });
+
+  test("atomically replaces stale report files and includes report.html", async () => {
+    // Catches report rendering happening after publication or stale files surviving a rerun.
+    const root = tempRoot();
+    const args = inputs(root);
+    await normalizeRunWithEvidence(args);
+    writeFileSync(join(args.outDir, "stale.log"), "stale");
+    writeFileSync(join(args.outDir, "report.html"), "stale report");
+
+    await normalizeRunWithEvidence(args);
+
+    expect(readdirSync(args.outDir).sort()).toEqual([
+      "data", "evidence", "manifest.json", "report.html", "summary.json",
+    ]);
+    expect(readFileSync(join(args.outDir, "report.html"), "utf8"))
+      .not.toContain("stale report");
+  });
+
+  test("preserves the prior report when rendering fails inside publication", async () => {
+    // Catches a render failure replacing a complete prior artifact with a partial directory.
+    const root = tempRoot();
+    const args = inputs(root);
+    await normalizeRunWithEvidence(args);
+    const priorReport = readFileSync(join(args.outDir, "report.html"), "utf8");
+    const priorSummary = readFileSync(join(args.outDir, "summary.json"), "utf8");
+
+    await expect(normalizeRunWithEvidence(args, () => {
+      throw new Error("synthetic render failure");
+    })).rejects.toThrow("synthetic render failure");
+
+    expect(readFileSync(join(args.outDir, "report.html"), "utf8")).toBe(priorReport);
+    expect(readFileSync(join(args.outDir, "summary.json"), "utf8")).toBe(priorSummary);
+  });
+});
+
+describe("renderReport", () => {
+  async function fixtureSummary(): Promise<ConsolidatedSummary> {
+    const root = tempRoot();
+    const args = inputs(root);
+    const summary = await normalizeRun(args);
+    const plan = summary.ios.test_plans[0] as Record<string, unknown>;
+    const steps = plan.steps as Array<Record<string, unknown>>;
+    steps[0]!.screenshot = "evidence/screenshots/test-insert-run-01-step-01.png";
+    steps[1]!.screenshot = "evidence/screenshots/test-insert-run-01-step-02.png";
+    const author = (summary.run.author as Record<string, unknown>);
+    author.cli_version = "Muse Code 0.1.0";
+    author.tool_calls = 14;
+    author.skill_reads = ["expo-router", "expo-native-ui"];
+    return summary;
+  }
+
+  test("renders the approved postmortem hierarchy and explicit status text", async () => {
+    // Catches a generic dashboard replacing the ordered dossier and status-readable run spine.
+    const summary = await fixtureSummary();
+    summary.build_health[0]!.status = "failed";
+    summary.build_health[1]!.status = "warning";
+    summary.build_health[2]!.status = "passed";
+    summary.build_health[4]!.status = "not_run";
+
+    const html = renderReport(summary);
+    const headings: Array<[string, string]> = [
+      ["Build and evaluation ladder", '<h2 id="ladder-title">Build and evaluation ladder</h2>'],
+      ["Skill use", '<h2 id="results-title">Skill use</h2>'],
+      ["iOS behavior", "<h3>iOS behavior</h3>"],
+      ["Visual evidence", '<h2 id="evidence-title">Visual evidence</h2>'],
+      ["Evaluation details", '<h2 id="details-title">Evaluation details</h2>'],
+      ["Run telemetry and provenance", '<h2 id="telemetry-title">Run telemetry and provenance</h2>'],
+    ];
+    for (const [, token] of headings) expect(html).toContain(token);
+    for (let index = 1; index < headings.length; index += 1) {
+      expect(html.indexOf(headings[index - 1]![1])).toBeLessThan(html.indexOf(headings[index]![1]));
+    }
+    expect(html).toContain("Failed");
+    expect(html).toContain("Warning");
+    expect(html).toContain("Passed");
+    expect(html).toContain("Not run");
+    expect(html).toContain("iOS quality");
+    expect(html).toContain("Skill recall");
+    expect(html).toContain("Skill uptake");
+    expect(html).toContain("Run status");
+  });
+
+  test("places failed final-state evidence before passing evidence", async () => {
+    // Catches successful previews obscuring the failure evidence collaborators need first.
+    const html = renderReport(await fixtureSummary());
+
+    expect(html.indexOf("FAILED: Persist the note"))
+      .toBeLessThan(html.indexOf("PASSED: Insert a note"));
+    expect(html.indexOf("Failed final state"))
+      .toBeLessThan(html.indexOf("Passed final state"));
+  });
+
+  test("escapes adversarial data and emits no executable or remote content", async () => {
+    // Catches producer-controlled values breaking out of text or attribute contexts.
+    const summary = await fixtureSummary();
+    summary.run.prd = '<img src=x onerror=alert(1)>';
+    summary.run.git_sha = '</style><script>alert("x")</script>';
+    summary.warnings.push('<img src=x onerror=alert(1)>');
+    const plan = summary.ios.test_plans[0] as Record<string, unknown>;
+    const steps = plan.steps as Array<Record<string, unknown>>;
+    steps[0]!.description = 'Passed "quoted" <svg/onload=alert(1)>';
+    steps[0]!.screenshot = 'evidence/screenshots/final" onerror="alert(1).png';
+
+    const html = renderReport(summary);
+
+    expect(html).toContain("&lt;img src=x onerror=alert(1)&gt;");
+    expect(html).toContain("&lt;/style&gt;&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;");
+    expect(html).toContain("&quot; onerror=&quot;");
+    expect(html.toLowerCase()).not.toContain("<script");
+    expect(html).not.toContain("http://");
+    expect(html).not.toContain("https://");
+  });
+
+  test("uses only relative screenshot URLs and explains their evidentiary limit", async () => {
+    // Catches evidence links depending on a server or being presented as model-visible proof.
+    const html = renderReport(await fixtureSummary());
+    const sources = [...html.matchAll(/<img\b[^>]*\bsrc="([^"]+)"/g)]
+      .map((match) => match[1]);
+
+    expect(sources).toEqual([
+      "evidence/screenshots/test-insert-run-01-step-02.png",
+      "evidence/screenshots/test-insert-run-01-step-01.png",
+    ]);
+    expect(sources.every((source) =>
+      source !== undefined && !source.startsWith("/") && !source.includes("://")
+    )).toBe(true);
+    expect(html).toContain("human final-state context");
+    expect(html).toContain("accessibility and structured state");
+    expect(html).toContain("cannot inspect captured image pixels today");
+  });
+
+  test("renders expandable detail and available telemetry without scripts", async () => {
+    // Catches drill-down and provenance being dropped from the collaborator-facing report.
+    const html = renderReport(await fixtureSummary());
+
+    expect(html).toContain("<details");
+    expect(html).toContain("Tool calls");
+    expect(html).toContain("14");
+    expect(html).toContain("Skill reads");
+    expect(html).toContain("expo-router");
+    expect(html).toContain("Versions");
+    expect(html).toContain("Muse Code 0.1.0");
+    expect(html).toContain("Machine data paths");
+    expect(html.toLowerCase()).not.toContain("<script");
   });
 });
 
