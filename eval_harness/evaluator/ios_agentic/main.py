@@ -31,7 +31,6 @@ from pathlib import Path
 
 warnings.filterwarnings("ignore", message="urllib3 v2 only supports OpenSSL")
 
-from .maestro.evaluator import MaestroEvaluator
 from .agent_device.evaluator import AgentDeviceEvaluator
 from .core.scoring import TestPlanResult
 from .report import write_html_report
@@ -325,8 +324,8 @@ def _run_suite(
     return output, 0 if output["status"] == "completed" else 1
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description="Adaptive Maestro Evaluator")
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Adaptive iOS App Evaluator")
     parser.add_argument(
         "test_path", type=Path, nargs="*",
         help="Path(s) to a test plan .txt file or directory of test plans. When omitted, the "
@@ -345,7 +344,13 @@ def main() -> int:
     )
     parser.add_argument("-o", "--output", type=Path, default=Path("evaluation-finished.json"), help="Output JSON path")
     parser.add_argument("-p", "--platform", choices=["ios", "android"], default="ios")
-    parser.add_argument("-d", "--driver", choices=["maestro", "agent-device"], default="maestro", help="Device automation driver")
+    parser.add_argument(
+        "-d",
+        "--driver",
+        choices=["agent-device"],
+        default="agent-device",
+        help="Device automation driver (Maestro remains available only as the optional restart fallback)",
+    )
     parser.add_argument("--max-iterations", type=int, default=50, help="Max turns per formal (scored) step")
     parser.add_argument("--seed-iterations", type=int, default=100,
                         help="Max turns for the pre-flight seed phase that runs the test plan's "
@@ -371,7 +376,11 @@ def main() -> int:
                              "generic test plans that rely on the PRD for app-specific context (credentials, screens, "
                              "fixtures).")
     parser.add_argument("--verbose", action="store_true")
-    args = parser.parse_args()
+    return parser
+
+
+def main() -> int:
+    args = _build_parser().parse_args()
 
     if args.prd and not args.prd.exists():
         print(f"Error: --prd path does not exist: {args.prd}")
@@ -396,21 +405,12 @@ def main() -> int:
         timeout=args.timeout,
         verbose=args.verbose,
     )
-    if args.driver == "agent-device":
-        evaluator = AgentDeviceEvaluator(
-            **evaluator_kwargs,
-            prd_path=args.prd,
-            hybrid_restart=args.hybrid_restart,
-            seed_iterations=args.seed_iterations,
-        )
-    else:
-        if args.hybrid_restart:
-            print("Note: --hybrid-restart is only applicable to -d agent-device; ignored.")
-        evaluator = MaestroEvaluator(
-            **evaluator_kwargs,
-            prd_path=args.prd,
-            seed_iterations=args.seed_iterations,
-        )
+    evaluator = AgentDeviceEvaluator(
+        **evaluator_kwargs,
+        prd_path=args.prd,
+        hybrid_restart=args.hybrid_restart,
+        seed_iterations=args.seed_iterations,
+    )
 
     output, exit_code = _run_suite(
         evaluator=evaluator,

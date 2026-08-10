@@ -95,12 +95,22 @@ class AgentDeviceEvaluator:
         return asyncio.run(self._evaluate_test_plan_async(test_plan_path))
 
     async def _evaluate_test_plan_async(self, test_plan_path: Path) -> TestPlanResult:
-        plan = parse_test_plan(test_plan_path)
-        result = TestPlanResult(score=0, full_points=plan["full_points"])
-
         tracer = Tracer(plan_stem=test_plan_path.stem, root=_trace_root_for(test_plan_path))
         os.environ["EVAL_SCREENSHOT_DIR"] = str(tracer.root / "screenshots")
         tracer.capture_console()
+        try:
+            return await self._evaluate_test_plan_inner_async(test_plan_path, tracer)
+        finally:
+            tracer.close()
+
+    async def _evaluate_test_plan_inner_async(
+        self,
+        test_plan_path: Path,
+        tracer: Tracer,
+    ) -> TestPlanResult:
+        plan = parse_test_plan(test_plan_path)
+        result = TestPlanResult(score=0, full_points=plan["full_points"])
+
         tracer.log(
             "plan_start",
             plan=test_plan_path.name,
@@ -143,7 +153,6 @@ class AgentDeviceEvaluator:
             result.status = "evaluator_error"
             result.error_stage = "restart"
             result.error_reason = err
-            tracer.close()
             return result
 
         # Build the SDK options. Tools are an MCP server; hooks track per-tool durations.
@@ -224,7 +233,6 @@ class AgentDeviceEvaluator:
                         category=state.abort_category,
                         error=state.abort_reason,
                     )
-                    tracer.close()
                     return result
 
                 if not state.completed:
@@ -236,7 +244,6 @@ class AgentDeviceEvaluator:
                         reason="seed_ended_without_terminal_tool",
                         error=result.error_reason,
                     )
-                    tracer.close()
                     return result
 
                 # N/A short-circuit: if the seed-phase complete_step summary
@@ -257,7 +264,6 @@ class AgentDeviceEvaluator:
                         reason="legacy_setup_blocked",
                         error=seed_summary,
                     )
-                    tracer.close()
                     return result
                 if state.completed and seed_summary.upper().startswith("N/A"):
                     print(f"\n{'='*60}")
@@ -272,7 +278,6 @@ class AgentDeviceEvaluator:
                     result.not_applicable = True
                     result.status = "not_applicable"
                     result.na_reason = seed_summary
-                    tracer.close()
                     return result
 
             # ----- Formal steps loop (scored) -----
@@ -323,7 +328,6 @@ class AgentDeviceEvaluator:
                         category=state.abort_category,
                         error=result.error_reason,
                     )
-                    tracer.close()
                     return result
 
                 step_result = score_step(step, state.assertions, state.soft_assertions, state.completed, state.turns_used)
@@ -376,7 +380,6 @@ class AgentDeviceEvaluator:
                 for s in result.steps
             ],
         })
-        tracer.close()
         return result
 
     # ----- Message processing -----

@@ -5,12 +5,28 @@ from pathlib import Path
 
 from eval_harness.evaluator.ios_agentic.main import (
     _app_name_from_prd,
+    _build_parser,
     _find_test_plans,
     _resolve_test_plans_from_prd,
 )
 
 
 class TestPlanResolutionTests(unittest.TestCase):
+    def test_spec_cli_defaults_to_supported_agent_device_evaluator(self):
+        """Specification: the public CLI selects the production evaluator.
+
+        Oracle: agent-device owns the current outcome, abort, and interruption
+        contracts; Maestro remains an internal restart fallback only.
+        Catches: successful default evaluations serialized as infrastructure errors.
+        """
+        args = _build_parser().parse_args([])
+
+        self.assertEqual(args.driver, "agent-device")
+
+    def test_spec_cli_rejects_legacy_maestro_evaluator_mode(self):
+        with self.assertRaises(SystemExit):
+            _build_parser().parse_args(["--driver", "maestro"])
+
     def test_app_name_from_prd_extracts_app_segment(self):
         self.assertEqual(_app_name_from_prd("dataset/prds/notes/prd/mvp.txt"), "notes")
         self.assertIsNone(_app_name_from_prd("some/other/path.txt"))

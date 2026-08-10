@@ -29,6 +29,10 @@ class CollectArtifactsTests(unittest.TestCase):
             evaluator.mkdir()
             telemetry.mkdir()
 
+            stale_pod = output / "bundle" / "app" / "ios" / "Pods" / "stale.bin"
+            stale_pod.parent.mkdir(parents=True)
+            stale_pod.write_text("inherited build cache", encoding="utf-8")
+
             keep = [
                 workspace / "App.tsx",
                 workspace / "package.json",
@@ -86,6 +90,7 @@ class CollectArtifactsTests(unittest.TestCase):
             for derived_path in exclude:
                 relative = derived_path.relative_to(workspace)
                 self.assertFalse((bundle_app / relative).exists(), relative)
+            self.assertFalse(stale_pod.exists(), "stale bundle content must be removed")
             self.assertTrue((output / "bundle" / "eval" / "result.json").is_file())
             self.assertTrue((output / "bundle" / "logs" / "s7-eval.log").is_file())
 

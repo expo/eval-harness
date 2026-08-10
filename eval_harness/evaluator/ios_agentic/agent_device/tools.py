@@ -13,6 +13,7 @@ The Maestro path requires the LLM to `tap_element` first then `fill_field` with
 just `{text}`. Everything else looks identical to the model.
 """
 
+import os
 from typing import Any
 
 from claude_agent_sdk import tool, create_sdk_mcp_server
@@ -269,19 +270,27 @@ def build_tools(ctx: ToolContext):
     @tool(
         "restart_app",
         "Restart the app on the device. Use this when the app is in an unrecoverable "
-        "state, or when you see no targetable elements on screen. On Expo dev-client "
-        "runs this performs a clean reset that clears app data before relaunching, "
-        "because process-only restarts can strand dev-client in its launcher. On "
-        "non-dev-client runs it only restarts the process. Returns once the app is "
-        "back on screen; after a clean reset, re-navigate/re-seed any state you need.",
+        "state, or when you see no targetable elements on screen. The harness chooses "
+        "the safe lifecycle for the current build mode. App data is normally preserved; "
+        "a dev-client run clears it only when the workflow explicitly enables that "
+        "behavior. Returns once the app is back on screen. Always capture the screen "
+        "afterward and determine the actual state before navigating or seeding.",
         {},
     )
     async def restart_app(args: dict) -> dict:
         deep_link = ctx.bridge.config.get("deep_link", "")
-        clear_state = "expo-development-client" in deep_link
-        r = ctx.bridge.restart_app(clear_state=clear_state)
+        is_dev_client = "expo-development-client" in deep_link
+        request_clear_state = is_dev_client
+        actually_clears_state = (
+            is_dev_client and os.environ.get("EVAL_DEV_CLIENT_CLEAR_STATE") == "1"
+        )
+        r = ctx.bridge.restart_app(clear_state=request_clear_state)
         if r.success:
-            return _ok("app restarted with clean reset" if clear_state else "app restarted")
+            state_effect = "cleared" if actually_clears_state else "preserved"
+            return _ok(
+                f"app restarted; app data was {state_effect}; "
+                "capture_screen to determine the current state"
+            )
         return _err(f"restart_app failed: {r.error or r.output[:200]}")
 
     # ----- Verify: hard assertions (engine executes) -----

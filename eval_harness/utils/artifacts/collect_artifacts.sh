@@ -138,6 +138,10 @@ esac
 
 # --- 2. built app tree (exclude heavy/derived dirs) ---
 if [ -d "$WORKSPACE" ]; then
+  # Replays can inherit an earlier bundle/app tree. Recreate this owned
+  # destination so excluded build caches cannot survive from that snapshot.
+  rm -rf "$BUNDLE/app"
+  mkdir -p "$BUNDLE/app"
   if command -v rsync >/dev/null 2>&1; then
     rsync -a \
       --exclude node_modules --exclude .expo --exclude .git \

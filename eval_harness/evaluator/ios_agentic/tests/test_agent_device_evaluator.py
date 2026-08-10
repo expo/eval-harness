@@ -24,9 +24,14 @@ class FailedRestartBridge:
 
 
 class RecordingTracer:
+    latest = None
+
     def __init__(self, *args, **kwargs) -> None:
+        type(self).latest = self
         self.root = Path("/tmp/test-ios-evaluator-trace")
         self.events: list[tuple[str, dict]] = []
+        self.close_calls = 0
+        self.start_time = 0.0
 
     def capture_console(self) -> None:
         return None
@@ -35,7 +40,7 @@ class RecordingTracer:
         self.events.append((event, fields))
 
     def close(self) -> None:
-        return None
+        self.close_calls += 1
 
 
 class RecordingTurnAggregator:
@@ -86,6 +91,31 @@ class CompletionStreamClient:
         yield sdk_result()
 
 
+class SuccessfulRestartBridge(FailedRestartBridge):
+    def restart_app(self, clear_state: bool = False) -> AgentDeviceResult:
+        return AgentDeviceResult(success=True, output="ready")
+
+
+class SuccessfulDevClientRestartBridge(SuccessfulRestartBridge):
+    config = {
+        "deep_link": (
+            "example://expo-development-client/"
+            "?url=http%3A%2F%2Flocalhost%3A8081"
+        )
+    }
+
+
+class FailingSdkClient:
+    def __init__(self, *args, **kwargs) -> None:
+        pass
+
+    async def __aenter__(self):
+        raise RuntimeError("SDK connection failed")
+
+    async def __aexit__(self, exc_type, exc, traceback) -> None:
+        return None
+
+
 async def call_mcp_tool(server: dict, name: str, arguments: dict):
     instance = server["instance"]
     handler = instance.request_handlers[mcp_types.CallToolRequest]
@@ -130,8 +160,62 @@ class AgentDeviceEvaluatorOutcomeTests(unittest.TestCase):
         self.assertEqual(result.score, 0)
         self.assertEqual(result.steps, [])
 
+    def test_regression_unexpected_sdk_exception_closes_plan_tracer(self) -> None:
+        """Regression: plan-local tracing releases console ownership on errors.
+
+        Oracle: every acquired tracer is closed regardless of SDK outcome.
+        Catches: redirected stdout/stderr and open trace files leaking into later plans.
+        """
+        evaluator = AgentDeviceEvaluator.__new__(AgentDeviceEvaluator)
+        evaluator.platform = "ios"
+        evaluator.hybrid_restart = False
+        evaluator.bridge = SuccessfulRestartBridge()
+        evaluator.prd_text = ""
+        evaluator.seed_iterations = 200
+        evaluator.max_iterations = 50
+        evaluator.verbose = False
+
+        with (
+            patch(
+                "eval_harness.evaluator.ios_agentic.agent_device.evaluator.parse_test_plan",
+                return_value={"full_points": 0, "steps": [], "seeding": ""},
+            ),
+            patch(
+                "eval_harness.evaluator.ios_agentic.agent_device.evaluator.Tracer",
+                RecordingTracer,
+            ),
+            patch(
+                "eval_harness.evaluator.ios_agentic.agent_device.evaluator.ClaudeSDKClient",
+                FailingSdkClient,
+            ),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "SDK connection failed"):
+                asyncio.run(evaluator._evaluate_test_plan_async(Path("test_empty.txt")))
+
+        self.assertIsNotNone(RecordingTracer.latest)
+        self.assertEqual(RecordingTracer.latest.close_calls, 1)
+
 
 class AgentDeviceEvaluatorLifecycleTests(unittest.TestCase):
+    @patch.dict("os.environ", {}, clear=False)
+    def test_regression_restart_tool_reports_preserved_dev_client_state(self) -> None:
+        """Regression: Claude receives the actual restart semantics.
+
+        Oracle: dev-client container clearing requires EVAL_DEV_CLIENT_CLEAR_STATE=1.
+        Catches: claiming a clean reset and then duplicating persistent seed data.
+        """
+        import os
+
+        os.environ.pop("EVAL_DEV_CLIENT_CLEAR_STATE", None)
+        server, _ = build_tools(ToolContext(SuccessfulDevClientRestartBridge()))
+
+        response = asyncio.run(call_mcp_tool(server, "restart_app", {}))
+
+        self.assertEqual(
+            response.root.content[0].text,
+            "app restarted; app data was preserved; capture_screen to determine the current state",
+        )
+
     def test_regression_complete_step_interrupts_and_ignores_extra_agent_work(self) -> None:
         """Regression: completion stops useful processing at the tool boundary.
 
