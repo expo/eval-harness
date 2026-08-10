@@ -1,14 +1,28 @@
 #!/usr/bin/env bash
 # Package one canonical artifact directory and optionally mirror that exact
 # archive to GCS. The GCS path is deliberately best-effort.
-set -uo pipefail
+set -euo pipefail
 
 PACKAGE_SA_FILE=""
+PACKAGE_GAC_OWNED=0
+PACKAGE_PREVIOUS_GAC=""
+PACKAGE_PREVIOUS_GAC_SET=0
 
 package::cleanup() {
   if [ -n "$PACKAGE_SA_FILE" ]; then
     rm -f -- "$PACKAGE_SA_FILE"
   fi
+  if [ "$PACKAGE_GAC_OWNED" = 1 ]; then
+    if [ "$PACKAGE_PREVIOUS_GAC_SET" = 1 ]; then
+      export GOOGLE_APPLICATION_CREDENTIALS="$PACKAGE_PREVIOUS_GAC"
+    else
+      unset GOOGLE_APPLICATION_CREDENTIALS
+    fi
+  fi
+  PACKAGE_SA_FILE=""
+  PACKAGE_GAC_OWNED=0
+  PACKAGE_PREVIOUS_GAC=""
+  PACKAGE_PREVIOUS_GAC_SET=0
 }
 
 package::artifact() { # source_dir archive_path gcs_object_name
@@ -19,15 +33,16 @@ package::artifact() { # source_dir archive_path gcs_object_name
     echo "artifact source directory does not exist: $source_dir" >&2
     return 2
   fi
-  case "$source_dir" in
-    ""|/) echo "refusing unsafe artifact source: $source_dir" >&2; return 2 ;;
-  esac
   if [ -z "$archive_path" ] || [ -z "$gcs_object_name" ]; then
     echo "archive path and GCS object name must be non-empty" >&2
     return 2
   fi
 
   source_abs="$(cd "$source_dir" && pwd -P)" || return 2
+  if [ "$source_abs" = / ]; then
+    echo "refusing unsafe artifact source: $source_dir" >&2
+    return 2
+  fi
   archive_parent="$(dirname "$archive_path")"
   mkdir -p "$archive_parent" || return 2
   archive_parent="$(cd "$archive_parent" && pwd -P)" || return 2
@@ -50,8 +65,14 @@ package::artifact() { # source_dir archive_path gcs_object_name
   gcs_log="$archive_parent/package-gcs.log"
   PACKAGE_SA_FILE=""
   if [ -n "${GCP_SA_KEY:-}" ]; then
-    PACKAGE_SA_FILE="$archive_parent/.gcp-sa.json"
+    PACKAGE_SA_FILE="$(mktemp "$archive_parent/.gcp-sa.XXXXXX")" || return 2
+    chmod 600 "$PACKAGE_SA_FILE"
     printf '%s' "$GCP_SA_KEY" > "$PACKAGE_SA_FILE"
+    if [ "${GOOGLE_APPLICATION_CREDENTIALS+x}" = x ]; then
+      PACKAGE_PREVIOUS_GAC_SET=1
+      PACKAGE_PREVIOUS_GAC="$GOOGLE_APPLICATION_CREDENTIALS"
+    fi
+    PACKAGE_GAC_OWNED=1
     export GOOGLE_APPLICATION_CREDENTIALS="$PACKAGE_SA_FILE"
   fi
 
@@ -67,7 +88,6 @@ package::artifact() { # source_dir archive_path gcs_object_name
     echo "  ⚠️  neither gcloud nor gsutil is available; skipping GCS mirror"
   fi
   package::cleanup
-  PACKAGE_SA_FILE=""
 
   if [ "$pushed" = 0 ]; then
     echo "  ✅ mirrored gs://$GCS_BUCKET/$gcs_object_name"
@@ -82,6 +102,7 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
     echo "usage: $0 <source_dir> <archive_path> <gcs_object_name>" >&2
     exit 2
   fi
-  trap package::cleanup EXIT HUP INT TERM
+  trap package::cleanup EXIT
+  trap 'package::cleanup; exit 130' HUP INT TERM
   package::artifact "$1" "$2" "$3"
 fi

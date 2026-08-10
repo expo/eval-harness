@@ -146,6 +146,106 @@ printf '%s\n' '{"n_sessions":1,"sessions":[]}' > "$out"
                 f"author-agent-workspace/{run_id}/",
             )
 
+    def test_collector_rejects_artifact_root_outside_repository(self) -> None:
+        """A caller-supplied artifact path must not delete an unrelated directory."""
+        with tempfile.TemporaryDirectory() as td:
+            parent = Path(td)
+            root = parent / "repository"
+            run_id = "path-escape"
+            workspace_root = root / "author-agent-workspace"
+            metadata_root = root / "author-agent-metadata"
+            outside = parent / "caller-owned"
+            write(workspace_root / run_id / "package.json", "{}")
+            write(metadata_root / run_id / "author.env", f"RUN_ID={run_id}\n")
+            write(outside / "sentinel.txt", "keep")
+            fake_bin = root / "bin"
+            write(
+                fake_bin / "bun",
+                """#!/usr/bin/env bash
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "--out" ]; then mkdir -p "$(dirname "$2")"; printf '{}\n' > "$2"; exit; fi
+  shift
+done
+""",
+            )
+            (fake_bin / "bun").chmod(0o755)
+            env = os.environ.copy()
+            env["PATH"] = f"{fake_bin}:{env['PATH']}"
+
+            result = subprocess.run(
+                [
+                    "bash",
+                    str(COLLECTOR),
+                    str(root),
+                    run_id,
+                    str(workspace_root),
+                    str(metadata_root),
+                    str(outside),
+                ],
+                cwd=ROOT,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual((outside / "sentinel.txt").read_text(encoding="utf-8"), "keep")
+
+    def test_collector_reports_required_workspace_move_failure(self) -> None:
+        """A failed structural move must make collection fail instead of publishing partial output."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            run_id = "move-failure"
+            workspace_root = root / "author-agent-workspace"
+            metadata_root = root / "author-agent-metadata"
+            artifact = root / "authored-app"
+            write(workspace_root / run_id / "package.json", "{}")
+            write(metadata_root / run_id / "author.env", f"RUN_ID={run_id}\n")
+            fake_bin = root / "bin"
+            write(
+                fake_bin / "bun",
+                """#!/usr/bin/env bash
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "--out" ]; then mkdir -p "$(dirname "$2")"; printf '{}\n' > "$2"; exit; fi
+  shift
+done
+""",
+            )
+            write(
+                fake_bin / "mv",
+                """#!/usr/bin/env bash
+case "$*" in
+  *author-agent-workspace*) exit 73 ;;
+  *) exec /bin/mv "$@" ;;
+esac
+""",
+            )
+            (fake_bin / "bun").chmod(0o755)
+            (fake_bin / "mv").chmod(0o755)
+            env = os.environ.copy()
+            env["PATH"] = f"{fake_bin}:{env['PATH']}"
+
+            result = subprocess.run(
+                [
+                    "bash",
+                    str(COLLECTOR),
+                    str(root),
+                    run_id,
+                    str(workspace_root),
+                    str(metadata_root),
+                    str(artifact),
+                ],
+                cwd=ROOT,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertFalse((artifact / "manifest.json").exists())
+
     def test_packager_mirrors_the_same_archive_and_cleans_service_account(self) -> None:
         """GCS mirroring must reuse the EAS archive and remove temporary credentials."""
         with tempfile.TemporaryDirectory() as td:
@@ -154,13 +254,20 @@ printf '%s\n' '{"n_sessions":1,"sessions":[]}' > "$out"
             archive = root / "authored-app.tar.gz"
             fake_bin = root / "bin"
             calls = root / "gcloud-calls.txt"
+            credential_capture = root / "credential-capture.txt"
+            caller_file = root / ".gcp-sa.json"
             write(source / "manifest.json", "{}")
+            write(caller_file, "caller-owned")
             write(
                 fake_bin / "gcloud",
                 """#!/usr/bin/env bash
 set -eu
 printf '%s\n' "$*" >> "$GCLOUD_CALLS"
-if [ "$1" = "auth" ]; then test -f "$GOOGLE_APPLICATION_CREDENTIALS"; fi
+if [ "$1" = "auth" ]; then
+  test -f "$GOOGLE_APPLICATION_CREDENTIALS"
+  mode="$(stat -c %a "$GOOGLE_APPLICATION_CREDENTIALS" 2>/dev/null || stat -f %Lp "$GOOGLE_APPLICATION_CREDENTIALS")"
+  printf '%s|%s|%s\n' "$GOOGLE_APPLICATION_CREDENTIALS" "$mode" "$(cat "$GOOGLE_APPLICATION_CREDENTIALS")" > "$GCS_CREDENTIAL_CAPTURE"
+fi
 """,
             )
             (fake_bin / "gcloud").chmod(0o755)
@@ -172,6 +279,7 @@ if [ "$1" = "auth" ]; then test -f "$GOOGLE_APPLICATION_CREDENTIALS"; fi
                     "GCS_BUCKET": "fixture-bucket",
                     "GCP_SA_KEY": '{"private_key":"fixture"}',
                     "GCLOUD_CALLS": str(calls),
+                    "GCS_CREDENTIAL_CAPTURE": str(credential_capture),
                 }
             )
             result = subprocess.run(
@@ -198,7 +306,44 @@ if [ "$1" = "auth" ]; then test -f "$GOOGLE_APPLICATION_CREDENTIALS"; fi
                 f"storage cp {archive.resolve()} gs://fixture-bucket/authored-app.tar.gz",
                 call_log,
             )
-            self.assertFalse((root / ".gcp-sa.json").exists())
+            credential_path, mode, contents = credential_capture.read_text(encoding="utf-8").strip().split("|", 2)
+            self.assertNotEqual(Path(credential_path), caller_file)
+            self.assertEqual(mode, "600")
+            self.assertEqual(contents, '{"private_key":"fixture"}')
+            self.assertFalse(Path(credential_path).exists())
+            self.assertEqual(caller_file.read_text(encoding="utf-8"), "caller-owned")
+
+    def test_packager_rejects_a_source_alias_that_resolves_to_root(self) -> None:
+        """Canonical validation must reject '/' even when the caller uses a symlink alias."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            source_alias = root / "root-alias"
+            source_alias.symlink_to("/", target_is_directory=True)
+            archive = root / "unsafe.tar.gz"
+            fake_bin = root / "bin"
+            tar_called = root / "tar-called"
+            write(
+                fake_bin / "tar",
+                """#!/usr/bin/env bash
+touch "$TAR_CALLED"
+touch "$2"
+""",
+            )
+            (fake_bin / "tar").chmod(0o755)
+            env = os.environ.copy()
+            env.update({"PATH": f"{fake_bin}:{env['PATH']}", "TAR_CALLED": str(tar_called)})
+
+            result = subprocess.run(
+                ["bash", str(PACKAGER), str(source_alias), str(archive), "unsafe.tar.gz"],
+                cwd=ROOT,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertFalse(tar_called.exists())
 
 
 if __name__ == "__main__":

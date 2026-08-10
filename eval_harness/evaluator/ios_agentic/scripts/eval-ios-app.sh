@@ -29,7 +29,8 @@ fi
 . "$AUTHOR_ENV"
 
 OUT="$ROOT/ios-eval-report"
-mkdir -p "$OUT"
+rm -rf -- "$OUT" || { echo "  ❌ could not reset iOS artifact root: $OUT"; exit 1; }
+mkdir -p "$OUT" || { echo "  ❌ could not create iOS artifact root: $OUT"; exit 1; }
 if [ -d "$ROOT/author-agent-workspace/$RUN_ID" ]; then
   WORKSPACE="$ROOT/author-agent-workspace/$RUN_ID"
 elif [ -d "$ROOT/agent-workspace/$RUN_ID" ]; then

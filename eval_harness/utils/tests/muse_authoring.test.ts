@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -436,6 +436,7 @@ test("Muse cleanup preserves ambient XDG config and removes only harness-owned s
 
 test("Muse artifact collection retains its normalized trace without raw session or proxy data", () => {
   const root = tempDir("muse-artifacts-");
+  symlinkSync(join(REPO_ROOT, "eval_harness"), join(root, "eval_harness"), "dir");
   const runId = "muse-artifacts-test";
   const metadataRoot = join(root, "author-agent-metadata");
   const workspaceRoot = join(root, "author-agent-workspace");
@@ -463,7 +464,7 @@ test("Muse artifact collection retains its normalized trace without raw session 
     grep -q '"muse_cli_version": "muse-test-version"' "$ARTIFACT/manifest.json"
     ! grep -q '"proxy_meta"' "$ARTIFACT/manifest.json"
   `, {
-    ROOT: REPO_ROOT,
+    ROOT: root,
     RUN_ID: runId,
     OUT: out,
     WORKSPACE: workspace,

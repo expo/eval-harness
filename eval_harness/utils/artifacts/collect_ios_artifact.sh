@@ -3,7 +3,7 @@
 #
 # Positional args: repository_root run_id ios_artifact_root
 # Trace reconstruction is best-effort so failed evaluations keep diagnostics.
-set -uo pipefail
+set -euo pipefail
 
 if [ "$#" -ne 3 ]; then
   echo "usage: $0 <repository_root> <run_id> <ios_artifact_root>" >&2
@@ -13,25 +13,28 @@ fi
 ROOT="$1"
 RUN_ID="$2"
 OUT="$3"
-PY="$(command -v python3 || command -v python)"
 TRACE_SINCE="${TRACE_SINCE_MTIME:-${EVAL_PHASE_START_MTIME:-${RUN_START_MTIME:-0}}}"
-PLAN_TRACES_ROOT="${EVALUATOR_TRACES_ROOT:-$ROOT/traces}"
 
-case "$OUT" in
-  ""|/|"$ROOT")
-    echo "refusing unsafe iOS artifact root: $OUT" >&2
-    exit 2
-    ;;
-esac
+canonical_existing_dir() { (cd "$1" && pwd -P); }
+
+ROOT="$(canonical_existing_dir "$ROOT")"
+OUT="$(canonical_existing_dir "$OUT")"
+if [ "$OUT" != "$ROOT/ios-eval-report" ]; then
+  echo "iOS artifact root must be the canonical repository child" >&2
+  exit 2
+fi
 if [ ! -d "$OUT" ]; then
   echo "missing iOS artifact root: $OUT" >&2
   exit 2
 fi
+PY="$(command -v python3 || command -v python)"
+PLAN_TRACES_ROOT="${EVALUATOR_TRACES_ROOT:-$ROOT/traces}"
 
 echo "================= COLLECT: ios-eval-report for run $RUN_ID ================="
 rm -rf -- "$OUT/bundle" "$OUT/author-agent-workspace" "$OUT/author-agent-metadata"
 rm -rf -- "$OUT/traces/test-plans"
 mkdir -p "$OUT/traces/test-plans" "$OUT/logs"
+rm -f -- "$OUT/traces/agentic-evaluator.json" "$OUT/traces/agentic-evaluator.json.tmp"
 
 run_trace_ts() {
   (cd "$ROOT" && bun "$@")
@@ -70,7 +73,10 @@ fi
 # evaluator-owned evidence and must not survive this producer boundary.
 rm -rf -- "$OUT/telemetry/traces" "$OUT/telemetry/openai.jsonl" "$OUT/telemetry/meta.jsonl"
 
-find "$OUT" -mindepth 1 -maxdepth 1 -type f -name '*.log' -exec mv -f {} "$OUT/logs/" \; 2>/dev/null
+for log_file in "$OUT"/*.log; do
+  [ -f "$log_file" ] || continue
+  mv -f "$log_file" "$OUT/logs/"
+done
 
 GIT_SHA="$(cd "$ROOT" && git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 RESULT_JSON="$OUT/result.json" RUN_ID="$RUN_ID" GIT_SHA="$GIT_SHA" \

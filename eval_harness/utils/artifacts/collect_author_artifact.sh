@@ -6,7 +6,7 @@
 #
 # This helper runs from author-app.sh's EXIT trap. Trace reconstruction is
 # best-effort so a failed authoring run still produces useful diagnostics.
-set -uo pipefail
+set -euo pipefail
 
 if [ "$#" -ne 5 ]; then
   echo "usage: $0 <repository_root> <run_id> <workspace_root> <metadata_root> <artifact_root>" >&2
@@ -18,19 +18,33 @@ RUN_ID="$2"
 WORKSPACE_ROOT="$3"
 METADATA_ROOT="$4"
 ARTIFACT_ROOT="$5"
-WORKSPACE="$WORKSPACE_ROOT/$RUN_ID"
-OUT="$METADATA_ROOT/$RUN_ID"
 AGENT="${AGENT:-claude-code}"
 [ "$AGENT" = "claude" ] && AGENT="claude-code"
 RUN_START_MTIME="${RUN_START_MTIME:-0}"
 PY="$(command -v python3 || command -v python)"
 
-case "$ARTIFACT_ROOT" in
-  ""|/|"$ROOT")
-    echo "refusing unsafe artifact root: $ARTIFACT_ROOT" >&2
-    exit 2
-    ;;
-esac
+canonical_existing_dir() { (cd "$1" && pwd -P); }
+canonical_target() {
+  if [ -d "$1" ]; then
+    canonical_existing_dir "$1"
+  else
+    printf '%s/%s\n' "$(canonical_existing_dir "$(dirname "$1")")" "$(basename "$1")"
+  fi
+}
+
+ROOT="$(canonical_existing_dir "$ROOT")"
+WORKSPACE_ROOT="$(canonical_existing_dir "$WORKSPACE_ROOT")"
+METADATA_ROOT="$(canonical_existing_dir "$METADATA_ROOT")"
+ARTIFACT_ROOT="$(canonical_target "$ARTIFACT_ROOT")"
+if [ "$WORKSPACE_ROOT" != "$ROOT/author-agent-workspace" ] \
+  || [ "$METADATA_ROOT" != "$ROOT/author-agent-metadata" ] \
+  || [ "$ARTIFACT_ROOT" != "$ROOT/authored-app" ]; then
+  echo "author artifact paths must be the canonical repository children" >&2
+  exit 2
+fi
+
+WORKSPACE="$WORKSPACE_ROOT/$RUN_ID"
+OUT="$METADATA_ROOT/$RUN_ID"
 if [ ! -d "$WORKSPACE" ] || [ ! -d "$OUT" ]; then
   echo "missing author runtime directories for run $RUN_ID" >&2
   exit 2
@@ -110,13 +124,16 @@ rm -rf -- \
   "$OUT/codex-home" "$OUT/muse-xdg-data" "$OUT/muse-data" \
   "$OUT/muse-bin" "$OUT/muse-settings" "$OUT/muse-xdg-config" \
   "$OUT/bundle" \
-  2>/dev/null || true
-rm -f -- "$OUT/$RUN_ID.tgz" 2>/dev/null || true
-rm -f -- "$OUT/telemetry/meta.jsonl" 2>/dev/null || true
+  2>/dev/null
+rm -f -- "$OUT/$RUN_ID.tgz" 2>/dev/null
+rm -f -- "$OUT/telemetry/meta.jsonl" 2>/dev/null
 
 # Logs have exactly one producer-owned location in the canonical tree.
 mkdir -p "$OUT/logs"
-find "$OUT" -mindepth 1 -maxdepth 1 -type f -name '*.log' -exec mv -f {} "$OUT/logs/" \; 2>/dev/null
+for log_file in "$OUT"/*.log; do
+  [ -f "$log_file" ] || continue
+  mv -f "$log_file" "$OUT/logs/"
+done
 
 rm -rf -- "$ARTIFACT_ROOT"
 mkdir -p "$ARTIFACT_ROOT/author-agent-workspace" "$ARTIFACT_ROOT/author-agent-metadata"
