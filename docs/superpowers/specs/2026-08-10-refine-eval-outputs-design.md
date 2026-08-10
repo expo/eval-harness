@@ -43,10 +43,9 @@ aggregator straightforward but does not implement it in the first release.
 Register a new `realistic` prompt between `baseline` and `minimal`:
 
 ```text
-Build me an Expo app based on the product brief below.
-Include all the described features, and make the main flows intuitive and easy to discover.
-Pay attention to the empty, loading, error, and confirmation states a real user would encounter.
-It should feel like a polished iPhone product I could genuinely try, not a rough prototype.
+Can you build this as an Expo app based on the product brief below?
+I want the core experience to feel complete, with the main actions easy to find and the important details handled thoughtfully.
+It should feel polished enough to give to a real user, not like a demo or rough prototype.
 ```
 
 The PRD remains appended by the existing prompt assembler, so the variant stays
@@ -89,7 +88,7 @@ not also vary the judge.
   `ClaudeAgentOptions`
 
 Record resolved author model/effort and evaluator model/effort in `author.env`,
-the bundle manifest, normalized summaries, and the HTML report. Unknown effort
+the artifact manifests, normalized summaries, and the HTML report. Unknown effort
 values fail before an expensive run rather than falling through to a CLI.
 
 ## E2E Job Topology
@@ -115,39 +114,130 @@ marks the relevant sections `not_run`, `partial`, or `failed` and points to the
 available diagnostic stage. A missing optional evaluator must not crash report
 generation.
 
+The EAS artifact names are:
+
+- `authored-app` from `author_app`
+- `skill-eval-report` from `eval_skill`
+- `ios-eval-report` from `eval_ios` (renamed from `eval-e2e-output`)
+- `eval-report` from the final `report` job
+
 ## Artifact Contracts
 
-### Intermediate skill artifact
+All new artifact writers use a canonical v2 layout. Readers accept both the
+existing layout and v2 during migration. Every artifact has one root
+`manifest.json`, every result has one authoritative location, scratch data is
+never archived, only the author artifact carries source, and only the producing
+job carries its own detailed traces and logs.
+
+Rename the runtime and artifact paths consistently:
+
+| Current name | V2 name |
+|---|---|
+| `agent-workspace/` | `author-agent-workspace/` |
+| author-side `eval-out/` | `author-agent-metadata/` |
+| iOS-side `eval-out/` and EAS `eval-e2e-output` | `ios-eval-report/` |
+| `skill-eval-report/` | unchanged |
+
+Update active scripts, workflow packagers, replay workflows, documentation, and
+tests to write the v2 names. Read-only artifact discovery retains compatibility
+with the old names so prior artifacts remain replayable.
+
+### Author transport artifact
+
+The current `agent-workspace` directory is the app project itself. It does not
+contain a separate app plus unrelated run metadata. Rename the two current
+top-level concepts without introducing another `app/` copy:
+
+```text
+authored-app.tar.gz
+  manifest.json
+  author-agent-workspace/
+    <run-id>/
+      package.json
+      app.json / app.config.js
+      <authored project source and configuration>
+  author-agent-metadata/
+    <run-id>/
+      author.env
+      telemetry/
+        anthropic.jsonl | openai.jsonl
+        otel/
+        traces/
+          <selected author-harness trace>.json
+      logs/
+```
+
+Do not create `bundle/app/`; the source under `author-agent-workspace/<run-id>/`
+is authoritative and sufficient for iOS evaluation and skill analysis. Update
+artifact discovery to prefer v2 while retaining read compatibility with
+`agent-workspace/<run-id>` and `bundle/app`.
+
+Do not create the inner `<run-id>.tgz`. EAS, iOS evaluation, and skill analysis
+do not consume it; only the optional GCS mirror currently does. Package one
+canonical `authored-app.tar.gz` and use that same archive for both EAS upload and
+optional GCS mirroring.
+
+### Skill artifact
 
 Keep the replay-friendly outputs:
 
 ```text
 skill-eval-report/
+  manifest.json
   metrics.json
   report.html
 ```
 
-Artifact extraction moves to a temporary scratch root outside
-`skill-eval-report/`. Remove the scratch root after analysis. The final tar must
-not contain `unpacked/authored`, the authored source tree, or the iOS bundle.
+`metrics.json` is the authoritative skill evaluator result. Artifact extraction
+still occurs because the analyzer must inspect downloaded source and traces, but
+it uses a `mktemp` scratch root outside `skill-eval-report/` and removes it on
+exit. The current `unpacked/` tree has no unique evidence: it only repeats the
+downloaded input artifacts. Eliminate it from the uploaded artifact entirely.
 
-### Intermediate iOS artifact
+The directory and EAS artifact are both named `skill-eval-report`; the transport
+file may remain `skill-eval-report.tar.gz` because it is a tar archive.
 
-Keep the current diagnostic bundle, but extend its structured data:
+### iOS artifact
+
+Rename the EAS artifact and archive from `eval-e2e-output` / `eval-out.tar.gz`
+to `ios-eval-report` / `ios-eval-report.tar.gz`. Use one authoritative copy of
+each file:
 
 ```text
-eval-out/<run-id>/bundle/
+ios-eval-report/
   manifest.json
-  pipeline.jsonl
-  eval/
-    result.json
-    report.html
-    traces/
+  result.json
+  report.html
+  traces/
+    agentic-evaluator.json
+    test-plans/
       <plan-run>/
         summary.json
         conversation.jsonl
+        console.log
         screenshots/
+  telemetry/
+    anthropic.jsonl
+    otel/
+  logs/
 ```
+
+`traces/agentic-evaluator.json` is the one normalized overall evaluator trace.
+`traces/test-plans/<plan-run>/` contains the evaluator-native trace for one test
+plan invocation: its turn/tool conversation, score-and-usage summary, console
+transcript, and screenshots. These serve different levels of inspection and are
+not duplicate file formats.
+
+Do not carry the author trace or authored source into `ios-eval-report`; those
+belong to `authored-app`. The author trace is present today only because the iOS
+worker inherits the author bundle and the generic collector preserves it while
+rebuilding a stitched bundle.
+
+Keep `telemetry/` and `logs/` separate. `telemetry/anthropic.jsonl` is the
+redacted Anthropic request/response usage log and `telemetry/otel/` contains the
+OTLP exports. `logs/` contains stage stdout/stderr such as dependency install,
+Xcode build, launch, and evaluator logs. Do not copy any of these again under a
+second `bundle/` directory.
 
 ### Final collaborator-facing artifact
 
@@ -155,13 +245,14 @@ Upload one artifact named `eval-report`:
 
 ```text
 eval-report/
+  manifest.json
   report.html
   summary.json
   data/
     author-manifest.json
     skill-metrics.json
     ios-result.json
-    pipeline.json
+    build-health.json
   evidence/
     screenshots/
       <stable-relative-name>.png
@@ -171,6 +262,13 @@ Only copy files that the report directly consumes. Do not include an authored
 app tree, raw provider credentials, Muse settings/data, duplicated transport
 archives, or the original intermediate tars. All links in `report.html` are
 relative so the extracted artifact works offline.
+
+`data/skill-metrics.json` is an exact copy of the skill artifact's
+`metrics.json`; `data/ios-result.json` is an exact copy of the iOS artifact's
+`result.json`. `summary.json` normalizes those inputs for rendering and future
+cross-run aggregation. `manifest.json` identifies and inventories this artifact.
+`data/build-health.json` contains only the normalized ladder assembled from
+producer manifests plus the structured syntax and Expo-export results.
 
 ## Consolidated Summary Schema
 
@@ -194,7 +292,7 @@ relative so the extracted artifact works offline.
     "skill_trigger_recall": 0,
     "skill_uptake_rate": 0
   },
-  "pipeline": [],
+  "build_health": [],
   "skills": [],
   "ios": { "test_plans": [] },
   "usage": { "author": {}, "evaluator": {} },
@@ -205,15 +303,31 @@ relative so the extracted artifact works offline.
 
 The renderer consumes this schema rather than reading arbitrary logs. Source
 adapters normalize the existing manifest, skill `metrics.json`, iOS
-`result.json`, pipeline events, and author/evaluator traces into it. Unknown or
+`result.json`, producer stage statuses, and author/evaluator traces into it. Unknown or
 unavailable metrics stay `null`; they must never render as zero.
 
 ## Build and Evaluation Ladder
 
-Add a small append-only, JSON-escaped pipeline recorder used by shell stages.
-Each event has `stage`, `status`, `detail`, `timestamp`, and optional `duration`.
-The reporter reduces to the latest event for each stage and combines it with the
-skill analyzer's syntax result.
+Do not add a separate append-only pipeline recorder. Most gates already run and
+some already have structured outputs. Persist only the currently log-only stage
+outcomes in the existing producer manifests, then normalize all sources into
+the final `data/build-health.json`.
+
+The sources are:
+
+| Stage | Authoritative source |
+|---|---|
+| App authored | author manifest status plus required-output gate |
+| Dependency install | iOS manifest status plus install log path |
+| Source syntax | `skill-metrics.json.build_health.syntax` |
+| Expo iOS bundle export | `skill-metrics.json.build_health.bundle` |
+| Native iOS build | iOS manifest status plus Xcode log path |
+| App install and launch | iOS manifest status plus launch log path |
+| iOS evaluation | `ios-result.json` status plus iOS manifest status |
+
+The shell stages already branch on these outcomes. Set manifest status fields at
+those existing boundaries rather than parsing human logs after the fact. A
+missing status means `not_run`; do not infer a pass from file existence alone.
 
 Display these actual gates in order:
 
@@ -232,11 +346,26 @@ such a check.
 
 ## Screenshot Evidence
 
-The current screenshot tool can return temporary paths but does not guarantee a
-durable, step-associated image. Make screenshot capture a harness responsibility:
+The evaluator already receives `capture_screenshot` in its allowed MCP tool
+list, but the current bridge ignores `EVAL_SCREENSHOT_DIR` and writes an
+unscoped temporary PNG when no path is supplied. Correct the stale bridge
+documentation, make agent-requested captures write under the active plan trace,
+and explicitly tell the evaluator in its system prompt that the tool is
+available for additional feature-relevant human evidence.
 
-- At the end of every formal scored step, capture one best-effort final-state
-  PNG under that plan trace's `screenshots/` directory.
+The tool currently returns a filesystem path as text. The evaluator's file-read
+tools are blocked, and the MCP result does not contain image pixels, so the
+evaluator cannot visually inspect the screenshot. State this limitation in the
+system prompt: screenshots are for human postmortem review only and must not be
+used as the basis for scoring. The evaluator continues to make decisions from
+the accessibility tree and structured hard/soft assertion tools.
+
+Do not depend on discretionary model tool use for the report. Make the primary
+screenshot capture a harness responsibility:
+
+- At the end of every formal step that reaches a terminal completed or aborted
+  state, capture one best-effort final-state PNG under that plan trace's
+  `screenshots/` directory.
 - Use deterministic names such as `step-01-final.png`.
 - Add the screenshot's trace-relative path to the step's trace summary and the
   public serialized step in `result.json`.
@@ -250,7 +379,11 @@ durable, step-associated image. Make screenshot capture a harness responsibility
 This first version associates one screenshot with a scored step, not a separate
 image with every assertion. That is reliable with the current driver and still
 provides both failed and passed previews without allowing screenshot collection
-to alter scoring.
+to alter scoring. The report labels screenshots as final-state context rather
+than proof that an assertion passed or failed. Do not add screenshot-count or
+byte-size fields solely for monitoring; artifact contents and archive sizes can
+be inspected after the first few runs. Revisit retention after those runs if
+screenshots materially increase artifact size.
 
 ## HTML Report
 
@@ -295,12 +428,17 @@ responsive layouts, and no remote assets or JavaScript dependency.
 - Evaluator model/effort reaches `ClaudeAgentOptions` and is serialized.
 - Step-result serialization preserves assertion detail and screenshot paths.
 - Screenshot capture succeeds, fails non-fatally, and cannot escape its trace.
-- Pipeline events reduce deterministically across pass/warn/fail/not-run states.
+- The evaluator prompt identifies screenshots as human-only evidence and keeps
+  scoring grounded in accessibility and assertion tools.
+- Producer manifest statuses and existing structured checks normalize
+  deterministically across pass/warn/fail/not-run states.
 - Consolidation supports full, partial, failed, iOS-disabled, and skill-disabled
   inputs.
 - HTML escapes controlled values, orders failed screenshots first, uses relative
   paths, and references only copied evidence.
 - Skill output archives do not contain an unpacked authored tree.
+- Author and iOS artifacts contain no duplicate source, result, report, trace,
+  log, or nested archive copies.
 
 Run:
 
@@ -342,6 +480,8 @@ Confirm:
 - The artifact contains no copied authored tree, temporary extraction root,
   provider credential, Expo bearer token, Muse settings/data, or nested tar.
 - The report records Muse Spark 1.2/high and evaluator Opus 4.8/high exactly.
+- The EAS artifacts are named `authored-app`, `skill-eval-report`,
+  `ios-eval-report`, and `eval-report`.
 
 ## Documentation
 
