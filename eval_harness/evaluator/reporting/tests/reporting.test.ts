@@ -18,6 +18,7 @@ import { dirname, join } from "node:path";
 import {
   copyScreenshotEvidence,
   normalizeRun,
+  normalizeRunWithEvidence,
   validateConsolidatedSummary,
 } from "../normalize.ts";
 import { parseArgs } from "../main.ts";
@@ -55,6 +56,22 @@ function writeJson(path: string, value: unknown): void {
 
 function readJson(path: string): Record<string, unknown> {
   return JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+}
+
+function completeTraceSummary(
+  plan: string,
+  options: { runIndex?: number; totalUsage?: Record<string, unknown> } = {},
+): Record<string, unknown> {
+  return {
+    plan,
+    platform: "ios",
+    driver: "agent-device",
+    score: 1,
+    full_points: 1,
+    total_usage: options.totalUsage ?? {},
+    steps: [],
+    ...(options.runIndex === undefined ? {} : { run_index: options.runIndex }),
+  };
 }
 
 function inputs(root: string, options: {
@@ -120,6 +137,36 @@ describe("normalizeRun", () => {
     const tracesRoot = join(args.iosArtifact!, "traces/test-plans");
     mkdirSync(tracesRoot, { recursive: true });
     symlinkSync(outsideTrace, join(tracesRoot, "escaped-trace"));
+
+    await expect(normalizeRun(args)).rejects.toThrow("unsafe plan trace directory");
+  });
+
+  test("rejects linked trace summaries while allowing only physical single-link files", async () => {
+    // Catches diagnostic-summary skipping accidentally weakening unsafe-topology rejection.
+    for (const kind of ["symlink", "hardlink"] as const) {
+      const root = tempRoot();
+      const args = inputs(root);
+      const trace = join(args.iosArtifact!, "traces/test-plans/test_insert_diagnostic");
+      const outside = join(root, `${kind}-summary.json`);
+      mkdirSync(trace, { recursive: true });
+      writeJson(outside, completeTraceSummary("test_insert.txt"));
+      if (kind === "symlink") {
+        symlinkSync(outside, join(trace, "summary.json"));
+      } else {
+        linkSync(outside, join(trace, "summary.json"));
+      }
+
+      await expect(normalizeRun(args)).rejects.toThrow("unsafe authoritative JSON");
+    }
+  });
+
+  test("rejects a special child trace node instead of ignoring it", async () => {
+    // Catches a FIFO/device in the trace-directory set being mistaken for an absent diagnostic.
+    const root = tempRoot();
+    const args = inputs(root);
+    const traces = join(args.iosArtifact!, "traces/test-plans");
+    mkdirSync(traces, { recursive: true });
+    expect(Bun.spawnSync(["mkfifo", join(traces, "diagnostic-fifo")]).exitCode).toBe(0);
 
     await expect(normalizeRun(args)).rejects.toThrow("unsafe plan trace directory");
   });
@@ -394,6 +441,91 @@ describe("normalizeRun", () => {
     expect(summary.build_health[6]?.status).toBe("passed");
   });
 
+  test("reports an all-N/A result when its safe diagnostic trace has no summary", async () => {
+    // Catches a normal seed N/A early return making the consolidated report fail.
+    const root = tempRoot();
+    const args = inputs(root);
+    mkdirSync(
+      join(args.iosArtifact!, "traces/test-plans/test_insert_20260810_120000"),
+      { recursive: true },
+    );
+    writeJson(join(args.iosArtifact!, "result.json"), {
+      status: "completed",
+      expected_plan_count: 1,
+      terminal_plan_count: 1,
+      macro_avg_pct: 0,
+      evaluator_errors: [],
+      test_plans: [{
+        test_plan: "test_insert.txt",
+        run_index: 1,
+        status: "not_applicable",
+        na_reason: "feature is outside this PRD",
+        score: 0,
+        full_points: 0,
+        macro_pct: null,
+        steps: [],
+      }],
+    });
+
+    const summary = await normalizeRun(args);
+
+    expect(summary.status).toBe("complete");
+    expect(summary.build_health[6]?.status).toBe("passed");
+    expect(summary.scores.ios_macro_pct).toBeNull();
+    expect(summary.usage.evaluator).toEqual({});
+  });
+
+  test("reports evaluator restart failure when its safe diagnostic trace has no summary", async () => {
+    // Catches a restart failure's retained trace hiding its authoritative evaluator detail.
+    const root = tempRoot();
+    const args = inputs(root);
+    mkdirSync(
+      join(args.iosArtifact!, "traces/test-plans/test_insert_20260810_120000"),
+      { recursive: true },
+    );
+    writeJson(join(args.iosArtifact!, "result.json"), {
+      status: "failed",
+      expected_plan_count: 1,
+      terminal_plan_count: 1,
+      macro_avg_pct: null,
+      evaluator_errors: [{ stage: "restart", reason: "development client never launched" }],
+      test_plans: [{
+        test_plan: "test_insert.txt",
+        run_index: 1,
+        status: "evaluator_error",
+        error_stage: "restart",
+        error_reason: "development client never launched",
+        score: null,
+        full_points: null,
+        macro_pct: null,
+        steps: [],
+      }],
+    });
+
+    const summary = await normalizeRun(args);
+
+    expect(summary.status).toBe("failed");
+    expect(summary.build_health[6]?.detail).toBe(
+      "restart: development client never launched",
+    );
+    expect(summary.scores.ios_macro_pct).toBeNull();
+  });
+
+  test("skips safe malformed and incomplete diagnostic trace summaries", async () => {
+    // Catches safe crash leftovers being treated as authoritative usage or ownership records.
+    const root = tempRoot();
+    const args = inputs(root);
+    const traces = join(args.iosArtifact!, "traces/test-plans");
+    mkdirSync(join(traces, "malformed"), { recursive: true });
+    writeFileSync(join(traces, "malformed/summary.json"), "{not-json\n");
+    writeJson(join(traces, "incomplete/summary.json"), { plan: "test_insert.txt" });
+
+    const summary = await normalizeRun(args);
+
+    expect(summary.status).toBe("complete");
+    expect(summary.usage.evaluator).toEqual({});
+  });
+
   test("withholds the iOS score when an earlier infrastructure gate failed", async () => {
     // Catches a valid-looking result surviving a failed install/build/launch prerequisite.
     const root = tempRoot();
@@ -619,25 +751,19 @@ describe("normalizeRun", () => {
     );
     writeJson(
       join(args.iosArtifact!, "traces/test-plans/test_insert_1/summary.json"),
-      {
-        plan: "test_insert.txt",
-        total_usage: {
-          input_tokens: 10,
-          output_tokens: 5,
-          total_cost_usd: 0.25,
-        },
-      },
+      completeTraceSummary("test_insert.txt", { totalUsage: {
+        input_tokens: 10,
+        output_tokens: 5,
+        total_cost_usd: 0.25,
+      } }),
     );
     writeJson(
       join(args.iosArtifact!, "traces/test-plans/test_insert_2/summary.json"),
-      {
-        plan: "test_insert.txt",
-        total_usage: {
-          input_tokens: 2,
-          output_tokens: 1,
-          total_cost_usd: null,
-        },
-      },
+      completeTraceSummary("test_insert.txt", { totalUsage: {
+        input_tokens: 2,
+        output_tokens: 1,
+        total_cost_usd: null,
+      } }),
     );
 
     const summary = await normalizeRun(args);
@@ -774,10 +900,10 @@ describe("copyScreenshotEvidence", () => {
       args.iosArtifact!,
       "traces/test-plans/test_insert_20260810_120000",
     );
-    writeJson(join(planTrace, "summary.json"), {
-      plan: "test_insert.txt",
-      run_index: 1,
-    });
+    writeJson(
+      join(planTrace, "summary.json"),
+      completeTraceSummary("test_insert.txt", { runIndex: 1 }),
+    );
     mkdirSync(join(planTrace, "screenshots"), { recursive: true });
     const result = readJson(join(args.iosArtifact!, "result.json"));
     const steps = ((result.test_plans as Array<Record<string, unknown>>)[0]?.steps) as Array<Record<string, unknown>>;
@@ -827,6 +953,49 @@ describe("copyScreenshotEvidence", () => {
     ]);
     expect(readFileSync(join(run.outDir, steps[0]!.screenshot as string)))
       .toEqual(PNG_BYTES);
+  });
+
+  test("warns without guessing when an aborted plan has a screenshot but no summary", async () => {
+    // Catches diagnostic files from a formal abort being assigned to a plan without ownership data.
+    const root = tempRoot();
+    const args = inputs(root);
+    const trace = join(args.iosArtifact!, "traces/test-plans/test_insert_aborted");
+    mkdirSync(join(trace, "screenshots"), { recursive: true });
+    writeFileSync(join(trace, "screenshots/step-01-final.png"), PNG_BYTES);
+    writeJson(join(args.iosArtifact!, "result.json"), {
+      status: "failed",
+      expected_plan_count: 1,
+      terminal_plan_count: 1,
+      macro_avg_pct: null,
+      evaluator_errors: [{ stage: "formal", reason: "agent aborted" }],
+      test_plans: [{
+        test_plan: "test_insert.txt",
+        run_index: 1,
+        status: "evaluator_error",
+        error_stage: "formal",
+        error_reason: "agent aborted",
+        score: null,
+        full_points: null,
+        macro_pct: null,
+        steps: [{
+          description: "FAILED: formal evaluation aborted",
+          points: 0,
+          max_points: 1,
+          screenshot: "screenshots/step-01-final.png",
+        }],
+      }],
+    });
+
+    const summary = await normalizeRunWithEvidence(args);
+
+    expect(summary.status).toBe("failed");
+    const plan = summary.ios.test_plans[0] as Record<string, unknown>;
+    const step = (plan.steps as Array<Record<string, unknown>>)[0]!;
+    expect(step.screenshot).toBeNull();
+    expect(summary.warnings).toContain(
+      "screenshot for test_insert.txt run 1 step 1 has no matching plan trace",
+    );
+    expect(readdirSync(join(args.outDir, "evidence/screenshots"))).toEqual([]);
   });
 
   test("rejects unsafe existing output destinations without touching their targets", async () => {
@@ -994,7 +1163,10 @@ describe("copyScreenshotEvidence", () => {
       run.iosRoot,
       "traces/test-plans/test_insert_20260810_130000",
     );
-    writeJson(join(duplicateTrace, "summary.json"), { plan: "test_insert.txt" });
+    writeJson(
+      join(duplicateTrace, "summary.json"),
+      completeTraceSummary("test_insert.txt"),
+    );
     mkdirSync(join(duplicateTrace, "screenshots"));
     writeFileSync(join(duplicateTrace, "screenshots/step-01-final.png"), PNG_BYTES);
     const args: ReportInputs = {
@@ -1025,7 +1197,10 @@ describe("copyScreenshotEvidence", () => {
     rmSync(join(run.iosRoot, "traces"), { recursive: true });
     for (const [name, plan] of [["one", "test_a-b.txt"], ["two", "test_a_b.txt"]] as const) {
       const trace = join(run.iosRoot, "traces/test-plans", name);
-      writeJson(join(trace, "summary.json"), { plan, run_index: 1 });
+      writeJson(
+        join(trace, "summary.json"),
+        completeTraceSummary(plan, { runIndex: 1 }),
+      );
       mkdirSync(join(trace, "screenshots"));
       writeFileSync(join(trace, "screenshots/step-01-final.png"), PNG_BYTES);
       writeFileSync(join(trace, "screenshots/step-02-final.png"), PNG_BYTES);

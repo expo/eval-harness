@@ -906,6 +906,18 @@ export async function normalizeRun(inputs: ReportInputs): Promise<ConsolidatedSu
   );
 }
 
+function validPlanTraceSummary(value: JsonRecord): boolean {
+  const plan = stringOrNull(value.plan) ?? stringOrNull(value.test_plan);
+  return plan !== null && plan.length > 0 &&
+    typeof value.platform === "string" && value.platform.length > 0 &&
+    typeof value.score === "number" && Number.isFinite(value.score) &&
+    typeof value.full_points === "number" && Number.isFinite(value.full_points) &&
+    record(value.total_usage) !== null &&
+    Array.isArray(value.steps) &&
+    (value.run_index === undefined ||
+      (typeof value.run_index === "number" && Number.isInteger(value.run_index)));
+}
+
 async function planTraceDirectories(
   iosRoot: string,
   testPlanTraces: string,
@@ -939,19 +951,16 @@ async function planTraceDirectories(
   }
   const directories: Array<{ path: string; summary: JsonRecord }> = [];
   for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
-    if (entry.isSymbolicLink()) {
+    if (entry.isSymbolicLink() || !entry.isDirectory()) {
       throw new Error(`unsafe plan trace directory: ${entry.name}`);
     }
-    if (!entry.isDirectory()) continue;
     const path = join(root, entry.name);
     const physical = await realpath(path);
     if (!inside(iosRoot, physical) || physical !== path) {
       throw new Error(`unsafe plan trace directory: ${entry.name}`);
     }
     const source = await readJson(physical, "summary.json");
-    if (source.value === null) {
-      throw new Error(`ambiguous plan trace ownership: ${entry.name} has no valid summary`);
-    }
+    if (source.value === null || !validPlanTraceSummary(source.value)) continue;
     directories.push({ path: physical, summary: source.value });
   }
   return directories;
