@@ -488,6 +488,36 @@ test("[REGRESSION] evaluator results produce a complete outcome", async () => {
   });
 });
 
+test("[REGRESSION] incomplete evaluator results are not outcome evidence", async () => {
+  // Oracle: only an explicitly completed iOS suite is valid outcome evidence.
+  // Catches: treating a finite partial score from an infrastructure failure as complete.
+  await withTempDirAsync(async (root) => {
+    const fixture = writeFixture(root);
+    const evalArtifact = join(root, "eval");
+    const resultDir = join(evalArtifact, "eval-out", "run-1", "bundle", "eval");
+    mkdirSync(resultDir, { recursive: true });
+    writeFileSync(
+      join(resultDir, "result.json"),
+      JSON.stringify({ status: "incomplete", macro_avg_pct: 87.5 }),
+    );
+
+    const payload = await analyzeArtifacts({
+      authoredArtifact: fixture.authored,
+      evalArtifact,
+      scenario: "skills_available_unmentioned",
+      outDir: join(root, "out"),
+      prdSkillsPath: fixture.prdSkills,
+      checksDir: fixture.checksDir,
+    });
+
+    expect(payload.outcome_status).toBe("pending");
+    expect(payload.runs[0]).toMatchObject({
+      evaluator_pct: null,
+      build_success: null,
+    });
+  });
+});
+
 test("[REGRESSION] non-finite evaluator scores cannot create complete outcomes", async () => {
   await withTempDirAsync(async (root) => {
     const fixture = writeFixture(root);

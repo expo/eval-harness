@@ -1,3 +1,4 @@
+import json
 import os
 import subprocess
 import tempfile
@@ -62,6 +63,7 @@ class CollectArtifactsTests(unittest.TestCase):
                     "RUN_START_MTIME": "0",
                     "TRACE_SINCE_MTIME": "0",
                     "GCS_BUCKET": "",
+                    "EVAL_IOS_APP_MODE": "release",
                 }
             )
             result = subprocess.run(
@@ -93,6 +95,10 @@ class CollectArtifactsTests(unittest.TestCase):
             self.assertFalse(stale_pod.exists(), "stale bundle content must be removed")
             self.assertTrue((output / "bundle" / "eval" / "result.json").is_file())
             self.assertTrue((output / "bundle" / "logs" / "s7-eval.log").is_file())
+            manifest = json.loads(
+                (output / "bundle" / "manifest.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(manifest.get("ios_app_mode"), "release")
 
 
 if __name__ == "__main__":

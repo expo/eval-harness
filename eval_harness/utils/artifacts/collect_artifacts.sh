@@ -196,7 +196,8 @@ GIT_SHA="$(cd "$ROOT" && git rev-parse --short HEAD 2>/dev/null || echo unknown)
 RESULT_JSON="$OUT/result.json" RUN_ID="$RUN_ID" AGENT="$AGENT" GIT_SHA="$GIT_SHA" \
 PRD="${PRD:-}" TEST_PLAN="${TEST_PLAN:-}" \
 AGENT_MODEL="${AGENT_MODEL:-}" MUSE_CLI_VERSION="${MUSE_CLI_VERSION:-}" METRO_MODE="${METRO_MODE:-}" \
-EVAL_APP_BUNDLE_ID="${EVAL_APP_BUNDLE_ID:-}" EXPO_MCP_AUTH_STATUS="${EXPO_MCP_AUTH_STATUS:-}" \
+EVAL_IOS_APP_MODE="${EVAL_IOS_APP_MODE:-}" EVAL_APP_BUNDLE_ID="${EVAL_APP_BUNDLE_ID:-}" \
+EXPO_MCP_AUTH_STATUS="${EXPO_MCP_AUTH_STATUS:-}" \
 SCENARIO="${SCENARIO:-}" PROMPT_VARIANT="${PROMPT_VARIANT:-}" PROMPT_FILE="${PROMPT_FILE:-}" \
 "$PY" - "$BUNDLE/manifest.json" <<'PYEOF'
 import json, os, sys
@@ -237,6 +238,7 @@ manifest = {
     "agent_model": preferred("AGENT_MODEL", "agent_model"),
     "muse_cli_version": preferred("MUSE_CLI_VERSION", "muse_cli_version"),
     "metro_mode": preferred("METRO_MODE", "metro_mode", "dev-build"),
+    "ios_app_mode": preferred("EVAL_IOS_APP_MODE", "ios_app_mode"),
     "eval_app_bundle_id": preferred("EVAL_APP_BUNDLE_ID", "eval_app_bundle_id"),
     "test_plan": preferred("TEST_PLAN", "test_plan") or "auto-resolved from dataset/prd_test_plans.json",
     "prd": preferred("PRD", "prd", "dataset/prds/hot_chocolate/prd/mvp.txt"),

@@ -56,6 +56,15 @@ class RecordingDevClientRestartBridge(AgentDeviceBridge):
         ]
 
 
+class RecordingMaestroRestart:
+    def __init__(self) -> None:
+        self.clear_state_calls: list[bool] = []
+
+    def restart_app(self, clear_state: bool = False) -> AgentDeviceResult:
+        self.clear_state_calls.append(clear_state)
+        return AgentDeviceResult(success=True, output="ready")
+
+
 class AgentDeviceBridgeFillTests(unittest.TestCase):
     @patch("eval_harness.evaluator.ios_agentic.agent_device.bridge.time.sleep")
     def test_regression_fill_uses_snapshot_reference_without_id_selector(
@@ -107,6 +116,56 @@ class AgentDeviceBridgeRestartTests(unittest.TestCase):
             ["get_app_container", "booted", "com.example.authored", "data"],
             bridge.simctl_commands,
         )
+
+    @patch.dict("os.environ", {}, clear=False)
+    def test_regression_hybrid_restart_preserves_dev_client_launcher_state(
+        self,
+    ) -> None:
+        """Regression: hybrid restarts obey the dev-client clearing policy.
+
+        Oracle: the shared launcher container is cleared only with explicit
+        EVAL_DEV_CLIENT_CLEAR_STATE=1 opt-in.
+        Catches: forwarding the evaluator's generic clear request to Maestro.
+        """
+        import os
+
+        os.environ.pop("EVAL_DEV_CLIENT_CLEAR_STATE", None)
+        bridge = AgentDeviceBridge(
+            app_id="com.example.authored",
+            deep_link=(
+                "example://expo-development-client/"
+                "?url=http%3A%2F%2Flocalhost%3A8081"
+            ),
+        )
+        maestro = RecordingMaestroRestart()
+        bridge._maestro = maestro
+
+        result = bridge.restart_app_hybrid(clear_state=True)
+
+        self.assertTrue(result.success, result.error)
+        self.assertEqual(maestro.clear_state_calls, [False])
+
+    @patch.dict("os.environ", {"EVAL_DEV_CLIENT_CLEAR_STATE": "1"})
+    def test_spec_hybrid_restart_allows_explicit_dev_client_clear(self) -> None:
+        """Specification: explicit diagnostic opt-in still clears app state.
+
+        Oracle: EVAL_DEV_CLIENT_CLEAR_STATE=1 is the documented destructive override.
+        Catches: preserving the container unconditionally in hybrid mode.
+        """
+        bridge = AgentDeviceBridge(
+            app_id="com.example.authored",
+            deep_link=(
+                "example://expo-development-client/"
+                "?url=http%3A%2F%2Flocalhost%3A8081"
+            ),
+        )
+        maestro = RecordingMaestroRestart()
+        bridge._maestro = maestro
+
+        result = bridge.restart_app_hybrid(clear_state=True)
+
+        self.assertTrue(result.success, result.error)
+        self.assertEqual(maestro.clear_state_calls, [True])
 
 
 if __name__ == "__main__":

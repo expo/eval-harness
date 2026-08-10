@@ -919,7 +919,15 @@ class AgentDeviceBridge:
                 platform=self.platform, timeout=self.timeout, verbose=self.verbose,
             )
 
-        m = self._maestro.restart_app(clear_state=clear_state)
+        is_dev_client = "expo-development-client" in self.config["deep_link"]
+        dev_client_clear_state = os.environ.get("EVAL_DEV_CLIENT_CLEAR_STATE") == "1"
+        effective_clear_state = clear_state and (
+            not is_dev_client or dev_client_clear_state
+        )
+        if clear_state and is_dev_client and not effective_clear_state and self.verbose:
+            print("  [bridge] preserving dev-client container state during hybrid restart")
+
+        m = self._maestro.restart_app(clear_state=effective_clear_state)
         if not m.success:
             return AgentDeviceResult(
                 success=False, output="",
