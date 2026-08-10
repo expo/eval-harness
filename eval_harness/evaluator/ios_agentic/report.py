@@ -32,6 +32,17 @@ def write_html_report(output: dict[str, Any], path: Path | str) -> None:
     plan_rows = []
     step_rows = []
     for plan in output.get("test_plans") or []:
+        if plan.get("status") == "evaluator_error":
+            plan_rows.append(
+                "<tr>"
+                f"<td>{_e(plan.get('test_plan'))}</td>"
+                f"<td>{_e(plan.get('run_index'))}</td>"
+                "<td>evaluator_error</td>"
+                "<td>n/a</td>"
+                f"<td>{_e(plan.get('error_stage'))}: {_e(plan.get('error_reason'))}</td>"
+                "</tr>"
+            )
+            continue
         if plan.get("status") == "not_applicable":
             plan_rows.append(
                 "<tr>"

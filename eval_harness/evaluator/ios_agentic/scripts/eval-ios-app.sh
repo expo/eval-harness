@@ -22,7 +22,7 @@ fi
 
 if [ -z "$AUTHOR_ENV" ] || [ ! -f "$AUTHOR_ENV" ]; then
   echo "  ❌ missing author.env from authored-app artifact"
-  exit 0
+  exit 1
 fi
 
 # shellcheck disable=SC1090
@@ -82,16 +82,16 @@ export OTEL_RESOURCE_ATTRIBUTES="run.id=$RUN_ID,phase=evaluate,service.name=eval
 
 if [ ! -f "$WORKSPACE/package.json" ]; then
   echo "  ❌ authored workspace has no package.json; skipping build/eval and collecting diagnostics"
-  exit 0
+  exit 1
 fi
 
 echo "================= STAGE D: npm install + resolve app config + native iOS build ================="
 if ! eval::npm_install "$WORKSPACE" "$OUT"; then
   echo "  ❌ authored app failed a clean npm install on the eval worker; skipping build/eval and collecting diagnostics"
-  exit 0
+  exit 1
 fi
 
-EVAL_IOS_APP_MODE="${EVAL_IOS_APP_MODE:-dev-client}"
+eval::configure_ios_app_mode || exit $?
 echo "  iOS app mode: $EVAL_IOS_APP_MODE"
 if [ "$EVAL_IOS_APP_MODE" = "dev-client" ]; then
   echo "  ensuring expo-dev-client is installed (dev-build deep-link handshake)"
@@ -102,7 +102,6 @@ if [ "$EVAL_IOS_APP_MODE" = "dev-client" ]; then
   node "$ROOT/eval_harness/utils/ios/patch_dev_client_default_url.mjs" "$WORKSPACE" "$DEV_CLIENT_DEFAULT_URL" >"$OUT/d-devclient-config.log" 2>&1 \
     || echo "  ⚠️  dev-client defaultLaunchURL patch failed (see d-devclient-config.log)"
   cat "$OUT/d-devclient-config.log"
-  export EVAL_DEV_CLIENT_CLEAR_STATE="${EVAL_DEV_CLIENT_CLEAR_STATE:-1}"
 fi
 
 BUNDLE_ID=""; SCHEME=""
@@ -113,7 +112,7 @@ fi
 echo "  resolved bundleIdentifier='$BUNDLE_ID'  scheme='$SCHEME'"
 if [ -z "$BUNDLE_ID" ] || [ -z "$SCHEME" ]; then
   echo "  ❌ authored app is missing required Expo config (ios.bundleIdentifier and scheme are required); skipping build/eval"
-  exit 0
+  exit 1
 fi
 if [ -n "$BUNDLE_ID" ]; then
   export EVAL_APP_BUNDLE_ID="$BUNDLE_ID"
@@ -126,7 +125,7 @@ if [ "$EVAL_IOS_APP_MODE" = "release" ]; then
   unset EVAL_APP_DEEP_LINK
   eval::build_release_ios_app "$WORKSPACE" "$OUT" "$EVAL_DEVNAME" || {
     echo "  ❌ release app build/install failed; skipping eval and collecting diagnostics"
-    exit 0
+    exit 1
   }
 else
   eval::start_metro_dev_build "$WORKSPACE" "$OUT" "$EVAL_DEVNAME"
@@ -149,5 +148,8 @@ if ! eval::run_evaluator "$EVAL" "$TEST_PLAN" "$PRD" "$OUT/result.json" "$OUT"; 
 fi
 
 echo "================= RESULT ================="
-if [ -f "$OUT/result.json" ]; then cat "$OUT/result.json"; else echo "(no result.json produced)"; fi
+if ! eval::require_evaluator_result "$OUT/result.json"; then
+  exit 1
+fi
+cat "$OUT/result.json"
 exit 0

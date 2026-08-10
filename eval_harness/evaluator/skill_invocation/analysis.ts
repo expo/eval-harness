@@ -210,7 +210,7 @@ export async function analyzeArtifacts(args: {
   const evaluatorPct = resultPath === null
     ? null
     : await readEvaluatorPct(resultPath);
-  const buildSuccess = resultPath === null ? null : true;
+  const buildSuccess = evaluatorPct === null ? null : true;
   const score = scoreCaseRun({
     expectedSkills,
     triggeredSkills,
@@ -690,6 +690,7 @@ function filesNamed(files: string[], filename: string): string[] {
 
 async function readEvaluatorPct(resultPath: string): Promise<number | null> {
   const data = await readJsonAsync<Record<string, unknown>>(resultPath);
+  if ("status" in data && data.status !== "completed") return null;
   if (data.macro_avg_pct !== null && data.macro_avg_pct !== undefined) {
     const value = Number(data.macro_avg_pct);
     if (Number.isFinite(value)) return value;

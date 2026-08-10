@@ -138,16 +138,24 @@ esac
 
 # --- 2. built app tree (exclude heavy/derived dirs) ---
 if [ -d "$WORKSPACE" ]; then
+  # Replays can inherit an earlier bundle/app tree. Recreate this owned
+  # destination so excluded build caches cannot survive from that snapshot.
+  rm -rf "$BUNDLE/app"
+  mkdir -p "$BUNDLE/app"
   if command -v rsync >/dev/null 2>&1; then
     rsync -a \
       --exclude node_modules --exclude .expo --exclude .git \
-      --exclude ios/build --exclude android/.gradle --exclude android/build \
-      --exclude .mcp.json \
+      --exclude ios/Pods --exclude ios/build --exclude ios/DerivedData \
+      --exclude android/.gradle --exclude android/build \
+      --exclude .cache --exclude .eval-bundle-export-tmp --exclude .mcp.json \
       "$WORKSPACE/" "$BUNDLE/app/" 2>/dev/null
   else
     cp -R "$WORKSPACE/." "$BUNDLE/app/" 2>/dev/null
     rm -rf "$BUNDLE/app/node_modules" "$BUNDLE/app/.expo" "$BUNDLE/app/.git" \
-           "$BUNDLE/app/ios/build" "$BUNDLE/app/android/.gradle" "$BUNDLE/app/.mcp.json" 2>/dev/null
+           "$BUNDLE/app/ios/Pods" "$BUNDLE/app/ios/build" "$BUNDLE/app/ios/DerivedData" \
+           "$BUNDLE/app/android/.gradle" "$BUNDLE/app/android/build" \
+           "$BUNDLE/app/.cache" "$BUNDLE/app/.eval-bundle-export-tmp" \
+           "$BUNDLE/app/.mcp.json" 2>/dev/null
   fi
 fi
 
@@ -188,7 +196,8 @@ GIT_SHA="$(cd "$ROOT" && git rev-parse --short HEAD 2>/dev/null || echo unknown)
 RESULT_JSON="$OUT/result.json" RUN_ID="$RUN_ID" AGENT="$AGENT" GIT_SHA="$GIT_SHA" \
 PRD="${PRD:-}" TEST_PLAN="${TEST_PLAN:-}" \
 AGENT_MODEL="${AGENT_MODEL:-}" MUSE_CLI_VERSION="${MUSE_CLI_VERSION:-}" METRO_MODE="${METRO_MODE:-}" \
-EVAL_APP_BUNDLE_ID="${EVAL_APP_BUNDLE_ID:-}" EXPO_MCP_AUTH_STATUS="${EXPO_MCP_AUTH_STATUS:-}" \
+EVAL_IOS_APP_MODE="${EVAL_IOS_APP_MODE:-}" EVAL_APP_BUNDLE_ID="${EVAL_APP_BUNDLE_ID:-}" \
+EXPO_MCP_AUTH_STATUS="${EXPO_MCP_AUTH_STATUS:-}" \
 SCENARIO="${SCENARIO:-}" PROMPT_VARIANT="${PROMPT_VARIANT:-}" PROMPT_FILE="${PROMPT_FILE:-}" \
 "$PY" - "$BUNDLE/manifest.json" <<'PYEOF'
 import json, os, sys
@@ -229,6 +238,7 @@ manifest = {
     "agent_model": preferred("AGENT_MODEL", "agent_model"),
     "muse_cli_version": preferred("MUSE_CLI_VERSION", "muse_cli_version"),
     "metro_mode": preferred("METRO_MODE", "metro_mode", "dev-build"),
+    "ios_app_mode": preferred("EVAL_IOS_APP_MODE", "ios_app_mode"),
     "eval_app_bundle_id": preferred("EVAL_APP_BUNDLE_ID", "eval_app_bundle_id"),
     "test_plan": preferred("TEST_PLAN", "test_plan") or "auto-resolved from dataset/prd_test_plans.json",
     "prd": preferred("PRD", "prd", "dataset/prds/hot_chocolate/prd/mvp.txt"),

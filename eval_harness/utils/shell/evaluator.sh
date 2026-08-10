@@ -1,3 +1,46 @@
+eval::require_evaluator_result() { # result_json
+  local result_json="$1"
+  if [ ! -f "$result_json" ]; then
+    echo "  ❌ evaluator did not produce result.json"
+    return 1
+  fi
+  python3 - "$result_json" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+try:
+    with open(path, encoding="utf-8") as handle:
+        result = json.load(handle)
+except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+    print(f"  ❌ evaluator result.json is unreadable: {exc}")
+    raise SystemExit(1)
+
+for field in ("score", "full_points", "macro_avg_pct"):
+    if type(result.get(field)) not in (int, float):
+        print(f"  ❌ evaluator result.json lacks numeric {field}")
+        raise SystemExit(1)
+
+if result.get("status") != "completed":
+    print(f"  ❌ evaluator result.json is incomplete (status={result.get('status')!r})")
+    raise SystemExit(1)
+
+expected = result.get("expected_plan_count")
+terminal = result.get("terminal_plan_count")
+if type(expected) is not int or type(terminal) is not int or expected != terminal:
+    print(
+        "  ❌ evaluator result.json does not contain one terminal result per "
+        f"expected plan (expected={expected!r}, terminal={terminal!r})"
+    )
+    raise SystemExit(1)
+
+errors = result.get("evaluator_errors")
+if not isinstance(errors, list) or errors:
+    print(f"  ❌ evaluator result.json contains evaluator errors: {errors!r}")
+    raise SystemExit(1)
+PY
+}
+
 eval::run_evaluator() { # eval_dir test_plan prd out_json out_dir [extra args...]
   # test_plan may be empty -- when omitted, the Python CLI auto-resolves which
   # test plans are relevant to $prd's app from dataset/prd_test_plans.json
@@ -53,6 +96,9 @@ eval::run_evaluator() { # eval_dir test_plan prd out_json out_dir [extra args...
     fi
     rc=$?
   fi
+  eval::reject_claude_quota_exhaustion "$out/s7-eval.log"
+  local quota_rc=$?
+  [ "$quota_rc" = 0 ] || rc=$quota_rc
   eval::gate $rc "evaluator run"
   [ "$rc" != 0 ] && { echo "  --- s7-eval.log tail ---"; tail -40 "$out/s7-eval.log" | sed 's/^/    /'; }
   return $rc
