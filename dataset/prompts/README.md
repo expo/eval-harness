@@ -9,6 +9,18 @@ one by **id**, via the `prompt_variant` workflow input.
 | `minimal` | [`minimal.md`](minimal.md) | Role and task only, none of baseline's verification instructions. Isolates the harness's guardrails from the agent's own defaults. |
 | `realistic` | [`realistic.md`](realistic.md) | A concise, conversational request for a complete, discoverable, polished Expo experience without baseline's technical build instructions. |
 
+The `realistic` variant is the cross-platform middle ground used by the current
+comparison experiment. Its complete base prompt is:
+
+```text
+Can you build this as an Expo app based on the product brief below?
+I want the core experience to feel complete, with the main actions easy to find and the important details handled thoughtfully.
+It should feel polished enough to give to a real user, not like a demo or rough prototype.
+```
+
+The PRD is appended separately, so the base prompt stays product-oriented and
+does not prescribe implementation details or an iPhone-only target.
+
 ## Adding a variant
 
 1. Add the file here, named for what it *is* (`minimal.md`), not its lineage
@@ -25,12 +37,11 @@ one by **id**, via the `prompt_variant` workflow input.
 
 3. Run it: `eas workflow:run .eas/workflows/eval-e2e.yml --ref main -F prompt_variant=terse ...`
 
-Ids, not paths: a path input silently degrades. An unreadable prompt yields an
-*empty* base prompt, and `author-app.sh` runs under `set -uo pipefail` without
-`-e`, so nothing aborts — the agent authors from the bare PRD with no
-instructions, and that invalid run is still built, evaluated, and scored.
-Resolving an id against the registry turns that into an immediate failure
-before any expensive stage. See
+Use ids, not paths. Without registry validation, an unreadable path could yield
+an empty base prompt and let the agent author from the bare PRD. The current
+prompt preflight prevents that: unknown ids and missing, unreadable, or empty
+prompt files fail before any expensive stage, while the early authoring trap
+still packages truthful failure diagnostics. See
 [`resolve_prompt.sh`](../../eval_harness/utils/shell/resolve_prompt.sh) and its
 tests.
 
