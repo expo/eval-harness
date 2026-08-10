@@ -2,10 +2,8 @@
 # Author an Expo app from a PRD on a cheap Linux worker.
 #
 # This is the first half of eval-e2e.yml. It runs only the coding agent and
-# telemetry sidecars, then lets collect_artifacts.sh package the authored app,
-# reconstructed agent trace, provider proxy logs when enabled, and stage logs.
-# The workflow uploads agent-workspace/ + eval-out/ as the artifact consumed by
-# the macOS eval job.
+# telemetry sidecars, then constructs one canonical authored-app tree containing
+# the sanitized workspace, reconstructed author trace, telemetry, and logs.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
@@ -15,10 +13,14 @@ source "$ROOT/eval_harness/utils/shell/eval_stages.sh"
 
 RUN_ID="${RUN_ID:-$(date +%Y%m%d-%H%M%S)-$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')}"
 RUN_START_MTIME="$(date +%s)"
-OUT="$ROOT/eval-out/$RUN_ID"; mkdir -p "$OUT"
-WORKSPACE="$ROOT/agent-workspace/$RUN_ID"; mkdir -p "$WORKSPACE"
+WORKSPACE_ROOT="$ROOT/author-agent-workspace"
+METADATA_ROOT="$ROOT/author-agent-metadata"
+WORKSPACE="$WORKSPACE_ROOT/$RUN_ID"
+OUT="$METADATA_ROOT/$RUN_ID"
+ARTIFACT_ROOT="$ROOT/authored-app"
+mkdir -p "$OUT" "$WORKSPACE"
 TELEMETRY_DIR="$OUT/telemetry"; mkdir -p "$TELEMETRY_DIR/otel"
-export RUN_ID RUN_START_MTIME OUT WORKSPACE TELEMETRY_DIR
+export RUN_ID RUN_START_MTIME OUT WORKSPACE TELEMETRY_DIR WORKSPACE_ROOT METADATA_ROOT ARTIFACT_ROOT
 
 AGENT="${AGENT:-claude-code}"
 AGENT="$(eval::normalize_authoring_agent "$AGENT")" || exit $?
@@ -78,7 +80,7 @@ echo "RUN_ID=$RUN_ID  AGENT=$AGENT  WORKSPACE=$WORKSPACE"
 } >"$OUT/author.env"
 
 EVAL_PROXY_PIDS=()
-trap 'eval::stop_proxies; eval::cleanup_muse_settings; bash "$ROOT/eval_harness/utils/artifacts/collect_artifacts.sh" "$ROOT" "$RUN_ID" "$OUT" "$WORKSPACE" "$EVAL" "$TELEMETRY_DIR"' EXIT
+trap 'eval::stop_proxies; eval::cleanup_muse_settings; bash "$ROOT/eval_harness/utils/artifacts/collect_author_artifact.sh" "$ROOT" "$RUN_ID" "$WORKSPACE_ROOT" "$METADATA_ROOT" "$ARTIFACT_ROOT"' EXIT
 
 echo "================= STAGE A: coding-agent CLI install ================="
 eval::require_authoring_credentials "$AGENT" "$ROOT" || exit $?

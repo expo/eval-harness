@@ -6,7 +6,7 @@ import { join } from "node:path";
 const REPO_ROOT = join(import.meta.dir, "../../..");
 const AGENTS_SH = join(REPO_ROOT, "eval_harness/utils/shell/agents.sh");
 const PROXY = join(REPO_ROOT, "eval_harness/utils/telemetry/proxy/logging-proxy.mjs");
-const COLLECT_ARTIFACTS = join(REPO_ROOT, "eval_harness/utils/artifacts/collect_artifacts.sh");
+const COLLECT_AUTHOR_ARTIFACT = join(REPO_ROOT, "eval_harness/utils/artifacts/collect_author_artifact.sh");
 const AUTHORING_SCRIPT = join(REPO_ROOT, "eval_harness/app_builder/scripts/author-app.sh");
 const tempDirs: string[] = [];
 const processes: ReturnType<typeof Bun.spawn>[] = [];
@@ -436,10 +436,14 @@ test("Muse cleanup preserves ambient XDG config and removes only harness-owned s
 
 test("Muse artifact collection retains its normalized trace without raw session or proxy data", () => {
   const root = tempDir("muse-artifacts-");
-  const out = join(root, "out");
-  const workspace = join(root, "workspace");
+  const runId = "muse-artifacts-test";
+  const metadataRoot = join(root, "author-agent-metadata");
+  const workspaceRoot = join(root, "author-agent-workspace");
+  const artifact = join(root, "authored-app");
+  const out = join(metadataRoot, runId);
+  const workspace = join(workspaceRoot, runId);
   const settings = tempDir("muse-settings-");
-  const data = join(out, "muse-data");
+  const data = join(out, "muse-xdg-data");
   const result = runBash(`
     set -e
     source "$0"
@@ -451,17 +455,21 @@ test("Muse artifact collection retains its normalized trace without raw session 
     eval::cleanup_muse_settings
     test ! -e "$SETTINGS/muse/settings.json"
     test "$MUSE_DATA_ROOT" = "$DATA"
-    bash "$COLLECT_ARTIFACTS" "$ROOT" "$RUN_ID" "$OUT" "$WORKSPACE" "$ROOT" "$OUT/telemetry"
-    test ! -e "$OUT/bundle/telemetry/muse"
-    test ! -e "$OUT/bundle/telemetry/meta.jsonl"
-    test -e "$OUT/bundle/telemetry/traces/muse-code-authoring.json"
-    grep -q '"muse_cli_version": "muse-test-version"' "$OUT/bundle/manifest.json"
-    ! grep -q '"proxy_meta"' "$OUT/bundle/manifest.json"
+    bash "$COLLECT_AUTHOR_ARTIFACT" "$ROOT" "$RUN_ID" "$WORKSPACE_ROOT" "$METADATA_ROOT" "$ARTIFACT"
+    test ! -e "$ARTIFACT/author-agent-metadata/$RUN_ID/telemetry/muse"
+    test ! -e "$ARTIFACT/author-agent-metadata/$RUN_ID/telemetry/meta.jsonl"
+    test ! -e "$ARTIFACT/author-agent-metadata/$RUN_ID/muse-xdg-data"
+    test -e "$ARTIFACT/author-agent-metadata/$RUN_ID/telemetry/traces/muse-code-authoring.json"
+    grep -q '"muse_cli_version": "muse-test-version"' "$ARTIFACT/manifest.json"
+    ! grep -q '"proxy_meta"' "$ARTIFACT/manifest.json"
   `, {
     ROOT: REPO_ROOT,
-    RUN_ID: "muse-artifacts-test",
+    RUN_ID: runId,
     OUT: out,
     WORKSPACE: workspace,
+    WORKSPACE_ROOT: workspaceRoot,
+    METADATA_ROOT: metadataRoot,
+    ARTIFACT: artifact,
     SETTINGS: settings,
     MUSE_SETTINGS_ROOT: settings,
     MUSE_DATA_ROOT: data,
@@ -469,7 +477,7 @@ test("Muse artifact collection retains its normalized trace without raw session 
     DATA: data,
     AGENT: "muse-code",
     MUSE_CLI_VERSION: "muse-test-version",
-    COLLECT_ARTIFACTS,
+    COLLECT_AUTHOR_ARTIFACT,
   });
 
   expect(result.exitCode).toBe(0);

@@ -2,8 +2,8 @@
 # Build, run, and evaluate an app authored by eval_harness/app_builder/scripts/author-app.sh.
 #
 # This is the macOS half of eval-e2e.yml. The workflow downloads and extracts the
-# authored-app artifact first, so this script expects agent-workspace/<RUN_ID> and
-# eval-out/<RUN_ID>/author.env to already exist.
+# authored-app artifact first. Canonical v2 paths are preferred, while v1
+# agent-workspace/eval-out artifacts remain replayable.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
@@ -13,7 +13,7 @@ source "$ROOT/eval_harness/utils/shell/eval_stages.sh"
 
 AUTHOR_ENV="${AUTHOR_ENV:-}"
 if [ -z "$AUTHOR_ENV" ]; then
-  for f in "$ROOT"/eval-out/*/author.env; do
+  for f in "$ROOT"/author-agent-metadata/*/author.env "$ROOT"/eval-out/*/author.env; do
     [ -f "$f" ] || continue
     AUTHOR_ENV="$f"
     break
@@ -28,9 +28,19 @@ fi
 # shellcheck disable=SC1090
 . "$AUTHOR_ENV"
 
-OUT="$ROOT/eval-out/$RUN_ID"
-WORKSPACE="$ROOT/agent-workspace/$RUN_ID"
+OUT="$ROOT/ios-eval-report"
+mkdir -p "$OUT"
+if [ -d "$ROOT/author-agent-workspace/$RUN_ID" ]; then
+  WORKSPACE="$ROOT/author-agent-workspace/$RUN_ID"
+elif [ -d "$ROOT/agent-workspace/$RUN_ID" ]; then
+  WORKSPACE="$ROOT/agent-workspace/$RUN_ID"
+elif [ -d "$ROOT/eval-out/$RUN_ID/bundle/app" ]; then
+  WORKSPACE="$ROOT/eval-out/$RUN_ID/bundle/app"
+else
+  WORKSPACE="$ROOT/author-agent-workspace/$RUN_ID"
+fi
 TELEMETRY_DIR="$OUT/telemetry"; mkdir -p "$TELEMETRY_DIR/otel"
+EVAL_PHASE_START_MTIME="$(date +%s)"
 METRO_MODE="${METRO_MODE:-dev-build}"
 AGENT="${AGENT:-claude-code}"
 [ "$AGENT" = "claude" ] && AGENT="claude-code"
@@ -45,7 +55,7 @@ PRD="${PRD_OVERRIDE:-${PRD:-dataset/prds/hot_chocolate/prd/mvp.txt}}"
 TEST_PLAN="${TEST_PLAN_OVERRIDE:-}"
 EVALUATOR_MODEL="${EVALUATOR_MODEL:-claude-opus-4-8}"
 EVALUATOR_REASONING_EFFORT="$(eval::resolve_reasoning_effort "${EVALUATOR_REASONING_EFFORT:-}")" || exit $?
-export RUN_ID RUN_START_MTIME OUT WORKSPACE TELEMETRY_DIR METRO_MODE AGENT AGENT_MODEL PRD TEST_PLAN SCENARIO EVALUATOR_MODEL EVALUATOR_REASONING_EFFORT
+export RUN_ID RUN_START_MTIME OUT WORKSPACE TELEMETRY_DIR EVAL_PHASE_START_MTIME METRO_MODE AGENT AGENT_MODEL AGENT_REASONING_EFFORT PRD TEST_PLAN SCENARIO EVALUATOR_MODEL EVALUATOR_REASONING_EFFORT
 
 ANTHROPIC_PROXY_PORT=8082
 OTLP_PORT=4318
@@ -53,7 +63,7 @@ export OTLP_PORT
 
 export CI=1 EXPO_NO_TELEMETRY=1
 # Keep workflow logs readable by default. The evaluator still writes the complete
-# verbose transcript to eval-out/<RUN_ID>/s7-eval.log, which is uploaded as an
+# verbose transcript to ios-eval-report/s7-eval.log, which is uploaded as an
 # artifact. Set EVAL_STREAM_LOGS=1 for live evaluator token/tool logs.
 export EVAL_STREAM_LOGS="${EVAL_STREAM_LOGS:-0}"
 eval::fix_java_home
@@ -62,7 +72,7 @@ echo "RUN_ID=$RUN_ID  WORKSPACE=$WORKSPACE"
 
 EVAL_PROXY_PIDS=()
 EVAL_METRO_PID=""
-trap 'eval::stop_proxies; kill "${EVAL_METRO_PID:-}" 2>/dev/null || true; bash "$ROOT/eval_harness/utils/artifacts/collect_artifacts.sh" "$ROOT" "$RUN_ID" "$OUT" "$WORKSPACE" "$EVAL" "$TELEMETRY_DIR"' EXIT
+trap 'eval::stop_proxies; kill "${EVAL_METRO_PID:-}" 2>/dev/null || true; bash "$ROOT/eval_harness/utils/artifacts/collect_ios_artifact.sh" "$ROOT" "$RUN_ID" "$OUT"' EXIT
 
 echo "================= STAGE D0: macOS eval toolchain ================="
 eval::install_agent_device "$OUT"
