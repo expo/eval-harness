@@ -49,6 +49,23 @@ export async function readJsonAsync<T>(path: string): Promise<T> {
   return JSON.parse(await Bun.file(path).text()) as T;
 }
 
+/** Read a producer manifest's optional run identity without making it analysis-critical. */
+export async function readArtifactRunId(
+  manifestPath: string | null,
+): Promise<string | null> {
+  if (manifestPath === null || !await Bun.file(manifestPath).exists()) {
+    return null;
+  }
+  try {
+    const manifest = await readJsonAsync<Record<string, unknown>>(manifestPath);
+    return typeof manifest.run_id === "string" && manifest.run_id.length > 0
+      ? manifest.run_id
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Write readable JSON with Python-compatible deterministic key ordering.
  *

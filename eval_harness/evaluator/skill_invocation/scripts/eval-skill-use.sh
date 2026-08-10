@@ -19,6 +19,7 @@ if [ -z "$AUTHORED_ARTIFACT" ]; then
   exit 2
 fi
 
+rm -rf -- "$OUT_DIR"
 mkdir -p "$OUT_DIR"
 
 args=(

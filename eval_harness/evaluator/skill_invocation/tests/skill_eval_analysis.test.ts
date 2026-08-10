@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import {
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   symlinkSync,
@@ -139,6 +140,98 @@ function writeFixture(root: string): {
     JSON.stringify({ "expo-test": ["ready-file"] }),
   );
   return { authored, prdSkills, checksDir, app, bundle, trace, manifest };
+}
+
+function writeV2Fixture(root: string): {
+  authored: string;
+  evalArtifact: string;
+  prdSkills: string;
+  checksDir: string;
+} {
+  const authored = join(root, "authored-v2");
+  const app = join(authored, "author-agent-workspace", "run-1");
+  const traces = join(
+    authored,
+    "author-agent-metadata",
+    "run-1",
+    "telemetry",
+    "traces",
+  );
+  mkdirSync(app, { recursive: true });
+  mkdirSync(traces, { recursive: true });
+  writeFileSync(join(app, "package.json"), "{}");
+  writeFileSync(join(app, "ready"), "yes\n");
+  writeFileSync(
+    join(authored, "manifest.json"),
+    JSON.stringify({
+      schema_version: 2,
+      artifact_type: "authored-app",
+      run_id: "run-1",
+      prd: "dataset/prds/test-app/prd/mvp.txt",
+    }),
+  );
+  writeFileSync(
+    join(traces, "muse-code-authoring.json"),
+    JSON.stringify({
+      agent: "muse-code",
+      sessions: [{
+        turns: [{
+          steps: [{
+            tool_calls: [{ name: "Skill", args: { skill: "expo-test" } }],
+          }],
+        }],
+      }],
+    }),
+  );
+  const legacyBundle = join(authored, "bundle");
+  mkdirSync(join(legacyBundle, "app"), { recursive: true });
+  mkdirSync(join(legacyBundle, "telemetry", "traces"), { recursive: true });
+  writeFileSync(join(legacyBundle, "app", "package.json"), "{}");
+  writeFileSync(
+    join(legacyBundle, "telemetry", "traces", "claude-code-authoring.json"),
+    JSON.stringify({ agent: "claude-code", sessions: [] }),
+  );
+
+  const evalArtifact = join(root, "ios-eval-report");
+  mkdirSync(evalArtifact, { recursive: true });
+  writeFileSync(
+    join(evalArtifact, "manifest.json"),
+    JSON.stringify({
+      schema_version: 2,
+      artifact_type: "ios-eval-report",
+      run_id: "run-1",
+    }),
+  );
+  writeFileSync(
+    join(evalArtifact, "result.json"),
+    JSON.stringify({ status: "completed", macro_avg_pct: 87.5 }),
+  );
+  mkdirSync(join(evalArtifact, "bundle", "eval"), { recursive: true });
+  writeFileSync(
+    join(evalArtifact, "bundle", "eval", "result.json"),
+    JSON.stringify({ status: "completed", macro_avg_pct: 12.5 }),
+  );
+
+  const prdSkills = join(root, "prd_skills.json");
+  writeFileSync(prdSkills, JSON.stringify({ "test-app": ["expo-test"] }));
+  const checksDir = join(root, "checks");
+  mkdirSync(checksDir);
+  writeFileSync(
+    join(checksDir, "checks_data.json"),
+    JSON.stringify({
+      checks: [{
+        id: "ready-file",
+        category: "structural",
+        kind: "path_exists",
+        target: ["ready"],
+      }],
+    }),
+  );
+  writeFileSync(
+    join(checksDir, "skill_map.json"),
+    JSON.stringify({ "expo-test": ["ready-file"] }),
+  );
+  return { authored, evalArtifact, prdSkills, checksDir };
 }
 
 const EXPECTED_HAPPY_REPORT = `<!doctype html>
@@ -400,6 +493,29 @@ test("[REGRESSION] artifact discovery and analysis preserve the metrics contract
       .toEqual(expectedPayload);
     expect(readFileSync(join(outDir, "report.html"), "utf8"))
       .toBe(EXPECTED_HAPPY_REPORT);
+  });
+});
+
+test("[REGRESSION] v2 artifact discovery wins over legacy layouts", async () => {
+  // Catches v2 artifacts being silently treated as the legacy stitched bundle.
+  await withTempDirAsync(async (root) => {
+    const fixture = writeV2Fixture(root);
+    const authorLayout = await discoverArtifactLayout(fixture.authored);
+    const evalLayout = await discoverArtifactLayout(fixture.evalArtifact);
+
+    expect(authorLayout.appDir).toEndWith(
+      join("author-agent-workspace", "run-1"),
+    );
+    expect(authorLayout.tracePath).toEndWith(
+      join(
+        "author-agent-metadata",
+        "run-1",
+        "telemetry",
+        "traces",
+        "muse-code-authoring.json",
+      ),
+    );
+    expect(evalLayout.resultPath).toEndWith(join("ios-eval-report", "result.json"));
   });
 });
 
@@ -816,6 +932,54 @@ test("[CHAR] Bun CLI writes reports and the stable console summary", () => {
   });
 });
 
+test("[REGRESSION] CLI discards extracted sources after analyzing a v2 archive", () => {
+  // Catches report artifacts shipping the authored source tree or scratch
+  // extraction directories after a successful CLI run.
+  withTempDir((root) => {
+    const fixture = writeV2Fixture(root);
+    const archive = join(root, "authored-v2.tar.gz");
+    const outDir = join(root, "skill-eval-report");
+    createArchive(
+      { file: archive, cwd: fixture.authored, gzip: true, sync: true },
+      ["."],
+    );
+
+    const spawned = Bun.spawnSync([
+      process.execPath,
+      CLI_PATH,
+      "analyze-artifacts",
+      "--authored-artifact",
+      archive,
+      "--scenario",
+      "skills_available_unmentioned",
+      "--out-dir",
+      outDir,
+      "--prd-skills",
+      fixture.prdSkills,
+      "--checks-dir",
+      fixture.checksDir,
+    ], { stdout: "pipe", stderr: "pipe" });
+
+    expect(spawned.exitCode).toBe(0);
+    expect(spawned.stderr.toString()).toBe("");
+    expect(readdirSync(outDir).sort()).toEqual([
+      "manifest.json",
+      "metrics.json",
+      "report.html",
+    ]);
+    expect(JSON.parse(readFileSync(join(outDir, "manifest.json"), "utf8")))
+      .toEqual({
+        schema_version: 2,
+        artifact_type: "skill-eval-report",
+        run_id: "run-1",
+        artifacts: {
+          metrics: "metrics.json",
+          report: "report.html",
+        },
+      });
+  });
+});
+
 test("[CHAR] Bun CLI accepts Python's unique long-option abbreviations", () => {
   withTempDir((root) => {
     const fixture = writeFixture(root);
@@ -900,6 +1064,7 @@ test("[REGRESSION] shell entrypoint runs with Bun and no Python executable", () 
       ["dirname", "/usr/bin/dirname"],
       ["find", "/usr/bin/find"],
       ["mkdir", "/bin/mkdir"],
+      ["rm", "/bin/rm"],
       ["sort", "/usr/bin/sort"],
     ];
     for (const [name, target] of requiredCommands) {

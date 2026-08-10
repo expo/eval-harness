@@ -1,3 +1,5 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { analyzeArtifacts, printSummary } from "./analysis.ts";
@@ -62,25 +64,37 @@ export async function runCli(argv: string[]): Promise<number> {
   }
   const parsed = parseAnalyzeOptions(argv.slice(1));
   if (typeof parsed === "number") return parsed;
-  const unpackRoot = path.join(parsed.outDir, "unpacked");
-  const authored = unpackArtifact(
-    parsed.authoredArtifact,
-    path.join(unpackRoot, "authored"),
-  );
-  const evalArtifact = parsed.evalArtifact === null ||
-      ["undefined", "null", ""].includes(parsed.evalArtifact)
-    ? null
-    : unpackArtifact(parsed.evalArtifact, path.join(unpackRoot, "eval"));
-  const payload = await analyzeArtifacts({
-    authoredArtifact: authored,
-    evalArtifact,
-    scenario: parsed.scenario,
-    outDir: parsed.outDir,
-    prdSkillsPath: parsed.prdSkills,
-    checksDir: parsed.checksDir,
-  });
-  printSummary(payload);
-  return 0;
+  const scratch = mkdtempSync(path.join(tmpdir(), "expo-skill-eval-"));
+  try {
+    const authored = unpackArtifact(
+      parsed.authoredArtifact,
+      path.join(scratch, "authored"),
+    );
+    const evalArtifact = parsed.evalArtifact === null ||
+        ["undefined", "null", ""].includes(parsed.evalArtifact)
+      ? null
+      : unpackArtifact(parsed.evalArtifact, path.join(scratch, "eval"));
+    const payload = await analyzeArtifacts({
+      authoredArtifact: authored,
+      evalArtifact,
+      scenario: parsed.scenario,
+      outDir: parsed.outDir,
+      prdSkillsPath: parsed.prdSkills,
+      checksDir: parsed.checksDir,
+      ...(path.isAbsolute(parsed.authoredArtifact)
+        ? {}
+        : { authoredArtifactDisplayRoot: parsed.authoredArtifact }),
+      ...(evalArtifact === null ||
+          parsed.evalArtifact === null ||
+          path.isAbsolute(parsed.evalArtifact)
+        ? {}
+        : { evalArtifactDisplayRoot: parsed.evalArtifact }),
+    });
+    printSummary(payload);
+    return 0;
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
 }
 
 function parseAnalyzeOptions(argv: string[]): AnalyzeOptions | number {

@@ -32,6 +32,7 @@ import {
   dedupe,
   flattenStrings,
   loadPrdSkillsAsync,
+  readArtifactRunId,
   readJsonAsync,
   roundFloat,
   writeJsonAsync,
@@ -137,6 +138,16 @@ export type SkillEvalPayload = {
   [key: string]: unknown;
 };
 
+export type SkillEvalReportManifest = {
+  schema_version: 2;
+  artifact_type: "skill-eval-report";
+  run_id: string | null;
+  artifacts: {
+    metrics: "metrics.json";
+    report: "report.html";
+  };
+};
+
 export async function analyzeArtifacts(args: {
   authoredArtifact: string;
   evalArtifact: string | null;
@@ -144,6 +155,8 @@ export async function analyzeArtifacts(args: {
   outDir: string;
   prdSkillsPath: string;
   checksDir: string;
+  authoredArtifactDisplayRoot?: string;
+  evalArtifactDisplayRoot?: string;
 }): Promise<SkillEvalPayload> {
   await mkdir(args.outDir, { recursive: true });
   const [authorLayout, evalLayout] = await Promise.all([
@@ -247,21 +260,85 @@ export async function analyzeArtifacts(args: {
     runs: [run],
     skills: skillResults,
     artifacts: {
-      authored_root: authorLayout.root,
-      app_dir: authorLayout.appDir,
-      author_trace: authorLayout.tracePath,
-      author_manifest: authorLayout.manifestPath,
-      eval_root: evalLayout?.root ?? null,
-      eval_result: resultPath,
-      eval_manifest: evalLayout?.manifestPath ?? null,
+      authored_root: displayArtifactPath(
+        authorLayout.root,
+        authorLayout.root,
+        args.authoredArtifactDisplayRoot,
+      ),
+      app_dir: displayArtifactPath(
+        authorLayout.appDir,
+        authorLayout.root,
+        args.authoredArtifactDisplayRoot,
+      ),
+      author_trace: displayArtifactPath(
+        authorLayout.tracePath,
+        authorLayout.root,
+        args.authoredArtifactDisplayRoot,
+      ),
+      author_manifest: displayArtifactPath(
+        authorLayout.manifestPath,
+        authorLayout.root,
+        args.authoredArtifactDisplayRoot,
+      ),
+      eval_root: displayArtifactPath(
+        evalLayout?.root ?? null,
+        evalLayout?.root ?? null,
+        args.evalArtifactDisplayRoot,
+      ),
+      eval_result: displayArtifactPath(
+        resultPath,
+        evalLayout?.root ?? null,
+        args.evalArtifactDisplayRoot,
+      ),
+      eval_manifest: displayArtifactPath(
+        evalLayout?.manifestPath ?? null,
+        evalLayout?.root ?? null,
+        args.evalArtifactDisplayRoot,
+      ),
     },
     braintrust_refs: await collectBraintrustRefs(authorLayout, evalLayout, trace),
   };
   await Promise.all([
     writeJsonAsync(payload as JsonObject, path.join(args.outDir, "metrics.json")),
     writeHtmlReport(payload, path.join(args.outDir, "report.html")),
+    writeSkillEvalManifest(
+      args.outDir,
+      await readArtifactRunId(authorLayout.manifestPath) ??
+        artifactRunIdFromLayout(authorLayout),
+    ),
   ]);
   return payload;
+}
+
+function displayArtifactPath(
+  actualPath: string | null,
+  actualRoot: string | null,
+  displayRoot: string | undefined,
+): string | null {
+  if (actualPath === null || actualRoot === null || displayRoot === undefined) {
+    return actualPath;
+  }
+  const relativePath = path.relative(actualRoot, actualPath);
+  return relativePath === "" ? displayRoot : path.join(displayRoot, relativePath);
+}
+
+async function writeSkillEvalManifest(
+  outDir: string,
+  runId: string | null,
+): Promise<void> {
+  const manifest: SkillEvalReportManifest = {
+    schema_version: 2,
+    artifact_type: "skill-eval-report",
+    run_id: runId,
+    artifacts: {
+      metrics: "metrics.json",
+      report: "report.html",
+    },
+  };
+  await writeJsonAsync(
+    manifest as unknown as JsonObject,
+    path.join(outDir, "manifest.json"),
+  );
 }
 
 async function resolveAppExpectedSkills(
@@ -322,16 +399,16 @@ export async function discoverArtifactLayout(root: string): Promise<ArtifactLayo
   return {
     root: normalizedRoot,
     appDir: findAppDir(normalizedRoot, files),
-    tracePath: findTrace(files),
+    tracePath: findTrace(normalizedRoot, files),
     manifestPath: firstExisting(
       normalizedRoot,
-      ["bundle/manifest.json", "manifest.json"],
+      ["manifest.json", "bundle/manifest.json"],
       "manifest.json",
       files,
     ),
     resultPath: firstExisting(
       normalizedRoot,
-      ["bundle/eval/result.json", "eval/result.json", "result.json"],
+      ["result.json", "bundle/eval/result.json", "eval/result.json"],
       "result.json",
       files,
     ),
@@ -610,13 +687,24 @@ export async function writeHtmlReport(
 
 function findAppDir(root: string, files: string[]): string | null {
   const fileSet = new Set(files);
+  const canonicalWorkspacePackages = filesNamed(files, "package.json")
+    .filter((candidate) => {
+      const parts = path.relative(root, candidate).split(path.sep);
+      return parts.length === 3 &&
+        parts[0] === "author-agent-workspace" &&
+        parts[2] === "package.json";
+    })
+    .sort(compareUnicodeCodePoints);
+  if (canonicalWorkspacePackages[0] !== undefined) {
+    return path.dirname(canonicalWorkspacePackages[0]);
+  }
   for (const candidate of [
     path.join(root, "bundle", "app"),
     path.join(root, "app"),
   ]) {
     if (fileSet.has(path.join(candidate, "package.json"))) return candidate;
   }
-  const workspacePackages = filesNamed(files, "package.json")
+  const legacyWorkspacePackages = filesNamed(files, "package.json")
     .filter((candidate) => {
       const parts = path.relative(root, candidate).split(path.sep);
       return parts.length === 3 &&
@@ -624,8 +712,8 @@ function findAppDir(root: string, files: string[]): string | null {
         parts[2] === "package.json";
     })
     .sort(compareUnicodeCodePoints);
-  if (workspacePackages[0] !== undefined) {
-    return path.dirname(workspacePackages[0]);
+  if (legacyWorkspacePackages[0] !== undefined) {
+    return path.dirname(legacyWorkspacePackages[0]);
   }
   const packages = filesNamed(files, "package.json").sort(
     compareUnicodeCodePoints,
@@ -638,7 +726,20 @@ function findAppDir(root: string, files: string[]): string | null {
   return null;
 }
 
-function findTrace(files: string[]): string | null {
+function findTrace(root: string, files: string[]): string | null {
+  for (const name of TRACE_CANDIDATES) {
+    const match = files
+      .filter((candidate) => {
+        const parts = path.relative(root, candidate).split(path.sep);
+        return parts.length === 5 &&
+          parts[0] === "author-agent-metadata" &&
+          parts[2] === "telemetry" &&
+          parts[3] === "traces" &&
+          parts[4] === name;
+      })
+      .sort(compareUnicodeCodePoints)[0];
+    if (match !== undefined) return match;
+  }
   for (const name of TRACE_CANDIDATES) {
     const match = files
       .filter((candidate) => path.basename(candidate) === name)
@@ -646,6 +747,14 @@ function findTrace(files: string[]): string | null {
     if (match !== undefined) return match;
   }
   return null;
+}
+
+function artifactRunIdFromLayout(layout: ArtifactLayout): string | null {
+  if (layout.appDir === null) return null;
+  const parent = path.basename(path.dirname(layout.appDir));
+  return parent === "author-agent-workspace" || parent === "agent-workspace"
+    ? path.basename(layout.appDir)
+    : null;
 }
 
 function firstExisting(
