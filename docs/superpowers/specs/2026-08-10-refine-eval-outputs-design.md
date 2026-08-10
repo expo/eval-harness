@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-10  
 **Branch:** `codex/refine-eval-outputs`  
-**Status:** Approved visual direction; technical design awaiting review
+**Status:** Approved v3 visual direction and technical design
 
 ## Goal
 
@@ -392,16 +392,20 @@ screenshots materially increase artifact size.
 
 ## HTML Report
 
-The single static, offline `report.html` follows the approved visual direction:
+The single static, offline `report.html` follows the approved v3 visual
+direction on a pale blue canvas:
 
-1. Navy run header with PRD, harness/model, reasoning, prompt, scenario, and SHA
-2. Outcome cards for iOS quality, skill recall, skill uptake, and run status
-3. Build/evaluation ladder
-4. Side-by-side skill-use and iOS product-flow summaries
-5. Screenshot gallery, failed steps first
-6. Expandable skill-check and assertion-level evidence
-7. Secondary run details: token/cache usage, cost when known, durations, tool
-   calls, skill reads, CLI/SDK versions, warnings, and machine-data paths
+1. Dark slate hero with the product title and compact model, reasoning, prompt,
+   scenario, and revision pills
+2. Four rounded, softly tinted metric cards for iOS quality, skill recall,
+   skill uptake, and run status
+3. One rounded white horizontal build/evaluation ladder with CSS status dots,
+   connectors, and explicit status text
+4. Paired rounded Skill use and iOS behavior cards
+5. Rounded screenshot-evidence grid, failed steps first
+6. Compact Run details card for usage, tool calls, skill reads, versions,
+   warnings, identity, and machine-data paths
+7. Expandable skill-check, plan, assertion, and abort-diagnostic evidence
 
 The report contains no generated narrative verdict. It uses semantic HTML,
 escaped artifact-controlled values, accessible color-plus-text statuses,

@@ -1216,8 +1216,8 @@ describe("renderReport", () => {
     return html.slice(start, end + tag.length + 3);
   }
 
-  test("renders the approved postmortem hierarchy and explicit status text", async () => {
-    // Catches a generic dashboard replacing the ordered dossier and status-readable run spine.
+  test("renders the approved rounded single-run report and explicit status text", async () => {
+    // Catches the hard-edged dossier replacing the approved v3 single-run report.
     const summary = await fixtureSummary();
     summary.build_health[0]!.status = "failed";
     summary.build_health[1]!.status = "warning";
@@ -1227,11 +1227,11 @@ describe("renderReport", () => {
     const html = renderReport(summary);
     const headings: Array<[string, string]> = [
       ["Build and evaluation ladder", '<h2 id="ladder-title">Build and evaluation ladder</h2>'],
-      ["Skill use", '<h2 id="results-title">Skill use</h2>'],
-      ["iOS behavior", "<h3>iOS behavior</h3>"],
+      ["Skill use", '<h2 id="skills-title">Skill use</h2>'],
+      ["iOS behavior", '<h2 id="ios-title">iOS behavior</h2>'],
       ["Visual evidence", '<h2 id="evidence-title">Visual evidence</h2>'],
-      ["Evaluation details", '<h2 id="details-title">Evaluation details</h2>'],
-      ["Run telemetry and provenance", '<h2 id="telemetry-title">Run telemetry and provenance</h2>'],
+      ["Run details", '<h2 id="run-details-title">Run details</h2>'],
+      ["Detailed evidence", '<h2 id="details-title">Detailed evidence</h2>'],
     ];
     for (const [, token] of headings) expect(html).toContain(token);
     for (let index = 1; index < headings.length; index += 1) {
@@ -1245,6 +1245,23 @@ describe("renderReport", () => {
     expect(html).toContain("Skill recall");
     expect(html).toContain("Skill uptake");
     expect(html).toContain("Run status");
+    expect(html).toContain('<header class="hero">');
+    expect(html).toContain("Notes, built by Muse Code");
+    expect(html).toContain('<div class="hero-chips"');
+    expect(html).toContain('<section class="metrics"');
+    expect(html).toContain('<section class="panel ladder-panel"');
+    expect(html).toContain('<ol class="ladder"');
+    expect(html).toContain('<div class="split"');
+    expect(html).toContain('<section class="panel evidence-panel"');
+    expect(html).toContain('<section class="panel run-details-panel"');
+    expect(html).toContain("--canvas: #EEF2F5;");
+    expect(html).toContain("--navy: #20384D;");
+    expect(html).toContain("border-radius: 14px;");
+    expect(html).toContain('<span class="status-dot" aria-hidden="true"></span>');
+    expect(html).not.toContain("run-spine");
+    expect(html).not.toMatch(/[✓×→]/);
+    expect(html).toContain('<meta charset="utf-8">');
+    expect(html).not.toMatch(/[âðï�]/i);
   });
 
   test("places failed final-state evidence before passing evidence", async () => {
@@ -1275,14 +1292,14 @@ describe("renderReport", () => {
     const partialCard = elementContaining(partial, "article", "Run status");
     const failedCard = elementContaining(failed, "article", "Run status");
     expect(completeCard).toContain("score-card score-passed");
-    expect(completeCard).toContain("> Complete</span>");
+    expect(completeCard).toContain(">Complete</span>");
     expect(completeCard).toContain('<p class="score-value">Complete</p>');
     expect(completeCard).not.toContain("Passed");
     expect(partialCard).toContain("score-card score-warning");
-    expect(partialCard).toContain("> Partial</span>");
+    expect(partialCard).toContain(">Partial</span>");
     expect(partialCard).toContain('<p class="score-value">Partial</p>');
     expect(failedCard).toContain("score-card score-failed");
-    expect(failedCard).toContain("> Failed</span>");
+    expect(failedCard).toContain(">Failed</span>");
     expect(failedCard).toContain('<p class="score-value">Failed</p>');
   });
 
@@ -1361,13 +1378,13 @@ describe("renderReport", () => {
     const malformedAuthor = malformed.run.author as Record<string, unknown>;
 
     expect(observedAuthor.skill_reads).toEqual([]);
-    expect(telemetryCard(renderReport(observed), "Skill reads")).toContain("<dd>None</dd>");
+    expect(telemetryCard(renderReport(observed), "Author usage")).toContain("<dt>Skill reads</dt><dd>None</dd>");
     expect("skill_reads" in missingAuthor).toBe(false);
-    expect(telemetryCard(renderReport(missing), "Skill reads"))
-      .toContain("<dd>Not recorded</dd>");
+    expect(telemetryCard(renderReport(missing), "Author usage"))
+      .toContain("<dt>Skill reads</dt><dd>Not recorded</dd>");
     expect("skill_reads" in malformedAuthor).toBe(false);
-    expect(telemetryCard(renderReport(malformed), "Skill reads"))
-      .toContain("<dd>Not recorded</dd>");
+    expect(telemetryCard(renderReport(malformed), "Author usage"))
+      .toContain("<dt>Skill reads</dt><dd>Not recorded</dd>");
   });
 
   test("escapes adversarial data and emits no executable or remote content", async () => {
@@ -1426,8 +1443,8 @@ describe("renderReport", () => {
   });
 
   test("uses a normal-text accessible warning token", async () => {
-    // #8A5A0A has a contrast ratio above 4.5:1 against the white report surface.
-    expect(renderReport(await fixtureSummary())).toContain("--warn: #8A5A0A;");
+    // #805F27 has a contrast ratio above 4.5:1 against the white report surface.
+    expect(renderReport(await fixtureSummary())).toContain("--warn: #805F27;");
   });
 });
 
