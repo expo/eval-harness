@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import subprocess
 import tarfile
 import tempfile
@@ -10,6 +11,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 COLLECTOR = ROOT / "eval_harness/utils/artifacts/collect_author_artifact.sh"
 PACKAGER = ROOT / "eval_harness/utils/artifacts/package_artifact.sh"
+AUTHOR_SCRIPT = ROOT / "eval_harness/app_builder/scripts/author-app.sh"
+PROMPT_RESOLVER = ROOT / "eval_harness/utils/shell/resolve_prompt.sh"
 
 
 def write(path: Path, contents: str = "fixture") -> None:
@@ -18,6 +21,113 @@ def write(path: Path, contents: str = "fixture") -> None:
 
 
 class AuthorArtifactTests(unittest.TestCase):
+    def test_authoring_records_a_failed_structured_export_as_warning(self) -> None:
+        """An `ok: false` export result must not become a passed manifest stage."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            run_id = "export-failure"
+            author_script = root / "eval_harness/app_builder/scripts/author-app.sh"
+            collector = root / "eval_harness/utils/artifacts/collect_author_artifact.sh"
+            prompt_resolver = root / "eval_harness/utils/shell/resolve_prompt.sh"
+            stages = root / "eval_harness/utils/shell/eval_stages.sh"
+            fake_bin = root / "bin"
+            author_script.parent.mkdir(parents=True)
+            collector.parent.mkdir(parents=True)
+            prompt_resolver.parent.mkdir(parents=True)
+            shutil.copy2(AUTHOR_SCRIPT, author_script)
+            shutil.copy2(COLLECTOR, collector)
+            shutil.copy2(PROMPT_RESOLVER, prompt_resolver)
+            (root / "dataset").symlink_to(ROOT / "dataset", target_is_directory=True)
+            write(
+                stages,
+                """eval::normalize_authoring_agent() { printf '%s\\n' "$1"; }
+eval::resolve_authoring_model() { printf '%s\\n' "${2:-muse-spark-1.2}"; }
+eval::resolve_reasoning_effort() { printf '%s\\n' "${1:-high}"; }
+eval::env_banner() { :; }
+eval::stop_proxies() { :; }
+eval::cleanup_muse_settings() { :; }
+eval::require_authoring_credentials() { :; }
+eval::install_uv_and_evaluator() { :; }
+eval::install_muse_cli() { :; }
+eval::gate() { return "$1"; }
+eval::configure_expo_mcp() { return 1; }
+eval::configure_muse_settings() { :; }
+eval::run_coding_agent() {
+  mkdir -p "$3"
+  printf '{"name":"fixture"}\\n' > "$3/package.json"
+  printf 'author log\\n' > "$5/c-agent.log"
+}
+eval::require_authored_app() { test "$1" = 0 && test -f "$2/package.json"; }
+""",
+            )
+            write(
+                fake_bin / "bun",
+                """#!/usr/bin/env bash
+set -eu
+for arg in "$@"; do
+  case "$arg" in
+    *bundle_check.ts)
+      workspace="${!#}"
+      printf '%s\\n' '{"ok":false,"reason":"fixture export failure"}' > "$workspace/.eval-build-health-bundle.json"
+      printf '%s\\n' 'bundle check: fixture export failure'
+      exit 0
+      ;;
+  esac
+done
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "--out" ]; then
+    mkdir -p "$(dirname "$2")"
+    printf '%s\\n' '{"n_sessions":1,"sessions":[]}' > "$2"
+    exit 0
+  fi
+  shift
+done
+""",
+            )
+            write(fake_bin / "npm", "#!/usr/bin/env bash\nexit 0\n")
+            write(fake_bin / "eas", "#!/usr/bin/env bash\nexit 0\n")
+            for executable in (fake_bin / "bun", fake_bin / "npm", fake_bin / "eas"):
+                executable.chmod(0o755)
+
+            env = os.environ.copy()
+            env.update(
+                {
+                    "PATH": f"{fake_bin}:{env['PATH']}",
+                    "AGENT": "muse-code",
+                    "RUN_ID": run_id,
+                    "PRD": "dataset/prds/notes/prd/mvp.txt",
+                }
+            )
+            result = subprocess.run(
+                ["bash", str(author_script)],
+                cwd=root,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            manifest = json.loads(
+                (root / "authored-app/manifest.json").read_text(encoding="utf-8")
+            )
+            export_stage = manifest["build_health"]["expo_export"]
+            self.assertEqual(export_stage["status"], "warning")
+            self.assertEqual(
+                export_stage["log"],
+                f"author-agent-metadata/{run_id}/logs/d-expo-export.log",
+            )
+            self.assertIn(
+                "fixture export failure",
+                (
+                    root
+                    / "authored-app"
+                    / "author-agent-metadata"
+                    / run_id
+                    / "logs/d-expo-export.log"
+                ).read_text(encoding="utf-8"),
+            )
+
     def test_canonical_artifact_has_one_sanitized_source_and_metadata_tree(self) -> None:
         """A collector regression must not duplicate source or ship transient secrets."""
         with tempfile.TemporaryDirectory() as td:

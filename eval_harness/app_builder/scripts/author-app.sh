@@ -179,7 +179,23 @@ else BH_TO="bun $ROOT/eval_harness/utils/shell/timeout_exec.ts 240"; fi
 AUTHOR_EXPO_EXPORT_STATUS=warning
 if ( cd "$ROOT" && $BH_TO bun eval_harness/evaluator/skill_invocation/build_health/bundle_check.ts "$WORKSPACE" ) \
   >"$OUT/d-expo-export.log" 2>&1; then
-  AUTHOR_EXPO_EXPORT_STATUS=passed
+  if "$(command -v python3 || command -v python)" - "$WORKSPACE/.eval-build-health-bundle.json" <<'PYEOF'
+import json
+import sys
+
+try:
+    with open(sys.argv[1], encoding="utf-8") as handle:
+        result = json.load(handle)
+except (OSError, UnicodeError, json.JSONDecodeError):
+    raise SystemExit(1)
+
+raise SystemExit(0 if isinstance(result, dict) and result.get("ok") is True else 1)
+PYEOF
+  then
+    AUTHOR_EXPO_EXPORT_STATUS=passed
+  else
+    echo "  ⚠️  build-health Expo export did not pass (continuing; see d-expo-export.log)"
+  fi
 else
   echo "  ⚠️  build-health bundle check failed to run (continuing; see d-expo-export.log)"
 fi
