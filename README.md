@@ -158,7 +158,6 @@ eas workflow:run .eas/workflows/eval-e2e.yml \
   -F agent=claude-code \
   -F agent_reasoning_effort=high \
   -F evaluator_model=claude-opus-4-8 \
-  -F evaluator_reasoning_effort=high \
   -F prd=dataset/prds/notes/prd/mvp.txt \
   -F run_eval_ios=true \
   -F run_eval_skill=true \
@@ -172,14 +171,16 @@ optional; the EAS dashboard continues the run if you disconnect.
 ### Model, reasoning, and prompt controls
 
 `agent_model` is optional and resolves according to the selected authoring
-harness. Author and evaluator reasoning both default to `high`:
+harness. Author reasoning is configurable and defaults to `high`. In the full
+E2E workflow, the iOS evaluator runs at `high` reasoning in `release` app mode;
+those two settings stay configurable in the `eval-ios-app.yml` replay workflow.
 
 | Role | Default model | Model input | Effort input |
 |---|---|---|---|
 | Claude Code author | `sonnet` | `agent_model` | `agent_reasoning_effort` |
 | Codex author | `gpt-5-mini` | `agent_model` | `agent_reasoning_effort` |
 | Muse Code author | `muse-spark-1.2` | `agent_model` | `agent_reasoning_effort` |
-| iOS evaluator | `claude-opus-4-8` | `evaluator_model` | `evaluator_reasoning_effort` |
+| iOS evaluator | `claude-opus-4-8` | `evaluator_model` | Fixed `high` in full E2E; `evaluator_reasoning_effort` in replay |
 
 The accepted effort values are `low`, `medium`, and `high`. For the planned
 frontier-model comparison, keep the evaluator fixed at
@@ -190,7 +191,7 @@ frontier-model comparison, keep the evaluator fixed at
 eas workflow:run .eas/workflows/eval-e2e.yml \
   -F agent=claude-code -F agent_model=claude-opus-5 \
   -F agent_reasoning_effort=high \
-  -F evaluator_model=claude-opus-4-8 -F evaluator_reasoning_effort=high \
+  -F evaluator_model=claude-opus-4-8 \
   -F prd=dataset/prds/notes/prd/mvp.txt -F prompt_variant=realistic \
   -F skill_scenario=skills_available_unmentioned \
   -F run_eval_ios=true -F run_eval_skill=true
@@ -199,7 +200,7 @@ eas workflow:run .eas/workflows/eval-e2e.yml \
 eas workflow:run .eas/workflows/eval-e2e.yml \
   -F agent=codex -F agent_model=gpt-5.6-sol \
   -F agent_reasoning_effort=high \
-  -F evaluator_model=claude-opus-4-8 -F evaluator_reasoning_effort=high \
+  -F evaluator_model=claude-opus-4-8 \
   -F prd=dataset/prds/notes/prd/mvp.txt -F prompt_variant=realistic \
   -F skill_scenario=skills_available_unmentioned \
   -F run_eval_ios=true -F run_eval_skill=true
@@ -208,7 +209,7 @@ eas workflow:run .eas/workflows/eval-e2e.yml \
 eas workflow:run .eas/workflows/eval-e2e.yml \
   -F agent=muse-code -F agent_model=muse-spark-1.2 \
   -F agent_reasoning_effort=high \
-  -F evaluator_model=claude-opus-4-8 -F evaluator_reasoning_effort=high \
+  -F evaluator_model=claude-opus-4-8 \
   -F prd=dataset/prds/notes/prd/mvp.txt -F prompt_variant=realistic \
   -F skill_scenario=skills_available_unmentioned \
   -F run_eval_ios=true -F run_eval_skill=true
@@ -426,7 +427,9 @@ eas workflow:run .eas/workflows/author-app.yml \
 Use `eval-ios-app.yml` to replay the iOS/evaluator half against a previously
 uploaded `authored-app` artifact after changing evaluator, build, restart, or
 probe logic. It accepts an EAS artifact ID or signed URL and uploads the same
-canonical `ios-eval-report` contract as the full flow.
+canonical `ios-eval-report` contract as the full flow. Unlike the full E2E
+workflow, the replay entrypoint exposes `ios_app_mode` and
+`evaluator_reasoning_effort` for focused diagnostics.
 
 Use `eval-skill-use.yml` to replay the skill-use analyzer against a prior
 `authored-app` artifact, optionally with an `ios-eval-report` artifact. It also

@@ -50,15 +50,6 @@ on:
         default: claude-opus-4-8
         required: false
         description: Claude model used only by the iOS evaluator
-      evaluator_reasoning_effort:
-        type: choice
-        options:
-          - low
-          - medium
-          - high
-        default: high
-        required: false
-        description: Reasoning effort for the iOS evaluator
       prd:
         type: string
         default: dataset/prds/hot_chocolate/prd/mvp.txt
@@ -67,14 +58,6 @@ on:
           PRD path under dataset/. Also determines which test plans run in
           eval_ios (auto-resolved from dataset/prd_test_plans.json) and which
           skills are expected in eval_skill (dataset/prd_skills.json).
-      ios_app_mode:
-        type: choice
-        options:
-          - dev-client
-          - release
-        default: release
-        required: false
-        description: iOS app mode to build for evaluation
       run_eval_ios:
         type: boolean
         default: false
@@ -154,9 +137,9 @@ jobs:
       AGENT_MODEL: ${{ inputs.agent_model || '' }}
       AGENT_REASONING_EFFORT: ${{ inputs.agent_reasoning_effort || 'high' }}
       EVALUATOR_MODEL: ${{ inputs.evaluator_model || 'claude-opus-4-8' }}
-      EVALUATOR_REASONING_EFFORT: ${{ inputs.evaluator_reasoning_effort || 'high' }}
+      EVALUATOR_REASONING_EFFORT: high
       PRD_OVERRIDE: ${{ inputs.prd || '' }}
-      EVAL_IOS_APP_MODE: ${{ inputs.ios_app_mode || 'release' }}
+      EVAL_IOS_APP_MODE: release
     steps:
       - uses: eas/checkout
 

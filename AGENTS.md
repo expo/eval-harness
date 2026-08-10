@@ -62,8 +62,10 @@ runner plus uploaded artifacts.
 - Model selection is configurable. Default author models are `sonnet`,
   `gpt-5-mini`, and `muse-spark-1.2` for Claude Code, Codex, and Muse Code.
   Author effort defaults to `high`. The iOS evaluator defaults to
-  `claude-opus-4-8` at `high`; keep that judge fixed when comparing author
-  models unless the experiment explicitly varies it.
+  `claude-opus-4-8`; the full E2E workflow fixes its effort at `high` and app
+  mode at `release` to stay within EAS's ten-input dispatch limit. The iOS
+  replay workflow retains both controls. Keep the judge fixed when comparing
+  author models unless the experiment explicitly varies it.
 - `eval_harness/legacy/` is archival. Do not wire new workflows or docs to files there.
 - Do not add new root-level folders unless there is a strong reason. Runtime
   code should live under `eval_harness/app_builder/`, `eval_harness/evaluator/`,

@@ -17,7 +17,37 @@ def workflow(name: str) -> str:
     return (WORKFLOW_ROOT / name).read_text(encoding="utf-8")
 
 
+def workflow_dispatch_input_names(name: str) -> tuple[str, ...]:
+    contents = workflow(name)
+    match = re.search(
+        r"^  workflow_dispatch:\n    inputs:\n(?P<inputs>(?:^      .*\n|^        .*\n|^\s*$)+)",
+        contents,
+        re.MULTILINE,
+    )
+    if match is None:
+        return ()
+    return tuple(
+        input_match.group(1)
+        for input_match in re.finditer(
+            r"^      ([A-Za-z0-9_]+):\s*$",
+            match.group("inputs"),
+            re.MULTILINE,
+        )
+    )
+
+
 class WorkflowContractTests(unittest.TestCase):
+    def test_active_dispatches_stay_within_eas_ten_input_limit(self) -> None:
+        """Adding an eleventh declared input makes EAS reject the run before creation."""
+        for name in ACTIVE_WORKFLOWS:
+            with self.subTest(workflow=name):
+                input_names = workflow_dispatch_input_names(name)
+                self.assertTrue(input_names)
+                self.assertLessEqual(len(input_names), 10, input_names)
+
+        e2e_inputs = workflow_dispatch_input_names("eval-e2e.yml")
+        self.assertEqual(len(e2e_inputs), 10, e2e_inputs)
+
     def test_active_workflows_use_only_canonical_runtime_and_artifact_names(self) -> None:
         """The active EAS surface must not recreate a legacy transport layout."""
         for name in ACTIVE_WORKFLOWS:
@@ -44,7 +74,7 @@ class WorkflowContractTests(unittest.TestCase):
                     contents,
                 )
 
-    def test_ios_workflows_expose_and_pass_pinned_evaluator_controls(self) -> None:
+    def test_ios_workflows_expose_and_pass_pinned_evaluator_model(self) -> None:
         for name in ("eval-e2e.yml", "eval-ios-app.yml"):
             with self.subTest(workflow=name):
                 contents = workflow(name)
@@ -52,18 +82,24 @@ class WorkflowContractTests(unittest.TestCase):
                     contents,
                     r"evaluator_model:\n(?:\s+.*\n)*?\s+default: claude-opus-4-8",
                 )
-                self.assertRegex(
-                    contents,
-                    r"evaluator_reasoning_effort:\n"
-                    r"(?:\s+.*\n)*?\s+options:\n"
-                    r"\s+- low\n\s+- medium\n\s+- high\n"
-                    r"\s+default: high",
-                )
                 self.assertIn("EVALUATOR_MODEL: ${{ inputs.evaluator_model || 'claude-opus-4-8' }}", contents)
-                self.assertIn(
-                    "EVALUATOR_REASONING_EFFORT: ${{ inputs.evaluator_reasoning_effort || 'high' }}",
-                    contents,
-                )
+
+    def test_e2e_fixes_ios_mode_and_evaluator_effort_while_replay_keeps_controls(self) -> None:
+        e2e = workflow("eval-e2e.yml")
+        self.assertNotIn("evaluator_reasoning_effort", workflow_dispatch_input_names("eval-e2e.yml"))
+        self.assertNotIn("ios_app_mode", workflow_dispatch_input_names("eval-e2e.yml"))
+        self.assertIn("EVALUATOR_REASONING_EFFORT: high", e2e)
+        self.assertIn("EVAL_IOS_APP_MODE: release", e2e)
+
+        replay = workflow("eval-ios-app.yml")
+        replay_inputs = workflow_dispatch_input_names("eval-ios-app.yml")
+        self.assertIn("evaluator_reasoning_effort", replay_inputs)
+        self.assertIn("ios_app_mode", replay_inputs)
+        self.assertIn(
+            "EVALUATOR_REASONING_EFFORT: ${{ inputs.evaluator_reasoning_effort || 'high' }}",
+            replay,
+        )
+        self.assertIn("EVAL_IOS_APP_MODE: ${{ inputs.ios_app_mode || 'release' }}", replay)
 
     def test_e2e_runs_evaluators_after_author_completion_and_consolidates(self) -> None:
         contents = workflow("eval-e2e.yml")
