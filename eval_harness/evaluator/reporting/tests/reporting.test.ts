@@ -277,6 +277,17 @@ describe("normalizeRun", () => {
       expect.objectContaining({ skill_id: "expo-router", uptake_rate: 0.75 }),
     ]);
     expect(summary.ios.test_plans).toHaveLength(1);
+    const normalizedPlan = summary.ios.test_plans[0] as Record<string, unknown>;
+    const normalizedStep = (normalizedPlan.steps as Array<Record<string, unknown>>)[0]!;
+    expect(normalizedStep).toEqual(expect.objectContaining({
+      description: "PASSED: Insert a note",
+      iterations: 3,
+      hard_assertion_count: 1,
+      soft_assertion_count: 1,
+    }));
+    expect(normalizedStep.hard_assertions).toEqual([
+      { command: "assertVisible: note-row", fatal: false, passed: true },
+    ]);
     expect(summary.build_health.map(({ id, status }) => ({ id, status }))).toEqual([
       { id: "app_authored", status: "passed" },
       { id: "dependency_install", status: "passed" },
@@ -611,6 +622,40 @@ describe("normalizeRun", () => {
     expect(authorSummary.warnings.join(" ")).toContain("required fields");
   });
 
+  test("withholds iOS scoring and detail for malformed nested step or assertion records", async () => {
+    // Catches incomplete nested producer data being rendered as a successful behavioral result.
+    const mutations: Array<(step: Record<string, unknown>) => void> = [
+      (step) => { delete step.iterations; },
+      (step) => {
+        const assertion = (step.hard_assertions as Array<Record<string, unknown>>)[0]!;
+        delete assertion.passed;
+      },
+      (step) => {
+        const assertion = (step.soft_assertions as Array<Record<string, unknown>>)[0]!;
+        assertion.evidence = { forged: true };
+      },
+      (step) => { step.screenshot = 42; },
+    ];
+
+    for (const mutate of mutations) {
+      const root = tempRoot();
+      const args = inputs(root);
+      const result = readJson(join(args.iosArtifact!, "result.json"));
+      const plan = (result.test_plans as Array<Record<string, unknown>>)[0]!;
+      const step = (plan.steps as Array<Record<string, unknown>>)[0]!;
+      mutate(step);
+      writeJson(join(args.iosArtifact!, "result.json"), result);
+
+      const summary = await normalizeRun(args);
+
+      expect(summary.status).toBe("partial");
+      expect(summary.scores.ios_macro_pct).toBeNull();
+      expect(summary.ios.test_plans).toEqual([]);
+      expect(summary.build_health[6]?.status).toBe("warning");
+      expect(summary.warnings.join(" ")).toContain("required fields");
+    }
+  });
+
   test("requires canonical fields in optional v2 producer manifests", async () => {
     // Catches schema/type-only manifest validation accepting unusable artifact indexes.
     const skillRoot = tempRoot();
@@ -799,6 +844,61 @@ describe("normalizeRun", () => {
       tool_calls: 4,
       skill_reads: ["expo-router"],
     });
+  });
+
+  test("extracts provider-aware author skill reads with shared trigger semantics", async () => {
+    // Catches Claude-only Skill parsing dropping Codex path reads or corrupting Muse exact IDs.
+    const cases = [
+      {
+        agent: "claude-code",
+        calls: [
+          { name: "Skill", args: { skill: "expo:expo-router" } },
+          { name: "Skill", args: { skill: "expo:expo-router" } },
+        ],
+        expected: ["expo-router"],
+      },
+      {
+        agent: "codex",
+        calls: [{
+          name: "exec_command",
+          args: {
+            cmd: "sed -n '1,80p' .agents/skills/expo-ui/SKILL.md && rg title .agents/skills/expo-ui/SKILL.md",
+          },
+        }],
+        expected: ["expo-ui"],
+      },
+      {
+        agent: "muse-code",
+        calls: [
+          { name: "Skill", args: { skill: "expo:expo-router" } },
+          { name: "Skill", args: { skill: "expo:expo-router" } },
+          { name: "Skill", args: { skill: "bundled:read-session" } },
+        ],
+        expected: ["expo:expo-router"],
+      },
+    ];
+
+    for (const provider of cases) {
+      const root = tempRoot();
+      const args = inputs(root, { skill: false, ios: false });
+      const manifest = readJson(join(args.authoredArtifact, "manifest.json"));
+      manifest.agent = provider.agent;
+      writeJson(join(args.authoredArtifact, "manifest.json"), manifest);
+      writeJson(
+        join(
+          args.authoredArtifact,
+          "author-agent-metadata/run-fixture-1/telemetry/traces/muse-code-authoring.json",
+        ),
+        {
+          agent: provider.agent,
+          sessions: [{ turns: [{ total_usage: {}, steps: [{ tool_calls: provider.calls }] }] }],
+        },
+      );
+
+      const summary = await normalizeRun(args);
+      expect((summary.run.author as Record<string, unknown>).skill_reads)
+        .toEqual(provider.expected);
+    }
   });
 
   test("rejects producer artifact path traversal before reading usage", async () => {
@@ -1112,10 +1212,27 @@ describe("renderReport", () => {
     const missing = await normalizeRun(missingArgs);
     const missingAuthor = missing.run.author as Record<string, unknown>;
 
+    const malformedRoot = tempRoot();
+    const malformedArgs = inputs(malformedRoot, { skill: false, ios: false });
+    const malformedTrace = join(
+      malformedArgs.authoredArtifact,
+      "author-agent-metadata/run-fixture-1/telemetry/traces/muse-code-authoring.json",
+    );
+    mkdirSync(dirname(malformedTrace), { recursive: true });
+    writeFileSync(
+      malformedTrace,
+      "{not-json\n",
+    );
+    const malformed = await normalizeRun(malformedArgs);
+    const malformedAuthor = malformed.run.author as Record<string, unknown>;
+
     expect(observedAuthor.skill_reads).toEqual([]);
     expect(telemetryCard(renderReport(observed), "Skill reads")).toContain("<dd>None</dd>");
     expect("skill_reads" in missingAuthor).toBe(false);
     expect(telemetryCard(renderReport(missing), "Skill reads"))
+      .toContain("<dd>Not recorded</dd>");
+    expect("skill_reads" in malformedAuthor).toBe(false);
+    expect(telemetryCard(renderReport(malformed), "Skill reads"))
       .toContain("<dd>Not recorded</dd>");
   });
 
@@ -1173,6 +1290,11 @@ describe("renderReport", () => {
     expect(html.match(/Scored steps/g) ?? []).toHaveLength(1);
     expect(html.toLowerCase()).not.toContain("<script");
   });
+
+  test("uses a normal-text accessible warning token", async () => {
+    // #8A5A0A has a contrast ratio above 4.5:1 against the white report surface.
+    expect(renderReport(await fixtureSummary())).toContain("--warn: #8A5A0A;");
+  });
 });
 
 describe("copyScreenshotEvidence", () => {
@@ -1208,8 +1330,8 @@ describe("copyScreenshotEvidence", () => {
     };
   }
 
-  test("copies referenced PNGs to stable names, rewrites paths, and sorts failures first", async () => {
-    // Catches nondeterministic evidence names/order and copying unreferenced images.
+  test("preserves formal step order while linking failed-first evidence to stable step anchors", async () => {
+    // Catches presentation sorting mutating the authoritative producer step sequence or identity.
     const run = screenshotRun();
     writeFileSync(
       join(run.iosRoot, "traces/test-plans/test_insert_20260810_120000/screenshots/unreferenced.png"),
@@ -1228,19 +1350,42 @@ describe("copyScreenshotEvidence", () => {
     const plan = run.summary.ios.test_plans[0] as Record<string, unknown>;
     const steps = plan.steps as Array<Record<string, unknown>>;
     expect(steps.map((step) => step.description)).toEqual([
-      "FAILED: Persist the note",
       "PASSED: Insert a note",
+      "FAILED: Persist the note",
     ]);
     expect(steps.map((step) => step.screenshot)).toEqual([
-      "evidence/screenshots/test-insert-run-01-step-02.png",
       "evidence/screenshots/test-insert-run-01-step-01.png",
+      "evidence/screenshots/test-insert-run-01-step-02.png",
     ]);
+    const persisted = readJson(join(run.outDir, "summary.json"));
+    const persistedPlan = (persisted.ios as Record<string, unknown>)
+      .test_plans as Array<Record<string, unknown>>;
+    expect((persistedPlan[0]!.steps as Array<Record<string, unknown>>)
+      .map((step) => step.description)).toEqual([
+        "PASSED: Insert a note",
+        "FAILED: Persist the note",
+      ]);
     expect(readdirSync(join(run.outDir, "evidence/screenshots")).sort()).toEqual([
       "test-insert-run-01-step-01.png",
       "test-insert-run-01-step-02.png",
     ]);
-    expect(readFileSync(join(run.outDir, steps[0]!.screenshot as string)))
+    expect(readFileSync(join(run.outDir, steps[1]!.screenshot as string)))
       .toEqual(PNG_BYTES);
+
+    const html = renderReport(run.summary);
+    const failedMarker = html.indexOf('<figure class="evidence-card evidence-failed">');
+    const failedCard = html.slice(
+      html.lastIndexOf("<figure", failedMarker),
+      html.indexOf("</figure>", failedMarker) + "</figure>".length,
+    );
+    expect(failedCard).toContain('href="#ios-plan-01-run-01-step-02"');
+    expect(failedCard).toContain("View step 02 details");
+    expect(html).toContain('id="ios-plan-01-run-01-step-01"');
+    expect(html).toContain('id="ios-plan-01-run-01-step-02"');
+    expect(html.indexOf('id="ios-plan-01-run-01-step-01"'))
+      .toBeLessThan(html.indexOf('id="ios-plan-01-run-01-step-02"'));
+    expect(html.indexOf("Failed final state"))
+      .toBeLessThan(html.indexOf("Passed final state"));
   });
 
   test("warns without guessing when an aborted plan has a screenshot but no summary", async () => {
@@ -1269,7 +1414,13 @@ describe("copyScreenshotEvidence", () => {
           description: "FAILED: formal evaluation aborted",
           points: 0,
           max_points: 1,
+          iterations: 1,
+          hard_assertions: [],
+          soft_assertions: [],
+          hard_assertion_count: 0,
+          soft_assertion_count: 0,
           screenshot: "screenshots/step-01-final.png",
+          screenshot_error: null,
         }],
       }],
     });

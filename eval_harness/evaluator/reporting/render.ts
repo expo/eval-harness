@@ -192,9 +192,22 @@ type Evidence = {
   failed: boolean;
   plan: string;
   run: string;
+  stepOrdinal: number;
+  detailId: string;
   description: string;
   screenshot: string;
 };
+
+function paddedOrdinal(value: number): string {
+  return String(value + 1).padStart(2, "0");
+}
+
+function stepAnchorId(planIndex: number, runValue: unknown, stepIndex: number): string {
+  const run = typeof runValue === "number" && Number.isInteger(runValue)
+    ? String(runValue).padStart(2, "0")
+    : String(runValue ?? "unknown").toLowerCase().replace(/[^a-z0-9_-]+/g, "-") || "unknown";
+  return `ios-plan-${paddedOrdinal(planIndex)}-run-${run}-step-${paddedOrdinal(stepIndex)}`;
+}
 
 function safeScreenshotPath(value: unknown): string | null {
   if (typeof value !== "string" || !value.startsWith("evidence/screenshots/")) return null;
@@ -206,10 +219,10 @@ function safeScreenshotPath(value: unknown): string | null {
 
 function collectEvidence(plans: unknown[]): Evidence[] {
   const evidence: Evidence[] = [];
-  for (const rawPlan of plans) {
+  for (const [planIndex, rawPlan] of plans.entries()) {
     const plan = record(rawPlan);
     if (plan === null || !Array.isArray(plan.steps)) continue;
-    for (const rawStep of plan.steps) {
+    for (const [stepIndex, rawStep] of plan.steps.entries()) {
       const step = record(rawStep);
       if (step === null) continue;
       const screenshot = safeScreenshotPath(step.screenshot);
@@ -218,6 +231,8 @@ function collectEvidence(plans: unknown[]): Evidence[] {
         failed: stepFailed(step),
         plan: text(plan.test_plan, "Unknown test plan"),
         run: text(plan.run_index, "—"),
+        stepOrdinal: stepIndex + 1,
+        detailId: stepAnchorId(planIndex, plan.run_index, stepIndex),
         description: text(step.description, "Untitled evaluation step"),
         screenshot,
       });
@@ -241,6 +256,7 @@ function renderEvidence(plans: unknown[]): string {
           <div class="evidence-caption-top">${statusBadge(status)}<span>${escapeHtml(label)}</span></div>
           <strong>${escapeHtml(item.description)}</strong>
           <span><code>${escapeHtml(item.plan)}</code> · run ${escapeHtml(item.run)}</span>
+          <a class="evidence-link" href="#${escapeHtml(item.detailId)}">View step ${String(item.stepOrdinal).padStart(2, "0")} details</a>
         </figcaption>
       </figure>`;
     }).join("")}
@@ -327,7 +343,7 @@ function renderEvaluationDetails(skills: unknown[], plans: unknown[]): string {
       </div>
     </details>`;
   });
-  const planDetails = plans.map((rawPlan) => {
+  const planDetails = plans.map((rawPlan, planIndex) => {
     const plan = record(rawPlan) ?? { value: rawPlan };
     const steps = Array.isArray(plan.steps) ? plan.steps : [];
     return `<details class="detail-block">
@@ -340,7 +356,8 @@ function renderEvaluationDetails(skills: unknown[], plans: unknown[]): string {
           : steps.map((rawStep, index) => {
             const step: JsonRecord = record(rawStep) ?? { value: rawStep };
             const status: StageStatus = stepFailed(step) ? "failed" : "passed";
-            return `<details class="step-detail">
+            const detailId = stepAnchorId(planIndex, plan.run_index, index);
+            return `<details class="step-detail" id="${escapeHtml(detailId)}">
               <summary><span>${String(index + 1).padStart(2, "0")} · ${escapeHtml(text(step.description, "Untitled step"))}</span>${statusBadge(status)}</summary>
               <div class="step-content">
                 ${renderKeyValues(Object.entries(step).filter(([key]) => !["description", "hard_assertions", "soft_assertions", "screenshot"].includes(key)))}
@@ -408,7 +425,7 @@ export function renderReport(summary: ConsolidatedSummary): string {
       --blue: #2563EB;
       --pass: #147D64;
       --pass-soft: #E8F5F0;
-      --warn: #B7791F;
+      --warn: #8A5A0A;
       --warn-soft: #FFF7E5;
       --fail: #B42318;
       --fail-soft: #FDECEA;
@@ -486,6 +503,7 @@ export function renderReport(summary: ConsolidatedSummary): string {
     .evidence-frame img { display: block; height: auto; max-height: 520px; max-width: 100%; object-fit: contain; }
     figcaption { display: grid; gap: 7px; padding: 16px 18px 18px; }
     figcaption > span { color: var(--muted); font-size: .8rem; }
+    .evidence-link { color: var(--blue); font-size: .8rem; font-weight: 700; width: fit-content; }
     .evidence-caption-top { align-items: center; display: flex; gap: 8px; justify-content: space-between; }
     .evidence-caption-top > span { color: var(--slate); font-size: .72rem; font-weight: 700; text-transform: uppercase; }
     details { background: var(--white); border: 1px solid var(--line); }
@@ -494,7 +512,7 @@ export function renderReport(summary: ConsolidatedSummary): string {
     summary > span:first-child { min-width: 0; overflow-wrap: anywhere; }
     details[open] > summary { border-bottom: 1px solid var(--line); }
     .detail-content { padding: 18px; }
-    .step-detail { background: var(--paper); }
+    .step-detail { background: var(--paper); scroll-margin-top: 16px; }
     .step-detail + .step-detail { border-top: 0; }
     .step-content { background: var(--white); border-top: 1px solid var(--line); padding: 16px; }
     .key-values { display: grid; gap: 0; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0; }

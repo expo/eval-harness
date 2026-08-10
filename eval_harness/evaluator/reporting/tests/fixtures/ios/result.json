@@ -17,8 +17,24 @@
           "description": "PASSED: Insert a note",
           "points": 1,
           "max_points": 1,
-          "hard_assertions": [],
-          "soft_assertions": [],
+          "iterations": 3,
+          "hard_assertions": [
+            {
+              "command": "assertVisible: note-row",
+              "fatal": false,
+              "passed": true
+            }
+          ],
+          "soft_assertions": [
+            {
+              "check": "The saved note is visible",
+              "fatal": false,
+              "passed": true,
+              "evidence": "accessibility tree"
+            }
+          ],
+          "hard_assertion_count": 1,
+          "soft_assertion_count": 1,
           "screenshot": null,
           "screenshot_error": null
         },
@@ -26,8 +42,17 @@
           "description": "FAILED: Persist the note",
           "points": 0,
           "max_points": 1,
-          "hard_assertions": [],
+          "iterations": 2,
+          "hard_assertions": [
+            {
+              "command": "assertVisible: persisted-note",
+              "fatal": true,
+              "passed": false
+            }
+          ],
           "soft_assertions": [],
+          "hard_assertion_count": 1,
+          "soft_assertion_count": 0,
           "screenshot": null,
           "screenshot_error": "capture unavailable"
         }

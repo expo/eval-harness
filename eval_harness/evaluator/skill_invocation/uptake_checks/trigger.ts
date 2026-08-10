@@ -50,7 +50,7 @@ export function detectTriggeredSkills(trace: NormalizedTrace): string[] {
   return dedupe(observed);
 }
 
-function skillsFromToolCall(agent: string, call: ToolCall): string[] {
+export function skillsFromToolCall(agent: string, call: ToolCall): string[] {
   const name = call.name;
   const args = call.args ?? {};
   if (agent === "muse-code" && name === "Skill") {

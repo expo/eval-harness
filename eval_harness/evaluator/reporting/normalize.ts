@@ -29,6 +29,7 @@ import type {
   ReportInputs,
   StageStatus,
 } from "./types.ts";
+import { skillsFromToolCall } from "../skill_invocation/uptake_checks/trigger.ts";
 import { renderReport } from "./render.ts";
 
 type JsonRecord = Record<string, unknown>;
@@ -245,6 +246,59 @@ function nullableFiniteNumber(value: unknown): boolean {
   return value === null || (typeof value === "number" && Number.isFinite(value));
 }
 
+function nullableString(value: unknown): boolean {
+  return value === null || typeof value === "string";
+}
+
+function nonEmptyString(value: unknown): boolean {
+  return typeof value === "string" && value.length > 0;
+}
+
+function nonNegativeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0;
+}
+
+function validHardAssertion(value: unknown): boolean {
+  const assertion = record(value);
+  return assertion !== null && nonEmptyString(assertion.command) &&
+    typeof assertion.fatal === "boolean" && typeof assertion.passed === "boolean";
+}
+
+function validSoftAssertion(value: unknown): boolean {
+  const assertion = record(value);
+  return assertion !== null && nonEmptyString(assertion.check) &&
+    typeof assertion.fatal === "boolean" && typeof assertion.passed === "boolean" &&
+    typeof assertion.evidence === "string";
+}
+
+function validIosStep(value: unknown): boolean {
+  const step = record(value);
+  if (step === null || !nonEmptyString(step.description) ||
+    typeof step.points !== "number" || !Number.isFinite(step.points) ||
+    typeof step.max_points !== "number" || !Number.isFinite(step.max_points) ||
+    !nonNegativeInteger(step.iterations) ||
+    !Array.isArray(step.hard_assertions) || !step.hard_assertions.every(validHardAssertion) ||
+    !Array.isArray(step.soft_assertions) || !step.soft_assertions.every(validSoftAssertion) ||
+    !nonNegativeInteger(step.hard_assertion_count) ||
+    !nonNegativeInteger(step.soft_assertion_count) ||
+    !nullableString(step.screenshot) || !nullableString(step.screenshot_error)
+  ) return false;
+  return step.hard_assertion_count === step.hard_assertions.length &&
+    step.soft_assertion_count === step.soft_assertions.length;
+}
+
+function validEvaluatorError(value: unknown): boolean {
+  const error = record(value);
+  if (error === null || !nonEmptyString(error.stage) || !nonEmptyString(error.reason)) {
+    return false;
+  }
+  const plan = error.test_plan;
+  const run = error.run_index;
+  return (plan === undefined || plan === null || nonEmptyString(plan)) &&
+    (run === undefined || run === null ||
+      (typeof run === "number" && Number.isInteger(run) && run >= 1));
+}
+
 function validateSkillMetricsFields(value: JsonRecord | null): string | null {
   const score = record(value?.score);
   const trigger = record(score?.trigger_quality);
@@ -269,23 +323,41 @@ function validateIosResultFields(value: JsonRecord | null): string | null {
   const plans = value?.test_plans;
   if (
     (value?.status !== "completed" && value?.status !== "incomplete" && value?.status !== "failed") ||
-    typeof value.expected_plan_count !== "number" || !Number.isInteger(value.expected_plan_count) ||
-    typeof value.terminal_plan_count !== "number" || !Number.isInteger(value.terminal_plan_count) ||
+    !nonNegativeInteger(value.expected_plan_count) ||
+    !nonNegativeInteger(value.terminal_plan_count) ||
+    value.terminal_plan_count > value.expected_plan_count ||
     !("macro_avg_pct" in value) || !nullableFiniteNumber(value.macro_avg_pct) ||
-    !Array.isArray(value.evaluator_errors) || !Array.isArray(plans)
+    !Array.isArray(value.evaluator_errors) ||
+    !value.evaluator_errors.every(validEvaluatorError) ||
+    (value.status === "completed" && value.evaluator_errors.length > 0) ||
+    !Array.isArray(plans)
   ) {
     return "iOS result is missing required fields";
   }
   for (const rawPlan of plans) {
     const plan = record(rawPlan);
     if (
-      plan === null || typeof plan.test_plan !== "string" ||
+      plan === null || !nonEmptyString(plan.test_plan) ||
       typeof plan.run_index !== "number" || !Number.isInteger(plan.run_index) ||
+      plan.run_index < 1 ||
       !["completed", "not_applicable", "evaluator_error"].includes(String(plan.status)) ||
-      !Array.isArray(plan.steps)
+      !Array.isArray(plan.steps) || !plan.steps.every(validIosStep)
     ) {
       return "iOS result test plans are missing required fields";
     }
+    if (plan.status === "completed" && (
+      typeof plan.score !== "number" || !Number.isFinite(plan.score) ||
+      typeof plan.full_points !== "number" || !Number.isFinite(plan.full_points) ||
+      typeof plan.macro_pct !== "number" || !Number.isFinite(plan.macro_pct)
+    )) return "iOS result completed plans are missing required fields";
+    if (plan.status === "not_applicable" && (
+      typeof plan.na_reason !== "string" || plan.score !== 0 || plan.full_points !== 0 ||
+      plan.macro_pct !== null || plan.steps.length !== 0
+    )) return "iOS result N/A plans are missing required fields";
+    if (plan.status === "evaluator_error" && (
+      !nonEmptyString(plan.error_stage) || !nonEmptyString(plan.error_reason) ||
+      plan.score !== null || plan.full_points !== null || plan.macro_pct !== null
+    )) return "iOS result evaluator-error plans are missing required fields";
   }
   return null;
 }
@@ -576,7 +648,9 @@ async function authorTraceTelemetry(
     if (traceBytes === null) return unavailable();
     const trace = JSON.parse(traceBytes.toString("utf8")) as unknown;
     const traceRecord = record(trace);
-    const sessions = Array.isArray(traceRecord?.sessions) ? traceRecord.sessions : [];
+    if (traceRecord === null || !Array.isArray(traceRecord.sessions)) return unavailable();
+    const agent = String(traceRecord?.agent ?? manifest?.agent ?? "").toLowerCase();
+    const sessions = traceRecord.sessions;
     const totals: Record<string, number> = {};
     const skillReads = new Set<string>();
     let toolCalls = 0;
@@ -599,10 +673,11 @@ async function authorTraceTelemetry(
           toolCalls += calls.length;
           for (const rawCall of calls) {
             const call = record(rawCall);
-            const skillId = call?.name === "Skill"
-              ? stringOrNull(record(call.args)?.skill)
-              : null;
-            if (skillId !== null && !skillId.startsWith("bundled:")) {
+            if (call === null) continue;
+            for (const skillId of skillsFromToolCall(agent, {
+              name: call.name,
+              args: record(call.args),
+            })) {
               skillReads.add(skillId);
             }
           }
@@ -1014,23 +1089,6 @@ async function planTraceDirectories(
   return directories;
 }
 
-function failedStep(stepValue: unknown): boolean {
-  const step = record(stepValue);
-  if (step === null) return false;
-  if (typeof step.description === "string" && /^FAILED:/i.test(step.description)) return true;
-  if (
-    typeof step.points === "number" && typeof step.max_points === "number" &&
-    step.points < step.max_points
-  ) return true;
-  for (const key of ["hard_assertions", "soft_assertions"] as const) {
-    if (
-      Array.isArray(step[key]) &&
-      step[key].some((assertion) => record(assertion)?.passed === false)
-    ) return true;
-  }
-  return false;
-}
-
 function safeSlug(value: string): string {
   return value
     .replace(/\.[^.]+$/, "")
@@ -1325,7 +1383,6 @@ async function copyScreenshotEvidenceInto(
       await writeFile(join(evidenceRoot, stableName), bytes);
       step.screenshot = `evidence/screenshots/${stableName}`;
     }
-    steps.sort((left, right) => Number(failedStep(right)) - Number(failedStep(left)));
   }
 
   validateConsolidatedSummary(summary);
