@@ -165,11 +165,28 @@ class WorkflowContractTests(unittest.TestCase):
             with self.subTest(workflow=name):
                 for root, archive in artifacts:
                     self.assertIn(
-                        f"package_artifact.sh {root} {archive} {archive}",
+                        f"package_artifact.sh {root} {archive} '${{{{ workflow.id }}}}/{archive}'",
                         contents,
                     )
                     self.assertIn(f"name: {root}", contents)
                     self.assertIn(f"path: {archive}", contents)
+
+    def test_optional_gcs_mirrors_are_namespaced_by_workflow_run(self) -> None:
+        """Two workflow runs must not mirror their canonical archives to the same GCS key."""
+        for name in ACTIVE_WORKFLOWS:
+            with self.subTest(workflow=name):
+                contents = workflow(name)
+                invocations = re.findall(
+                    r"package_artifact\.sh\s+\S+\s+(\S+\.tar\.gz)\s+(.+)$",
+                    contents,
+                    re.MULTILINE,
+                )
+                self.assertTrue(invocations)
+                for archive, object_name in invocations:
+                    self.assertEqual(
+                        object_name.strip(),
+                        f"'${{{{ workflow.id }}}}/{archive}'",
+                    )
 
     def test_active_workflows_fit_eas_size_limit(self) -> None:
         for name in ACTIVE_WORKFLOWS:

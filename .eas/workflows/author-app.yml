@@ -86,7 +86,7 @@ jobs:
 
       - name: Package authored app
         if: ${{ always() }}
-        run: bash eval_harness/utils/artifacts/package_artifact.sh authored-app authored-app.tar.gz authored-app.tar.gz
+        run: bash eval_harness/utils/artifacts/package_artifact.sh authored-app authored-app.tar.gz '${{ workflow.id }}/authored-app.tar.gz'
 
       - name: Upload authored app
         if: ${{ always() }}

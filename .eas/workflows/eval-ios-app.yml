@@ -106,7 +106,7 @@ jobs:
               --evaluator-model "$EVALUATOR_MODEL" \
               --evaluator-reasoning-effort "$EVALUATOR_REASONING_EFFORT"
           fi
-          bash eval_harness/utils/artifacts/package_artifact.sh ios-eval-report ios-eval-report.tar.gz ios-eval-report.tar.gz
+          bash eval_harness/utils/artifacts/package_artifact.sh ios-eval-report ios-eval-report.tar.gz '${{ workflow.id }}/ios-eval-report.tar.gz'
 
       - name: Upload iOS eval report
         if: ${{ always() }}

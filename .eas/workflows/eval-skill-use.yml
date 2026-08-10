@@ -122,7 +122,7 @@ jobs:
               --scenario '${{ inputs.scenario }}' --stage workflow_preflight \
               --reason 'skill evaluator did not produce a canonical artifact; inspect job logs'
           fi
-          bash eval_harness/utils/artifacts/package_artifact.sh skill-eval-report skill-eval-report.tar.gz skill-eval-report.tar.gz
+          bash eval_harness/utils/artifacts/package_artifact.sh skill-eval-report skill-eval-report.tar.gz '${{ workflow.id }}/skill-eval-report.tar.gz'
 
       - name: Upload skill-eval report
         if: ${{ always() }}

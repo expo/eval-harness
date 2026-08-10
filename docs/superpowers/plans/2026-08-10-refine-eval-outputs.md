@@ -715,26 +715,31 @@ Assert all active workflows lack `agent-workspace`, `eval-out`, and `eval-e2e-ou
 ```yaml
 agent_reasoning_effort:
 evaluator_model:
-evaluator_reasoning_effort:
 report:
   after: [eval_ios, eval_skill]
 ```
 
 - [ ] **Step 2: Add model/effort inputs to author and E2E workflows**
 
-Add choice inputs with `low`, `medium`, `high`, default `high`; add evaluator model default `claude-opus-4-8`. Pass resolved values into author and iOS jobs.
+Add the author effort choice input with `low`, `medium`, `high`, default
+`high`; add evaluator model default `claude-opus-4-8`. Pass resolved author
+values into authoring. In full E2E, pass evaluator effort `high` and iOS app
+mode `release` as fixed job environment values to stay within EAS's ten-input
+dispatch limit; retain both controls in `eval-ios-app.yml` replay.
 
 - [ ] **Step 3: Switch all producer packaging to canonical roots**
 
 Package:
 
 ```bash
-bash eval_harness/utils/artifacts/package_artifact.sh authored-app authored-app.tar.gz authored-app.tar.gz
-bash eval_harness/utils/artifacts/package_artifact.sh ios-eval-report ios-eval-report.tar.gz ios-eval-report.tar.gz
-bash eval_harness/utils/artifacts/package_artifact.sh skill-eval-report skill-eval-report.tar.gz skill-eval-report.tar.gz
+bash eval_harness/utils/artifacts/package_artifact.sh authored-app authored-app.tar.gz '${{ workflow.id }}/authored-app.tar.gz'
+bash eval_harness/utils/artifacts/package_artifact.sh ios-eval-report ios-eval-report.tar.gz '${{ workflow.id }}/ios-eval-report.tar.gz'
+bash eval_harness/utils/artifacts/package_artifact.sh skill-eval-report skill-eval-report.tar.gz '${{ workflow.id }}/skill-eval-report.tar.gz'
+bash eval_harness/utils/artifacts/package_artifact.sh eval-report eval-report.tar.gz '${{ workflow.id }}/eval-report.tar.gz'
 ```
 
-Upload using `authored-app`, `ios-eval-report`, and `skill-eval-report`. Update replay download/unpack paths accordingly.
+Upload using `authored-app`, `ios-eval-report`, `skill-eval-report`, and
+`eval-report`. Update replay download/unpack paths accordingly.
 
 - [ ] **Step 4: Make downstream jobs failure-tolerant**
 
@@ -859,7 +864,6 @@ eas workflow:run .eas/workflows/eval-e2e.yml \
   -F agent_model=muse-spark-1.2 \
   -F agent_reasoning_effort=high \
   -F evaluator_model=claude-opus-4-8 \
-  -F evaluator_reasoning_effort=high \
   -F prd=dataset/prds/notes/prd/mvp.txt \
   -F prompt_variant=realistic \
   -F skill_scenario=skills_available_unmentioned \

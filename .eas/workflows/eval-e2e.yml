@@ -117,7 +117,7 @@ jobs:
 
       - name: Package authored app
         if: ${{ always() }}
-        run: bash eval_harness/utils/artifacts/package_artifact.sh authored-app authored-app.tar.gz authored-app.tar.gz
+        run: bash eval_harness/utils/artifacts/package_artifact.sh authored-app authored-app.tar.gz '${{ workflow.id }}/authored-app.tar.gz'
 
       - name: Upload authored app
         if: ${{ always() }}
@@ -173,7 +173,7 @@ jobs:
               --evaluator-model "$EVALUATOR_MODEL" \
               --evaluator-reasoning-effort "$EVALUATOR_REASONING_EFFORT"
           fi
-          bash eval_harness/utils/artifacts/package_artifact.sh ios-eval-report ios-eval-report.tar.gz ios-eval-report.tar.gz
+          bash eval_harness/utils/artifacts/package_artifact.sh ios-eval-report ios-eval-report.tar.gz '${{ workflow.id }}/ios-eval-report.tar.gz'
 
       - name: Upload iOS eval report
         if: ${{ always() }}
@@ -220,7 +220,7 @@ jobs:
               --scenario '${{ inputs.skill_scenario }}' --stage workflow_preflight \
               --reason 'skill evaluator did not produce a canonical artifact; inspect job logs'
           fi
-          bash eval_harness/utils/artifacts/package_artifact.sh skill-eval-report skill-eval-report.tar.gz skill-eval-report.tar.gz
+          bash eval_harness/utils/artifacts/package_artifact.sh skill-eval-report skill-eval-report.tar.gz '${{ workflow.id }}/skill-eval-report.tar.gz'
 
       - name: Upload skill-eval report
         if: ${{ always() }}
@@ -291,7 +291,7 @@ jobs:
 
       - name: Package consolidated report
         if: ${{ always() }}
-        run: bash eval_harness/utils/artifacts/package_artifact.sh eval-report eval-report.tar.gz eval-report.tar.gz
+        run: bash eval_harness/utils/artifacts/package_artifact.sh eval-report eval-report.tar.gz '${{ workflow.id }}/eval-report.tar.gz'
 
       - name: Upload consolidated report
         if: ${{ always() }}

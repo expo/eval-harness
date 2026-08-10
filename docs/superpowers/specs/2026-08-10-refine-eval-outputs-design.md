@@ -66,7 +66,12 @@ Add:
 
 - `agent_reasoning_effort`: choice `low | medium | high`, default `high`
 - `evaluator_model`: string, default `claude-opus-4-8`
-- `evaluator_reasoning_effort`: choice `low | medium | high`, default `high`
+
+The full E2E workflow fixes evaluator reasoning at `high` and iOS app mode at
+`release` so its manual dispatch stays within EAS's ten-input limit. The
+`eval-ios-app.yml` replay workflow retains the
+`evaluator_reasoning_effort` (`low | medium | high`) and `ios_app_mode`
+controls for focused diagnostics.
 
 The first comparative experiment will override `agent_model` with:
 
@@ -463,7 +468,6 @@ eas workflow:run .eas/workflows/eval-e2e.yml \
   -F agent_model=muse-spark-1.2 \
   -F agent_reasoning_effort=high \
   -F evaluator_model=claude-opus-4-8 \
-  -F evaluator_reasoning_effort=high \
   -F prd=dataset/prds/notes/prd/mvp.txt \
   -F prompt_variant=realistic \
   -F skill_scenario=skills_available_unmentioned \
