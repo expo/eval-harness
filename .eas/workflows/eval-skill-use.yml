@@ -27,16 +27,16 @@ on:
         required: false
         default: ''
         description: Signed download URL for an authored-app.tar.gz artifact
-      eval_output_artifact_id:
+      ios_eval_report_artifact_id:
         type: string
         required: false
         default: ''
-        description: Optional EAS artifact ID for eval output
-      eval_output_url:
+        description: Optional EAS artifact ID for an ios-eval-report artifact
+      ios_eval_report_url:
         type: string
         required: false
         default: ''
-        description: Optional signed download URL for eval output tarball
+        description: Optional signed download URL for ios-eval-report.tar.gz
       scenario:
         type: choice
         options:
@@ -77,26 +77,26 @@ jobs:
           curl --fail --location --show-error "$AUTHORED_APP_URL" --output authored-app-download/authored-app.tar.gz
           set-output artifact_path "$(pwd)/authored-app-download/authored-app.tar.gz"
 
-      - name: Download eval output by artifact ID
+      - name: Download iOS eval report by artifact ID
         uses: eas/download_artifact
-        id: download_eval
-        if: ${{ inputs.eval_output_artifact_id }}
+        id: download_ios_eval
+        if: ${{ inputs.ios_eval_report_artifact_id }}
         with:
-          artifact_id: ${{ inputs.eval_output_artifact_id }}
+          artifact_id: ${{ inputs.ios_eval_report_artifact_id }}
 
-      - name: Download eval output by signed URL
-        id: download_eval_from_url
-        if: ${{ !inputs.eval_output_artifact_id && inputs.eval_output_url }}
+      - name: Download iOS eval report by signed URL
+        id: download_ios_eval_from_url
+        if: ${{ !inputs.ios_eval_report_artifact_id && inputs.ios_eval_report_url }}
         run: |
-          EVAL_OUTPUT_URL='${{ inputs.eval_output_url }}'
-          mkdir -p eval-output-download
-          curl --fail --location --show-error "$EVAL_OUTPUT_URL" --output eval-output-download/eval-output.tar.gz
-          set-output artifact_path "$(pwd)/eval-output-download/eval-output.tar.gz"
+          IOS_EVAL_REPORT_URL='${{ inputs.ios_eval_report_url }}'
+          mkdir -p ios-eval-report-download
+          curl --fail --location --show-error "$IOS_EVAL_REPORT_URL" --output ios-eval-report-download/ios-eval-report.tar.gz
+          set-output artifact_path "$(pwd)/ios-eval-report-download/ios-eval-report.tar.gz"
 
       - name: Analyze skill-eval artifacts
         run: |
           AUTHORED_ARTIFACT='${{ steps.download_author.outputs.artifact_path || steps.download_author_from_url.outputs.artifact_path }}'
-          EVAL_ARTIFACT='${{ steps.download_eval.outputs.artifact_path || steps.download_eval_from_url.outputs.artifact_path }}'
+          EVAL_ARTIFACT='${{ steps.download_ios_eval.outputs.artifact_path || steps.download_ios_eval_from_url.outputs.artifact_path }}'
           if [ "$EVAL_ARTIFACT" = "undefined" ] || [ "$EVAL_ARTIFACT" = "null" ]; then
             EVAL_ARTIFACT=""
           fi
@@ -108,7 +108,12 @@ jobs:
 
       - name: Package skill-eval report
         if: ${{ always() }}
-        run: tar -czf skill-eval-report.tar.gz skill-eval-report
+        run: |
+          if [ ! -f skill-eval-report/manifest.json ]; then
+            mkdir -p skill-eval-report
+            printf '%s\n' '{"schema_version":2,"artifact_type":"skill-eval-report","run_id":null,"artifacts":{"metrics":"metrics.json","report":"report.html"}}' > skill-eval-report/manifest.json
+          fi
+          bash eval_harness/utils/artifacts/package_artifact.sh skill-eval-report skill-eval-report.tar.gz skill-eval-report.tar.gz
 
       - name: Upload skill-eval report
         if: ${{ always() }}
