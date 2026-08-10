@@ -1,13 +1,20 @@
 import {
-  copyFile,
+  constants,
+} from "node:fs";
+import {
   lstat,
   mkdir,
-  readFile,
+  mkdtemp,
+  open,
   readdir,
   realpath,
+  rename,
+  rm,
   writeFile,
 } from "node:fs/promises";
 import {
+  basename,
+  dirname,
   extname,
   isAbsolute,
   join,
@@ -26,7 +33,7 @@ import type {
 type JsonRecord = Record<string, unknown>;
 type ReadJsonResult = {
   path: string;
-  raw: string | null;
+  raw: Buffer | null;
   value: JsonRecord | null;
   error: string | null;
 };
@@ -110,21 +117,61 @@ async function ensureArtifactRoot(path: string, label: string): Promise<string> 
 }
 
 async function readJson(root: string, name: string): Promise<ReadJsonResult> {
-  const path = join(root, name);
-  let raw: string;
-  try {
-    raw = await readFile(path, "utf8");
-  } catch {
-    return { path, raw: null, value: null, error: `${name} is missing` };
+  const path = resolve(root, name);
+  if (!inside(root, path)) {
+    throw new Error(`unsafe authoritative JSON path outside artifact: ${name}`);
   }
   try {
-    const value = record(JSON.parse(raw));
+    const pathMetadata = await lstat(path);
+    if (pathMetadata.isSymbolicLink() || !pathMetadata.isFile() || pathMetadata.nlink !== 1) {
+      throw new Error(`unsafe authoritative JSON file: ${name}`);
+    }
+  } catch (error) {
+    if (isMissingPathError(error)) {
+      return { path, raw: null, value: null, error: `${name} is missing` };
+    }
+    if (error instanceof Error && error.message.startsWith("unsafe authoritative JSON")) {
+      throw error;
+    }
+    throw new Error(`unsafe authoritative JSON file: ${name}`);
+  }
+  let handle;
+  try {
+    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  } catch (error) {
+    if (isMissingPathError(error)) {
+      return { path, raw: null, value: null, error: `${name} is missing` };
+    }
+    throw new Error(`unsafe authoritative JSON file: ${name}`);
+  }
+  let raw: Buffer | null = null;
+  try {
+    const metadata = await handle.stat();
+    if (!metadata.isFile() || metadata.nlink !== 1) {
+      throw new Error(`unsafe authoritative JSON file: ${name}`);
+    }
+    const physical = await realpath(path);
+    if (!inside(root, physical)) {
+      throw new Error(`unsafe authoritative JSON file outside artifact: ${name}`);
+    }
+    raw = await handle.readFile();
+    const value = record(JSON.parse(raw.toString("utf8")));
     return value === null
       ? { path, raw, value: null, error: `${name} must contain a JSON object` }
       : { path, raw, value, error: null };
-  } catch {
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith("unsafe authoritative JSON")) {
+      throw error;
+    }
     return { path, raw, value: null, error: `${name} is malformed JSON` };
+  } finally {
+    await handle.close();
   }
+}
+
+function isMissingPathError(error: unknown): boolean {
+  return error instanceof Error && "code" in error &&
+    (error.code === "ENOENT" || error.code === "ENOTDIR");
 }
 
 function validateManifest(
@@ -137,6 +184,107 @@ function validateManifest(
   }
   if (source.value.artifact_type !== artifactType) {
     return `manifest.json has artifact_type=${String(source.value.artifact_type)} (expected ${artifactType})`;
+  }
+  return null;
+}
+
+function validStageRecord(value: unknown): boolean {
+  const source = record(value);
+  return source !== null &&
+    typeof source.status === "string" &&
+    STAGE_STATUSES.has(source.status as StageStatus) &&
+    (source.detail === null || typeof source.detail === "string") &&
+    (source.log === null || typeof source.log === "string");
+}
+
+function validateAuthorFields(value: JsonRecord | null): string | null {
+  const health = record(value?.build_health);
+  if (
+    typeof value?.run_id !== "string" || value.run_id.length === 0 ||
+    health === null ||
+    !validStageRecord(health.app_authored) ||
+    !validStageRecord(health.expo_export) ||
+    record(value.artifacts) === null
+  ) {
+    return "author manifest is missing required fields";
+  }
+  return null;
+}
+
+function validateSkillManifestFields(value: JsonRecord | null): string | null {
+  const artifacts = record(value?.artifacts);
+  if (
+    artifacts?.metrics !== "metrics.json" || artifacts.report !== "report.html" ||
+    !(value?.run_id === null || typeof value?.run_id === "string")
+  ) {
+    return "skill manifest is missing required fields";
+  }
+  return null;
+}
+
+function validateIosManifestFields(value: JsonRecord | null): string | null {
+  const artifacts = record(value?.artifacts);
+  const health = record(value?.build_health);
+  if (
+    typeof value?.run_id !== "string" || value.run_id.length === 0 ||
+    artifacts?.result !== "result.json" ||
+    typeof artifacts.test_plan_traces !== "string" ||
+    health === null ||
+    !validStageRecord(health.dependency_install) ||
+    !validStageRecord(health.native_build) ||
+    !validStageRecord(health.app_launch) ||
+    !validStageRecord(health.evaluation)
+  ) {
+    return "iOS manifest is missing required fields";
+  }
+  return null;
+}
+
+function nullableFiniteNumber(value: unknown): boolean {
+  return value === null || (typeof value === "number" && Number.isFinite(value));
+}
+
+function validateSkillMetricsFields(value: JsonRecord | null): string | null {
+  const score = record(value?.score);
+  const trigger = record(score?.trigger_quality);
+  const uptake = record(score?.context_uptake);
+  const health = record(value?.build_health);
+  if (
+    typeof value?.scenario !== "string" ||
+    (value.outcome_status !== "complete" && value.outcome_status !== "pending") ||
+    !Array.isArray(value.warnings) ||
+    !value.warnings.every((warning) => typeof warning === "string") ||
+    trigger === null || !("recall" in trigger) || !nullableFiniteNumber(trigger.recall) ||
+    uptake === null || !("uptake_rate" in uptake) || !nullableFiniteNumber(uptake.uptake_rate) ||
+    health === null || !("syntax" in health) || !("bundle" in health) ||
+    record(value.skills) === null
+  ) {
+    return "skill metrics are missing required fields";
+  }
+  return null;
+}
+
+function validateIosResultFields(value: JsonRecord | null): string | null {
+  const plans = value?.test_plans;
+  if (
+    (value?.status !== "completed" && value?.status !== "incomplete" && value?.status !== "failed") ||
+    typeof value.expected_plan_count !== "number" || !Number.isInteger(value.expected_plan_count) ||
+    typeof value.terminal_plan_count !== "number" || !Number.isInteger(value.terminal_plan_count) ||
+    !("macro_avg_pct" in value) || !nullableFiniteNumber(value.macro_avg_pct) ||
+    !Array.isArray(value.evaluator_errors) || !Array.isArray(plans)
+  ) {
+    return "iOS result is missing required fields";
+  }
+  for (const rawPlan of plans) {
+    const plan = record(rawPlan);
+    if (
+      plan === null || typeof plan.test_plan !== "string" ||
+      typeof plan.run_index !== "number" || !Number.isInteger(plan.run_index) ||
+      !["completed", "not_applicable", "evaluator_error"].includes(String(plan.status)) ||
+      !Array.isArray(plan.steps)
+    ) {
+      return "iOS result test plans are missing required fields";
+    }
   }
   return null;
 }
@@ -203,6 +351,7 @@ function evaluationStage(
   manifestHealth: JsonRecord | null,
   result: JsonRecord | null,
   resultSupplied: boolean,
+  resultValid: boolean,
 ): BuildHealthStage {
   const manifestStage = producerStage("evaluation", manifestHealth?.evaluation);
   if (manifestStage.status === "failed") return manifestStage;
@@ -216,7 +365,28 @@ function evaluationStage(
     );
   }
   if (!resultSupplied) return manifestStage;
+  if (!resultValid) {
+    return stage(
+      "evaluation",
+      "warning",
+      "iOS result is structurally incomplete",
+      manifestStage.log,
+    );
+  }
   if (result?.status === "completed") {
+    const plans = Array.isArray(result.test_plans) ? result.test_plans : [];
+    const allNotApplicable = plans.length > 0 && plans.every((rawPlan) =>
+      record(rawPlan)?.status === "not_applicable"
+    );
+    const macro = finiteNumberOrNull(result.macro_avg_pct);
+    if (!allNotApplicable && macro !== null && macro < 100) {
+      return stage(
+        "evaluation",
+        "warning",
+        `iOS behavior completed with partial credit (${macro}%)`,
+        manifestStage.log,
+      );
+    }
     return stage("evaluation", "passed", null, manifestStage.log);
   }
   if (result !== null) {
@@ -249,6 +419,13 @@ function normalizedPlans(result: JsonRecord | null): unknown[] {
     : [];
 }
 
+function allIosPlansNotApplicable(result: JsonRecord | null): boolean {
+  const plans = Array.isArray(result?.test_plans) ? result.test_plans : [];
+  return plans.length > 0 && plans.every((rawPlan) =>
+    record(rawPlan)?.status === "not_applicable"
+  );
+}
+
 function addWarnings(target: string[], value: unknown): void {
   if (!Array.isArray(value)) return;
   for (const warning of value) {
@@ -272,7 +449,7 @@ async function copyExactSource(
   destination: string,
 ): Promise<boolean> {
   if (source.raw === null) return false;
-  await copyFile(source.path, destination);
+  await writeFile(destination, source.raw);
   return true;
 }
 
@@ -317,13 +494,62 @@ function numericUsage(value: unknown): Record<string, number | null> {
   return usage;
 }
 
+export function validateConsolidatedSummary(
+  value: unknown,
+): asserts value is ConsolidatedSummary {
+  const summary = record(value);
+  const scores = record(summary?.scores);
+  const ios = record(summary?.ios);
+  const usage = record(summary?.usage);
+  const authorUsageValue = record(usage?.author);
+  const evaluatorUsageValue = record(usage?.evaluator);
+  const artifacts = record(summary?.artifacts);
+  const expectedStageIds = STAGES.map(([id]) => id);
+  const health = Array.isArray(summary?.build_health) ? summary.build_health : null;
+  const validUsage = (candidate: JsonRecord | null): boolean =>
+    candidate !== null && Object.values(candidate).every(nullableFiniteNumber);
+  const validArtifacts = artifacts !== null && Object.values(artifacts).every(
+    (item) => item === null || typeof item === "string",
+  ) && artifacts.author_manifest !== undefined &&
+    artifacts.build_health === "data/build-health.json" &&
+    artifacts.screenshots === "evidence/screenshots/" &&
+    (artifacts.skill_metrics === null || artifacts.skill_metrics === "data/skill-metrics.json") &&
+    (artifacts.ios_result === null || artifacts.ios_result === "data/ios-result.json");
+  const validHealth = health !== null && health.length === STAGES.length &&
+    health.every((rawStage, index) => {
+      const item = record(rawStage);
+      return item !== null && item.id === expectedStageIds[index] &&
+        typeof item.label === "string" &&
+        typeof item.status === "string" &&
+        STAGE_STATUSES.has(item.status as StageStatus) &&
+        (item.detail === null || typeof item.detail === "string") &&
+        (item.log === null || typeof item.log === "string");
+    });
+  if (
+    summary?.schema_version !== 1 ||
+    !["complete", "partial", "failed"].includes(String(summary.status)) ||
+    record(summary.run) === null || scores === null ||
+    !nullableFiniteNumber(scores.ios_macro_pct) ||
+    !nullableFiniteNumber(scores.skill_trigger_recall) ||
+    !nullableFiniteNumber(scores.skill_uptake_rate) ||
+    !validHealth || !Array.isArray(summary.skills) ||
+    ios === null || !Array.isArray(ios.test_plans) ||
+    !validUsage(authorUsageValue) || !validUsage(evaluatorUsageValue) ||
+    !Array.isArray(summary.warnings) ||
+    !summary.warnings.every((warning) => typeof warning === "string") ||
+    !validArtifacts
+  ) {
+    throw new Error("invalid consolidated summary schema");
+  }
+}
+
 async function authorUsage(root: string, manifest: JsonRecord | null): Promise<Record<string, number | null>> {
   const tracePath = stringOrNull(record(manifest?.artifacts)?.author_trace);
   if (tracePath === null) return {};
   try {
-    const physicalTrace = await containedRegularFile(root, tracePath);
-    if (physicalTrace === null) return {};
-    const trace = JSON.parse(await readFile(physicalTrace, "utf8")) as unknown;
+    const traceBytes = await secureRegularBytes(root, tracePath, "author trace", true);
+    if (traceBytes === null) return {};
+    const trace = JSON.parse(traceBytes.toString("utf8")) as unknown;
     const traceRecord = record(trace);
     const sessions = Array.isArray(traceRecord?.sessions) ? traceRecord.sessions : [];
     const totals: Record<string, number> = {};
@@ -337,7 +563,10 @@ async function authorUsage(root: string, manifest: JsonRecord | null): Promise<R
       }
     }
     return totals;
-  } catch {
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith("unsafe author trace")) {
+      throw error;
+    }
     return {};
   }
 }
@@ -359,7 +588,84 @@ async function evaluatorUsage(
   return totals;
 }
 
-export async function normalizeRun(inputs: ReportInputs): Promise<ConsolidatedSummary> {
+type OutputTarget = {
+  path: string;
+  parent: string;
+  existed: boolean;
+};
+
+async function prepareOutputTarget(
+  outDir: string,
+  inputRoots: string[],
+): Promise<OutputTarget> {
+  const requested = resolve(outDir);
+  for (const inputRoot of inputRoots) {
+    if (inside(inputRoot, requested) || inside(requested, inputRoot)) {
+      throw new Error(`output target must not overlap an input artifact: ${outDir}`);
+    }
+  }
+  const requestedParent = dirname(requested);
+  await mkdir(requestedParent, { recursive: true });
+  const parentMetadata = await lstat(requestedParent);
+  if (parentMetadata.isSymbolicLink() || !parentMetadata.isDirectory()) {
+    throw new Error(`output parent must be a physical directory: ${requestedParent}`);
+  }
+  const parent = await realpath(requestedParent);
+  const target = join(parent, basename(requested));
+  let existed = false;
+  try {
+    const metadata = await lstat(target);
+    existed = true;
+    if (metadata.isSymbolicLink() || !metadata.isDirectory()) {
+      throw new Error(`output target must be a physical directory: ${outDir}`);
+    }
+    const physical = await realpath(target);
+    if (physical !== target) {
+      throw new Error(`output target must resolve to its physical directory: ${outDir}`);
+    }
+  } catch (error) {
+    if (!isMissingPathError(error)) throw error;
+  }
+  for (const inputRoot of inputRoots) {
+    if (inside(inputRoot, target) || inside(target, inputRoot)) {
+      throw new Error(`output target must not overlap an input artifact: ${outDir}`);
+    }
+  }
+  return { path: target, parent, existed };
+}
+
+async function publishFromCleanStage<T>(
+  outDir: string,
+  inputRoots: string[],
+  generate: (stagingDir: string) => Promise<T>,
+): Promise<T> {
+  const target = await prepareOutputTarget(outDir, inputRoots);
+  const staging = await mkdtemp(join(target.parent, `.${basename(target.path)}.staging-`));
+  let backup: string | null = null;
+  try {
+    const generated = await generate(staging);
+    if (target.existed) {
+      backup = join(
+        target.parent,
+        `.${basename(target.path)}.backup-${crypto.randomUUID()}`,
+      );
+      await rename(target.path, backup);
+    }
+    try {
+      await rename(staging, target.path);
+    } catch (error) {
+      if (backup !== null) await rename(backup, target.path);
+      throw error;
+    }
+    if (backup !== null) await rm(backup, { recursive: true, force: true });
+    return generated;
+  } catch (error) {
+    await rm(staging, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+async function normalizeInto(inputs: ReportInputs): Promise<ConsolidatedSummary> {
   const authoredRoot = await ensureArtifactRoot(inputs.authoredArtifact, "authored");
   const skillRoot = inputs.skillArtifact === null
     ? null
@@ -376,9 +682,12 @@ export async function normalizeRun(inputs: ReportInputs): Promise<ConsolidatedSu
 
   const authorManifest = await readJson(authoredRoot, "manifest.json");
   const authorManifestError = validateManifest(authorManifest, "authored-app");
-  if (authorManifestError !== null) {
+  const authorFieldsError = validateAuthorFields(authorManifest.value);
+  if (authorManifestError !== null || authorFieldsError !== null) {
     status = "failed";
-    warnings.push(`authored artifact contract is invalid: ${authorManifestError}`);
+    warnings.push(
+      `authored artifact contract is invalid: ${authorManifestError ?? authorFieldsError}`,
+    );
   }
   await copyExactSource(
     authorManifest,
@@ -394,19 +703,31 @@ export async function normalizeRun(inputs: ReportInputs): Promise<ConsolidatedSu
 
   let skillManifest: ReadJsonResult | null = null;
   let skillMetrics: ReadJsonResult | null = null;
+  let skillMetricsValid = false;
   if (skillRoot === null) {
     warnings.push("skill evaluation was not supplied (disabled or unavailable)");
   } else {
     skillManifest = await readJson(skillRoot, "manifest.json");
     const manifestError = validateManifest(skillManifest, "skill-eval-report");
-    if (manifestError !== null) {
+    const manifestFieldsError = validateSkillManifestFields(skillManifest.value);
+    if (manifestError !== null || manifestFieldsError !== null) {
       status = worseStatus(status, "partial");
-      warnings.push(`skill artifact is incomplete: ${manifestError}`);
+      warnings.push(
+        `skill artifact is incomplete: ${manifestError ?? manifestFieldsError}`,
+      );
     }
     skillMetrics = await readJson(skillRoot, "metrics.json");
     if (skillMetrics.error !== null) {
       status = worseStatus(status, "partial");
       warnings.push(`skill artifact is missing authoritative metrics: ${skillMetrics.error}`);
+    } else {
+      const fieldsError = validateSkillMetricsFields(skillMetrics.value);
+      if (fieldsError !== null) {
+        status = worseStatus(status, "partial");
+        warnings.push(`skill artifact required fields are invalid: ${fieldsError}`);
+      } else {
+        skillMetricsValid = true;
+      }
     }
     await copyExactSource(
       skillMetrics,
@@ -425,19 +746,31 @@ export async function normalizeRun(inputs: ReportInputs): Promise<ConsolidatedSu
 
   let iosManifest: ReadJsonResult | null = null;
   let iosResult: ReadJsonResult | null = null;
+  let iosResultValid = false;
   if (iosRoot === null) {
     warnings.push("iOS evaluation was not supplied (disabled or unavailable)");
   } else {
     iosManifest = await readJson(iosRoot, "manifest.json");
     const manifestError = validateManifest(iosManifest, "ios-eval-report");
-    if (manifestError !== null) {
+    const manifestFieldsError = validateIosManifestFields(iosManifest.value);
+    if (manifestError !== null || manifestFieldsError !== null) {
       status = worseStatus(status, "partial");
-      warnings.push(`iOS artifact is incomplete: ${manifestError}`);
+      warnings.push(
+        `iOS artifact is incomplete: ${manifestError ?? manifestFieldsError}`,
+      );
     }
     iosResult = await readJson(iosRoot, "result.json");
     if (iosResult.error !== null) {
       status = worseStatus(status, "partial");
       warnings.push(`iOS artifact is missing result.json`);
+    } else {
+      const fieldsError = validateIosResultFields(iosResult.value);
+      if (fieldsError !== null) {
+        status = worseStatus(status, "partial");
+        warnings.push(`iOS artifact required fields are invalid: ${fieldsError}`);
+      } else {
+        iosResultValid = true;
+      }
     }
     await copyExactSource(
       iosResult,
@@ -463,7 +796,12 @@ export async function normalizeRun(inputs: ReportInputs): Promise<ConsolidatedSu
     expoExportStage(metrics, authorHealth),
     producerStage("native_build", iosHealth?.native_build),
     producerStage("app_launch", iosHealth?.app_launch),
-    evaluationStage(iosHealth, result, iosResult?.raw !== null && iosResult !== null),
+    evaluationStage(
+      iosHealth,
+      result,
+      iosResult?.raw !== null && iosResult !== null,
+      iosResultValid,
+    ),
   ];
 
   if (buildHealth.some((item) => item.status === "failed")) status = "failed";
@@ -487,7 +825,7 @@ export async function normalizeRun(inputs: ReportInputs): Promise<ConsolidatedSu
     warnings.push("iOS artifact contains a non-terminal build or evaluation stage");
   }
 
-  const skillScore = record(metrics?.score);
+  const skillScore = skillMetricsValid ? record(metrics?.score) : null;
   const triggerQuality = record(skillScore?.trigger_quality);
   const contextUptake = record(skillScore?.context_uptake);
   const summary: ConsolidatedSummary = {
@@ -495,16 +833,20 @@ export async function normalizeRun(inputs: ReportInputs): Promise<ConsolidatedSu
     status,
     run: runDetails(author, metrics, iosManifest?.value ?? null),
     scores: {
-      ios_macro_pct: result?.status === "completed" &&
-          buildHealth[6]?.status === "passed"
+      ios_macro_pct: iosResultValid && result?.status === "completed" &&
+          !allIosPlansNotApplicable(result) &&
+          [buildHealth[1], buildHealth[4], buildHealth[5]].every(
+            (item) => item?.status === "passed",
+          ) &&
+          (buildHealth[6]?.status === "passed" || buildHealth[6]?.status === "warning")
         ? finiteNumberOrNull(result.macro_avg_pct)
         : null,
       skill_trigger_recall: finiteNumberOrNull(triggerQuality?.recall),
       skill_uptake_rate: finiteNumberOrNull(contextUptake?.uptake_rate),
     },
     build_health: buildHealth,
-    skills: normalizedSkills(metrics),
-    ios: { test_plans: normalizedPlans(result) },
+    skills: normalizedSkills(skillMetricsValid ? metrics : null),
+    ios: { test_plans: normalizedPlans(iosResultValid ? result : null) },
     usage: {
       author: await authorUsage(authoredRoot, author),
       evaluator: await evaluatorUsage(iosRoot, iosManifest?.value ?? null),
@@ -522,6 +864,8 @@ export async function normalizeRun(inputs: ReportInputs): Promise<ConsolidatedSu
       screenshots: "evidence/screenshots/",
     },
   };
+
+  validateConsolidatedSummary(summary);
 
   await Promise.all([
     writeJson(join(inputs.outDir, "summary.json"), summary),
@@ -541,19 +885,50 @@ export async function normalizeRun(inputs: ReportInputs): Promise<ConsolidatedSu
   return summary;
 }
 
+export async function normalizeRun(inputs: ReportInputs): Promise<ConsolidatedSummary> {
+  const authoredRoot = await ensureArtifactRoot(inputs.authoredArtifact, "authored");
+  const skillRoot = inputs.skillArtifact === null
+    ? null
+    : await ensureArtifactRoot(inputs.skillArtifact, "skill");
+  const iosRoot = inputs.iosArtifact === null
+    ? null
+    : await ensureArtifactRoot(inputs.iosArtifact, "iOS");
+  const roots = [authoredRoot, skillRoot, iosRoot].filter(
+    (root): root is string => root !== null,
+  );
+  return await publishFromCleanStage(inputs.outDir, roots, async (stagingDir) =>
+    await normalizeInto({
+      authoredArtifact: authoredRoot,
+      skillArtifact: skillRoot,
+      iosArtifact: iosRoot,
+      outDir: stagingDir,
+    })
+  );
+}
+
 async function planTraceDirectories(
   iosRoot: string,
   testPlanTraces: string,
 ): Promise<Array<{ path: string; summary: JsonRecord }>> {
   const requestedRoot = resolve(iosRoot, testPlanTraces);
-  if (!inside(iosRoot, requestedRoot)) return [];
+  if (!inside(iosRoot, requestedRoot)) {
+    throw new Error("unsafe plan trace root outside iOS artifact");
+  }
   let root: string;
   try {
     const metadata = await lstat(requestedRoot);
-    if (metadata.isSymbolicLink() || !metadata.isDirectory()) return [];
+    if (metadata.isSymbolicLink() || !metadata.isDirectory()) {
+      throw new Error("unsafe plan trace root must be a physical directory");
+    }
     root = await realpath(requestedRoot);
-    if (!inside(iosRoot, root)) return [];
-  } catch {
+    if (!inside(iosRoot, root)) {
+      throw new Error("unsafe plan trace root outside iOS artifact");
+    }
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith("unsafe plan trace")) {
+      throw error;
+    }
+    if (!isMissingPathError(error)) throw error;
     return [];
   }
   let entries;
@@ -564,14 +939,20 @@ async function planTraceDirectories(
   }
   const directories: Array<{ path: string; summary: JsonRecord }> = [];
   for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
-    if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
-    const path = join(root, entry.name);
-    try {
-      const summary = record(JSON.parse(await readFile(join(path, "summary.json"), "utf8")));
-      if (summary !== null) directories.push({ path, summary });
-    } catch {
-      // A partial trace cannot safely resolve screenshot ownership.
+    if (entry.isSymbolicLink()) {
+      throw new Error(`unsafe plan trace directory: ${entry.name}`);
     }
+    if (!entry.isDirectory()) continue;
+    const path = join(root, entry.name);
+    const physical = await realpath(path);
+    if (!inside(iosRoot, physical) || physical !== path) {
+      throw new Error(`unsafe plan trace directory: ${entry.name}`);
+    }
+    const source = await readJson(physical, "summary.json");
+    if (source.value === null) {
+      throw new Error(`ambiguous plan trace ownership: ${entry.name} has no valid summary`);
+    }
+    directories.push({ path: physical, summary: source.value });
   }
   return directories;
 }
@@ -606,21 +987,108 @@ function inside(root: string, candidate: string): boolean {
   return rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
 }
 
-async function containedRegularFile(
+async function secureRegularBytes(
   root: string,
   reference: string,
-): Promise<string | null> {
+  label: string,
+  optional = false,
+): Promise<Buffer | null> {
   const candidate = resolve(root, reference);
-  if (!inside(root, candidate)) return null;
+  if (!inside(root, candidate)) throw new Error(`unsafe ${label} path`);
+  let metadata;
   try {
-    const metadata = await lstat(candidate);
-    if (metadata.isSymbolicLink() || !metadata.isFile() || metadata.nlink !== 1) {
-      return null;
+    metadata = await lstat(candidate);
+  } catch (error) {
+    if (optional && isMissingPathError(error)) return null;
+    throw new Error(`unsafe ${label}: missing file`);
+  }
+  if (metadata.isSymbolicLink() || !metadata.isFile() || metadata.nlink !== 1) {
+    throw new Error(`unsafe ${label}: expected physical regular single-link file`);
+  }
+  const physical = await realpath(candidate);
+  if (!inside(root, physical)) throw new Error(`unsafe ${label} physical path`);
+  const handle = await open(physical, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const opened = await handle.stat();
+    if (!opened.isFile() || opened.nlink !== 1) {
+      throw new Error(`unsafe ${label}: expected physical regular single-link file`);
     }
-    const physical = await realpath(candidate);
-    return inside(root, physical) ? physical : null;
-  } catch {
-    return null;
+    return await handle.readFile();
+  } finally {
+    await handle.close();
+  }
+}
+
+async function requirePhysicalContainedDirectory(
+  root: string,
+  reference: string,
+  label: string,
+): Promise<string> {
+  const candidate = resolve(root, reference);
+  if (!inside(root, candidate)) throw new Error(`unsafe ${label} path`);
+  const metadata = await lstat(candidate);
+  if (metadata.isSymbolicLink() || !metadata.isDirectory()) {
+    throw new Error(`unsafe ${label}: expected physical directory`);
+  }
+  const physical = await realpath(candidate);
+  if (!inside(root, physical) || physical !== candidate) {
+    throw new Error(`unsafe ${label} physical path`);
+  }
+  return physical;
+}
+
+async function cloneMachineReport(sourceRoot: string, stagingRoot: string): Promise<void> {
+  const allowedRoot = new Set(["manifest.json", "summary.json", "data", "evidence", "report.html"]);
+  const rootEntries = await readdir(sourceRoot, { withFileTypes: true });
+  for (const entry of rootEntries) {
+    if (!allowedRoot.has(entry.name)) {
+      throw new Error(`unsafe output inventory entry: ${entry.name}`);
+    }
+  }
+  await mkdir(join(stagingRoot, "data"), { recursive: true });
+  await mkdir(join(stagingRoot, "evidence", "screenshots"), { recursive: true });
+  for (const name of ["manifest.json", "summary.json"] as const) {
+    const bytes = await secureRegularBytes(sourceRoot, name, `output ${name}`);
+    await writeFile(join(stagingRoot, name), bytes!);
+  }
+  const report = await secureRegularBytes(
+    sourceRoot,
+    "report.html",
+    "output report.html",
+    true,
+  );
+  if (report !== null) await writeFile(join(stagingRoot, "report.html"), report);
+
+  const dataRoot = await requirePhysicalContainedDirectory(sourceRoot, "data", "output data");
+  const allowedData = new Set([
+    "author-manifest.json",
+    "build-health.json",
+    "skill-metrics.json",
+    "ios-result.json",
+  ]);
+  for (const entry of await readdir(dataRoot, { withFileTypes: true })) {
+    if (!allowedData.has(entry.name)) {
+      throw new Error(`unsafe output data entry: ${entry.name}`);
+    }
+    const bytes = await secureRegularBytes(dataRoot, entry.name, `output data/${entry.name}`);
+    await writeFile(join(stagingRoot, "data", entry.name), bytes!);
+  }
+  const evidence = await requirePhysicalContainedDirectory(
+    sourceRoot,
+    "evidence",
+    "output evidence",
+  );
+  const evidenceEntries = await readdir(evidence, { withFileTypes: true });
+  if (evidenceEntries.length !== 1 || evidenceEntries[0]?.name !== "screenshots") {
+    throw new Error("unsafe output evidence inventory");
+  }
+  const screenshots = await requirePhysicalContainedDirectory(
+    sourceRoot,
+    "evidence/screenshots",
+    "output screenshots",
+  );
+  for (const entry of await readdir(screenshots, { withFileTypes: true })) {
+    await secureRegularBytes(screenshots, entry.name, `output screenshot ${entry.name}`);
   }
 }
 
@@ -635,7 +1103,80 @@ function evidenceWarning(
   );
 }
 
-export async function copyScreenshotEvidence(
+function unsafeEvidence(detail: string): never {
+  throw new Error(`unsafe screenshot evidence: ${detail}`);
+}
+
+function planHasScreenshot(plan: JsonRecord): boolean {
+  return Array.isArray(plan.steps) && plan.steps.some((rawStep) =>
+    typeof record(rawStep)?.screenshot === "string"
+  );
+}
+
+function associatePlanTraces(
+  plans: unknown[],
+  traces: Array<{ path: string; summary: JsonRecord }>,
+): Map<number, { path: string; summary: JsonRecord }> {
+  const associations = new Map<number, { path: string; summary: JsonRecord }>();
+  const planGroups = new Map<string, number[]>();
+  for (const [index, rawPlan] of plans.entries()) {
+    const plan = record(rawPlan);
+    if (plan === null || typeof plan.test_plan !== "string") continue;
+    const group = planGroups.get(plan.test_plan) ?? [];
+    group.push(index);
+    planGroups.set(plan.test_plan, group);
+  }
+  for (const trace of traces) {
+    const tracePlan = stringOrNull(trace.summary.plan) ?? stringOrNull(trace.summary.test_plan);
+    if (tracePlan === null) {
+      throw new Error("ambiguous plan trace ownership: trace summary has no plan");
+    }
+    if (!planGroups.has(tracePlan)) {
+      throw new Error(`ambiguous plan trace ownership: unmatched trace for ${tracePlan}`);
+    }
+  }
+  for (const [planName, planIndexes] of planGroups) {
+    const matchingTraces = traces.filter(({ summary: traceSummary }) =>
+      traceSummary.plan === planName || traceSummary.test_plan === planName
+    );
+    const indexed = matchingTraces.filter(({ summary }) =>
+      typeof summary.run_index === "number" && Number.isInteger(summary.run_index)
+    );
+    const positional = matchingTraces.filter(({ summary }) => summary.run_index === undefined);
+    const referenced = planIndexes.some((index) => {
+      const plan = record(plans[index]);
+      return plan !== null && planHasScreenshot(plan);
+    });
+    if (indexed.length > 0) {
+      if (positional.length > 0 || indexed.length !== planIndexes.length) {
+        throw new Error(`ambiguous plan trace ownership for ${planName}`);
+      }
+      for (const planIndex of planIndexes) {
+        const plan = record(plans[planIndex]);
+        const runIndex = plan?.run_index;
+        const candidates = indexed.filter(({ summary }) => summary.run_index === runIndex);
+        if (candidates.length !== 1) {
+          throw new Error(`ambiguous plan trace ownership for ${planName} run ${String(runIndex)}`);
+        }
+        associations.set(planIndex, candidates[0]!);
+      }
+    } else if (positional.length > 0) {
+      if (positional.length !== planIndexes.length) {
+        throw new Error(`ambiguous plan trace ownership for ${planName}`);
+      }
+      for (const [offset, planIndex] of planIndexes.entries()) {
+        associations.set(planIndex, positional[offset]!);
+      }
+    } else if (referenced) {
+      // Missing capture evidence is non-fatal, but no positional guess is made.
+    }
+  }
+  return associations;
+}
+
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+async function copyScreenshotEvidenceInto(
   summary: ConsolidatedSummary,
   iosRoot: string,
   outDir: string,
@@ -645,23 +1186,19 @@ export async function copyScreenshotEvidence(
   const traceRoot = stringOrNull(record(manifest.value?.artifacts)?.test_plan_traces) ??
     "traces/test-plans/";
   const traces = await planTraceDirectories(physicalIosRoot, traceRoot);
+  const associations = associatePlanTraces(summary.ios.test_plans, traces);
   const evidenceRoot = join(outDir, "evidence", "screenshots");
   await mkdir(evidenceRoot, { recursive: true });
+  const destinations = new Set<string>();
 
-  for (const rawPlan of summary.ios.test_plans) {
+  for (const [planIndex, rawPlan] of summary.ios.test_plans.entries()) {
     const plan = record(rawPlan);
     if (plan === null) continue;
     const planName = stringOrNull(plan.test_plan) ?? "test-plan";
     const runIndex = typeof plan.run_index === "number" && Number.isInteger(plan.run_index)
       ? plan.run_index
       : 1;
-    const matches = traces.filter(({ summary: traceSummary }) =>
-      traceSummary.plan === planName || traceSummary.test_plan === planName
-    );
-    const exact = matches.find(({ summary: traceSummary }) =>
-      traceSummary.run_index === runIndex
-    );
-    const trace = exact ?? matches[runIndex - 1] ?? null;
+    const trace = associations.get(planIndex) ?? null;
     const steps = Array.isArray(plan.steps) ? plan.steps : [];
 
     for (const [stepIndex, rawStep] of steps.entries()) {
@@ -674,52 +1211,111 @@ export async function copyScreenshotEvidence(
         continue;
       }
       if (extname(sourceReference).toLowerCase() !== ".png") {
-        evidenceWarning(summary, plan, stepIndex, "is not a PNG");
-        continue;
+        unsafeEvidence("referenced file is not a PNG");
       }
       const resolved = resolve(trace.path, sourceReference);
       if (!inside(physicalIosRoot, resolved)) {
-        evidenceWarning(summary, plan, stepIndex, "resolves outside the iOS artifact");
-        continue;
+        unsafeEvidence("referenced file resolves outside the iOS artifact");
       }
 
       let sourceMetadata;
       try {
         sourceMetadata = await lstat(resolved);
-      } catch {
-        evidenceWarning(summary, plan, stepIndex, "does not exist");
-        continue;
+      } catch (error) {
+        if (isMissingPathError(error)) {
+          evidenceWarning(summary, plan, stepIndex, "does not exist");
+          continue;
+        }
+        unsafeEvidence("referenced file metadata could not be read");
       }
       if (sourceMetadata.isSymbolicLink()) {
-        evidenceWarning(summary, plan, stepIndex, "is a symbolic link");
-        continue;
+        unsafeEvidence("referenced file is a symbolic link");
       }
       if (!sourceMetadata.isFile()) {
-        evidenceWarning(summary, plan, stepIndex, "is not a regular file");
-        continue;
+        unsafeEvidence("referenced file is not a regular file");
       }
       if (sourceMetadata.nlink !== 1) {
-        evidenceWarning(summary, plan, stepIndex, "has multiple hard links");
-        continue;
+        unsafeEvidence("referenced file has multiple hard links");
       }
       let physicalSource;
       try {
         physicalSource = await realpath(resolved);
-      } catch {
-        evidenceWarning(summary, plan, stepIndex, "could not be physically resolved");
-        continue;
+      } catch (error) {
+        if (isMissingPathError(error)) {
+          evidenceWarning(summary, plan, stepIndex, "could not be physically resolved");
+          continue;
+        }
+        unsafeEvidence("referenced file could not be physically resolved");
       }
       if (!inside(physicalIosRoot, physicalSource)) {
-        evidenceWarning(summary, plan, stepIndex, "resolves outside the iOS artifact");
-        continue;
+        unsafeEvidence("referenced file resolves outside the iOS artifact");
       }
 
       const stableName = `${safeSlug(planName)}-run-${String(runIndex).padStart(2, "0")}-step-${String(stepIndex + 1).padStart(2, "0")}.png`;
-      await copyFile(physicalSource, join(evidenceRoot, stableName));
+      if (destinations.has(stableName)) {
+        throw new Error(`evidence destination collision: ${stableName}`);
+      }
+      destinations.add(stableName);
+      const bytes = await secureRegularBytes(
+        physicalIosRoot,
+        relative(physicalIosRoot, physicalSource),
+        "screenshot evidence",
+      );
+      if (bytes === null) unsafeEvidence("referenced file disappeared");
+      if (!bytes.subarray(0, PNG_SIGNATURE.length).equals(PNG_SIGNATURE)) {
+        unsafeEvidence("invalid PNG signature");
+      }
+      await writeFile(join(evidenceRoot, stableName), bytes);
       step.screenshot = `evidence/screenshots/${stableName}`;
     }
     steps.sort((left, right) => Number(failedStep(right)) - Number(failedStep(left)));
   }
 
+  validateConsolidatedSummary(summary);
   await writeJson(join(outDir, "summary.json"), summary);
+}
+
+export async function copyScreenshotEvidence(
+  summary: ConsolidatedSummary,
+  iosRoot: string,
+  outDir: string,
+): Promise<void> {
+  validateConsolidatedSummary(summary);
+  const physicalIosRoot = await ensureArtifactRoot(iosRoot, "iOS");
+  const working = structuredClone(summary);
+  await publishFromCleanStage(outDir, [physicalIosRoot], async (stagingDir) => {
+    const currentOutput = await ensureArtifactRoot(outDir, "output");
+    await cloneMachineReport(currentOutput, stagingDir);
+    await copyScreenshotEvidenceInto(working, physicalIosRoot, stagingDir);
+  });
+  for (const key of Object.keys(summary)) delete (summary as unknown as JsonRecord)[key];
+  Object.assign(summary, working);
+}
+
+export async function normalizeRunWithEvidence(
+  inputs: ReportInputs,
+): Promise<ConsolidatedSummary> {
+  const authoredRoot = await ensureArtifactRoot(inputs.authoredArtifact, "authored");
+  const skillRoot = inputs.skillArtifact === null
+    ? null
+    : await ensureArtifactRoot(inputs.skillArtifact, "skill");
+  const iosRoot = inputs.iosArtifact === null
+    ? null
+    : await ensureArtifactRoot(inputs.iosArtifact, "iOS");
+  const roots = [authoredRoot, skillRoot, iosRoot].filter(
+    (root): root is string => root !== null,
+  );
+  return await publishFromCleanStage(inputs.outDir, roots, async (stagingDir) => {
+    const summary = await normalizeInto({
+      authoredArtifact: authoredRoot,
+      skillArtifact: skillRoot,
+      iosArtifact: iosRoot,
+      outDir: stagingDir,
+    });
+    if (iosRoot !== null) {
+      await copyScreenshotEvidenceInto(summary, iosRoot, stagingDir);
+    }
+    validateConsolidatedSummary(summary);
+    return summary;
+  });
 }
