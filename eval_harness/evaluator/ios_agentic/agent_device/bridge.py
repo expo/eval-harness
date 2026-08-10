@@ -36,6 +36,7 @@ import shutil
 import subprocess
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 
@@ -194,20 +195,49 @@ class AgentDeviceBridge:
         """
         Capture a PNG screenshot of the current simulator screen.
 
-        If `path` is provided, the screenshot is written there. Otherwise a
-        temporary file path is generated. Returns an AgentDeviceResult whose
-        `output` is the path to the captured PNG on disk.
-
-        Intentionally NOT yet exposed as an LLM-visible tool — building the
-        bridge primitive only so we can wire it into a `capture_screenshot`
-        tool later without changing the bridge surface. Callers (the eval
-        harness, a future MCP tool, or diagnostic scripts) can use it
-        directly via this method.
+        EVAL_SCREENSHOT_DIR defines the active plan's evidence root. If `path`
+        is omitted, a unique filename is allocated beneath that root. Explicit
+        paths must also resolve beneath it. On success, `output` is the durable
+        screenshot path on disk.
         """
         import tempfile
+
+        configured_root = os.environ.get("EVAL_SCREENSHOT_DIR")
+        if not configured_root:
+            return AgentDeviceResult(
+                success=False,
+                output="",
+                error="EVAL_SCREENSHOT_DIR is required for screenshot capture",
+            )
+
+        root = Path(configured_root).expanduser()
+        root.mkdir(parents=True, exist_ok=True)
+        resolved_root = root.resolve()
         if path is None:
-            path = tempfile.NamedTemporaryFile(suffix=".png", delete=False).name
-        return self._run_cmd(["screenshot", path])
+            with tempfile.NamedTemporaryFile(
+                prefix="evidence-",
+                suffix=".png",
+                dir=root,
+                delete=False,
+            ) as screenshot_file:
+                target = Path(screenshot_file.name)
+        else:
+            target = Path(path).expanduser()
+            if not target.resolve().is_relative_to(resolved_root):
+                return AgentDeviceResult(
+                    success=False,
+                    output="",
+                    error=(
+                        f"screenshot path is outside EVAL_SCREENSHOT_DIR: "
+                        f"{target.resolve()} (root: {resolved_root})"
+                    ),
+                )
+            target.parent.mkdir(parents=True, exist_ok=True)
+
+        result = self._run_cmd(["screenshot", str(target)])
+        if not result.success:
+            return result
+        return AgentDeviceResult(success=True, output=str(target), error=result.error)
 
     def capture_hierarchy(self) -> str:
         """

@@ -313,6 +313,10 @@ class AgentDeviceEvaluator:
                 turn_agg.flush(reason="step_end")
 
                 if state.aborted or not state.completed:
+                    screenshot_path, screenshot_error = self._capture_terminal_screenshot(
+                        tracer,
+                        i,
+                    )
                     result.status = "evaluator_error"
                     result.error_stage = f"step_{i}"
                     if state.aborted:
@@ -333,10 +337,16 @@ class AgentDeviceEvaluator:
                         step_number=i,
                         category=state.abort_category,
                         error=result.error_reason,
+                        screenshot=screenshot_path,
+                        screenshot_error=screenshot_error,
                     )
                     return result
 
                 step_result = score_step(step, state.assertions, state.soft_assertions, state.completed, state.turns_used)
+                (
+                    step_result.screenshot_path,
+                    step_result.screenshot_error,
+                ) = self._capture_terminal_screenshot(tracer, i)
                 result.steps.append(step_result)
                 result.score += step_result.earned_points
 
@@ -358,6 +368,8 @@ class AgentDeviceEvaluator:
                     n_soft_assertions=len(state.soft_assertions),
                     step_usage=turn_agg.step_usage.snapshot(),
                     sdk_result=turn_agg.sdk_result,
+                    screenshot=step_result.screenshot_path,
+                    screenshot_error=step_result.screenshot_error,
                 )
 
         print(f"\n{'━'*60}")
@@ -382,11 +394,28 @@ class AgentDeviceEvaluator:
                     "completed_by_llm": s.completed_by_llm,
                     "n_assertions": len(s.assertions),
                     "n_soft_assertions": len(s.soft_assertions),
+                    "screenshot": s.screenshot_path,
+                    "screenshot_error": s.screenshot_error,
                 }
                 for s in result.steps
             ],
         })
         return result
+
+    def _capture_terminal_screenshot(
+        self,
+        tracer: Tracer,
+        step_number: int,
+    ) -> tuple[str | None, str | None]:
+        """Best-effort human evidence capture, independent of step scoring."""
+        relative = Path("screenshots") / f"step-{step_number:02d}-final.png"
+        try:
+            screenshot = self.bridge.capture_screenshot(str(tracer.root / relative))
+        except Exception as exc:
+            return None, str(exc)
+        if screenshot.success:
+            return relative.as_posix(), None
+        return None, screenshot.error or screenshot.output or "screenshot capture failed"
 
     # ----- Message processing -----
 

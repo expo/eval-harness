@@ -3,8 +3,18 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from eval_harness.evaluator.ios_agentic.core.scoring import StepResult, TestPlanResult
-from eval_harness.evaluator.ios_agentic.main import _build_parser, _build_suite_output, _run_suite
+from eval_harness.evaluator.ios_agentic.core.scoring import (
+    AssertionResult,
+    SoftAssertionResult,
+    StepResult,
+    TestPlanResult,
+)
+from eval_harness.evaluator.ios_agentic.main import (
+    _build_parser,
+    _build_suite_output,
+    _run_suite,
+    _serialize_plan_result,
+)
 
 
 def completed_plan(score: int = 3, full_points: int = 3) -> TestPlanResult:
@@ -26,6 +36,67 @@ def completed_plan(score: int = 3, full_points: int = 3) -> TestPlanResult:
 
 
 class SuiteOutputTests(unittest.TestCase):
+    def test_spec_plan_serialization_preserves_assertion_and_screenshot_evidence(self) -> None:
+        """Specification: public results retain evidence needed for postmortems.
+
+        Oracle: commands/checks, fatality, outcomes, soft evidence, screenshot,
+        and compatibility counts all survive serialization.
+        Catches: reducing assertions back to opaque integer counts.
+        """
+        result = TestPlanResult(
+            score=0,
+            full_points=3,
+            status="completed",
+            steps=[
+                StepResult(
+                    name="delete note",
+                    max_points=3,
+                    earned_points=0,
+                    passed=False,
+                    assertions=[
+                        AssertionResult(
+                            "assert_visible: note-title",
+                            fatal=True,
+                            passed=False,
+                        )
+                    ],
+                    soft_assertions=[
+                        SoftAssertionResult(
+                            "destructive action is clearly communicated",
+                            fatal=False,
+                            passed=False,
+                            evidence="Delete label absent from the latest accessibility tree",
+                        )
+                    ],
+                    screenshot_path="screenshots/step-01-final.png",
+                    screenshot_error=None,
+                )
+            ],
+        )
+
+        record = _serialize_plan_result(Path("test_delete.txt"), 1, result)
+        step = record["steps"][0]
+
+        self.assertEqual(
+            step["hard_assertions"],
+            [{"command": "assert_visible: note-title", "fatal": True, "passed": False}],
+        )
+        self.assertEqual(
+            step["soft_assertions"],
+            [
+                {
+                    "check": "destructive action is clearly communicated",
+                    "fatal": False,
+                    "passed": False,
+                    "evidence": "Delete label absent from the latest accessibility tree",
+                }
+            ],
+        )
+        self.assertEqual(step["hard_assertion_count"], 1)
+        self.assertEqual(step["soft_assertion_count"], 1)
+        self.assertEqual(step["screenshot"], "screenshots/step-01-final.png")
+        self.assertIsNone(step["screenshot_error"])
+
     def test_spec_completed_and_not_applicable_plans_complete_the_suite(self) -> None:
         """Specification: N/A is a legitimate terminal plan outcome.
 

@@ -49,6 +49,8 @@ class StepResult:
     soft_assertions: list[SoftAssertionResult] = field(default_factory=list)
     iterations_used: int = 0
     completed_by_llm: bool = False
+    screenshot_path: str | None = None
+    screenshot_error: str | None = None
 
 
 @dataclass

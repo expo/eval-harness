@@ -32,7 +32,7 @@ from pathlib import Path
 warnings.filterwarnings("ignore", message="urllib3 v2 only supports OpenSSL")
 
 from .agent_device.evaluator import AgentDeviceEvaluator
-from .core.scoring import TestPlanResult
+from .core.scoring import StepResult, TestPlanResult
 from .report import write_html_report
 
 _PACKAGE_DIR = Path(__file__).resolve().parent
@@ -117,17 +117,7 @@ def _serialize_plan_result(
             "score": None,
             "full_points": None,
             "macro_pct": None,
-            "steps": [
-                {
-                    "description": f"{'PASSED' if step.passed else 'FAILED'}: {step.name}",
-                    "points": step.earned_points,
-                    "max_points": step.max_points,
-                    "iterations": step.iterations_used,
-                    "hard_assertions": len(step.assertions),
-                    "soft_assertions": len(step.soft_assertions),
-                }
-                for step in result.steps
-            ],
+            "steps": [_serialize_step_result(step) for step in result.steps],
         }
 
     if result.status != "completed":
@@ -159,17 +149,40 @@ def _serialize_plan_result(
         "score": result.score,
         "full_points": result.full_points,
         "macro_pct": round(test_macro_pct * 100, 2),
-        "steps": [
-            {
-                "description": f"{'PASSED' if step.passed else 'FAILED'}: {step.name}",
-                "points": step.earned_points,
-                "max_points": step.max_points,
-                "iterations": step.iterations_used,
-                "hard_assertions": len(step.assertions),
-                "soft_assertions": len(step.soft_assertions),
-            }
-            for step in result.steps
-        ],
+        "steps": [_serialize_step_result(step) for step in result.steps],
+    }
+
+
+def _serialize_step_result(step: StepResult) -> dict:
+    """Preserve assertion-level evidence plus explicit compatibility counts."""
+    hard_assertions = [
+        {
+            "command": assertion.yaml_cmd,
+            "fatal": assertion.fatal,
+            "passed": assertion.passed,
+        }
+        for assertion in step.assertions
+    ]
+    soft_assertions = [
+        {
+            "check": assertion.check,
+            "fatal": assertion.fatal,
+            "passed": assertion.passed,
+            "evidence": assertion.evidence,
+        }
+        for assertion in step.soft_assertions
+    ]
+    return {
+        "description": f"{'PASSED' if step.passed else 'FAILED'}: {step.name}",
+        "points": step.earned_points,
+        "max_points": step.max_points,
+        "iterations": step.iterations_used,
+        "hard_assertions": hard_assertions,
+        "soft_assertions": soft_assertions,
+        "hard_assertion_count": len(hard_assertions),
+        "soft_assertion_count": len(soft_assertions),
+        "screenshot": step.screenshot_path,
+        "screenshot_error": step.screenshot_error,
     }
 
 

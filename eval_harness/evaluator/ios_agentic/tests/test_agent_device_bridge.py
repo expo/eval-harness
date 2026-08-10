@@ -1,4 +1,7 @@
+import os
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from eval_harness.evaluator.ios_agentic.agent_device.bridge import (
@@ -63,6 +66,61 @@ class RecordingMaestroRestart:
     def restart_app(self, clear_state: bool = False) -> AgentDeviceResult:
         self.clear_state_calls.append(clear_state)
         return AgentDeviceResult(success=True, output="ready")
+
+
+class RecordingScreenshotBridge(AgentDeviceBridge):
+    """Keep screenshot path policy real while replacing the external CLI."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.commands: list[list[str]] = []
+
+    def _run_cmd(
+        self,
+        args: list[str],
+        timeout: int | None = None,
+    ) -> AgentDeviceResult:
+        self.commands.append(args)
+        return AgentDeviceResult(success=True, output=args[1])
+
+
+class AgentDeviceBridgeScreenshotTests(unittest.TestCase):
+    def test_spec_discretionary_screenshot_stays_inside_active_trace(self) -> None:
+        """Specification: no-argument captures are durable plan evidence.
+
+        Oracle: EVAL_SCREENSHOT_DIR is the only allowed capture root.
+        Catches: falling back to an uncollected system temporary directory.
+        """
+        bridge = RecordingScreenshotBridge()
+
+        with tempfile.TemporaryDirectory() as td:
+            trace = Path(td) / "plan-trace"
+            screenshot_root = trace / "screenshots"
+            with patch.dict(os.environ, {"EVAL_SCREENSHOT_DIR": str(screenshot_root)}):
+                result = bridge.capture_screenshot()
+
+            self.assertTrue(result.success, result.error)
+            self.assertTrue(Path(result.output).is_relative_to(screenshot_root))
+            self.assertEqual(bridge.commands, [["screenshot", result.output]])
+
+    def test_spec_explicit_screenshot_cannot_escape_active_trace(self) -> None:
+        """Specification: explicit capture paths cannot escape the evidence root.
+
+        Oracle: a resolved sibling path is outside EVAL_SCREENSHOT_DIR.
+        Catches: an agent or caller writing arbitrary files through agent-device.
+        """
+        bridge = RecordingScreenshotBridge()
+
+        with tempfile.TemporaryDirectory() as td:
+            trace = Path(td) / "plan-trace"
+            screenshot_root = trace / "screenshots"
+            escaped = trace / "escaped.png"
+            with patch.dict(os.environ, {"EVAL_SCREENSHOT_DIR": str(screenshot_root)}):
+                result = bridge.capture_screenshot(str(escaped))
+
+        self.assertFalse(result.success)
+        self.assertIn("outside EVAL_SCREENSHOT_DIR", result.error)
+        self.assertEqual(bridge.commands, [])
 
 
 class AgentDeviceBridgeFillTests(unittest.TestCase):
