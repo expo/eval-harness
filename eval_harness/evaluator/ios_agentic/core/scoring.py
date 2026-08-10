@@ -54,10 +54,21 @@ class StepResult:
 
 
 @dataclass
+class TerminalEvidence:
+    """Human-only evidence for a formal step that did not reach scoring."""
+
+    step_number: int
+    step_name: str
+    screenshot_path: str | None = None
+    screenshot_error: str | None = None
+
+
+@dataclass
 class TestPlanResult:
     score: int
     full_points: int
     steps: list[StepResult] = field(default_factory=list)
+    terminal_evidence: list[TerminalEvidence] = field(default_factory=list)
     status: PlanStatus = "in_progress"
     error_stage: str = ""
     error_reason: str = ""

@@ -287,6 +287,15 @@ function validIosStep(value: unknown): boolean {
     step.soft_assertion_count === step.soft_assertions.length;
 }
 
+function validTerminalEvidence(value: unknown): boolean {
+  const evidence = record(value);
+  return evidence !== null &&
+    typeof evidence.step_number === "number" && Number.isInteger(evidence.step_number) &&
+    evidence.step_number >= 1 && nonEmptyString(evidence.step_name) &&
+    nullableString(evidence.screenshot) && nullableString(evidence.screenshot_error) &&
+    (evidence.screenshot !== null || evidence.screenshot_error !== null);
+}
+
 function validEvaluatorError(value: unknown): boolean {
   const error = record(value);
   if (error === null || !nonEmptyString(error.stage) || !nonEmptyString(error.reason)) {
@@ -336,12 +345,16 @@ function validateIosResultFields(value: JsonRecord | null): string | null {
   }
   for (const rawPlan of plans) {
     const plan = record(rawPlan);
+    const terminalEvidence = plan?.terminal_evidence;
     if (
       plan === null || !nonEmptyString(plan.test_plan) ||
       typeof plan.run_index !== "number" || !Number.isInteger(plan.run_index) ||
       plan.run_index < 1 ||
       !["completed", "not_applicable", "evaluator_error"].includes(String(plan.status)) ||
-      !Array.isArray(plan.steps) || !plan.steps.every(validIosStep)
+      !Array.isArray(plan.steps) || !plan.steps.every(validIosStep) ||
+      (terminalEvidence !== undefined && (
+        !Array.isArray(terminalEvidence) || !terminalEvidence.every(validTerminalEvidence)
+      ))
     ) {
       return "iOS result test plans are missing required fields";
     }
@@ -354,6 +367,9 @@ function validateIosResultFields(value: JsonRecord | null): string | null {
       typeof plan.na_reason !== "string" || plan.score !== 0 || plan.full_points !== 0 ||
       plan.macro_pct !== null || plan.steps.length !== 0
     )) return "iOS result N/A plans are missing required fields";
+    if (plan.status !== "evaluator_error" &&
+      Array.isArray(terminalEvidence) && terminalEvidence.length > 0
+    ) return "iOS result terminal evidence is only valid for evaluator errors";
     if (plan.status === "evaluator_error" && (
       !nonEmptyString(plan.error_stage) || !nonEmptyString(plan.error_reason) ||
       plan.score !== null || plan.full_points !== null || plan.macro_pct !== null
@@ -1077,14 +1093,22 @@ export async function normalizeRun(inputs: ReportInputs): Promise<ConsolidatedSu
 
 function validPlanTraceSummary(value: JsonRecord): boolean {
   const plan = stringOrNull(value.plan) ?? stringOrNull(value.test_plan);
-  return plan !== null && plan.length > 0 &&
+  const baseValid = plan !== null && plan.length > 0 &&
     typeof value.platform === "string" && value.platform.length > 0 &&
-    typeof value.score === "number" && Number.isFinite(value.score) &&
-    typeof value.full_points === "number" && Number.isFinite(value.full_points) &&
     record(value.total_usage) !== null &&
     Array.isArray(value.steps) &&
     (value.run_index === undefined ||
-      (typeof value.run_index === "number" && Number.isInteger(value.run_index)));
+      (typeof value.run_index === "number" && Number.isInteger(value.run_index) &&
+        value.run_index >= 1));
+  if (!baseValid) return false;
+  if (value.status === "evaluator_error") {
+    return value.score === null && value.full_points === null &&
+      nonEmptyString(value.error_stage) && nonEmptyString(value.error_reason) &&
+      Array.isArray(value.terminal_evidence) &&
+      value.terminal_evidence.every(validTerminalEvidence);
+  }
+  return typeof value.score === "number" && Number.isFinite(value.score) &&
+    typeof value.full_points === "number" && Number.isFinite(value.full_points);
 }
 
 async function planTraceDirectories(
@@ -1256,11 +1280,11 @@ async function cloneMachineReport(sourceRoot: string, stagingRoot: string): Prom
 function evidenceWarning(
   summary: ConsolidatedSummary,
   plan: JsonRecord,
-  stepIndex: number,
+  stepNumber: number,
   detail: string,
 ): void {
   summary.warnings.push(
-    `screenshot for ${String(plan.test_plan ?? "unknown plan")} run ${String(plan.run_index ?? 1)} step ${stepIndex + 1} ${detail}`,
+    `screenshot for ${String(plan.test_plan ?? "unknown plan")} run ${String(plan.run_index ?? 1)} step ${stepNumber} ${detail}`,
   );
 }
 
@@ -1269,9 +1293,14 @@ function unsafeEvidence(detail: string): never {
 }
 
 function planHasScreenshot(plan: JsonRecord): boolean {
-  return Array.isArray(plan.steps) && plan.steps.some((rawStep) =>
+  const scored = Array.isArray(plan.steps) && plan.steps.some((rawStep) =>
     typeof record(rawStep)?.screenshot === "string"
   );
+  const terminal = Array.isArray(plan.terminal_evidence) &&
+    plan.terminal_evidence.some((rawEvidence) =>
+      typeof record(rawEvidence)?.screenshot === "string"
+    );
+  return scored || terminal;
 }
 
 function associatePlanTraces(
@@ -1361,14 +1390,30 @@ async function copyScreenshotEvidenceInto(
       : 1;
     const trace = associations.get(planIndex) ?? null;
     const steps = Array.isArray(plan.steps) ? plan.steps : [];
+    const terminalEvidence = Array.isArray(plan.terminal_evidence)
+      ? plan.terminal_evidence
+      : [];
+    const references = [
+      ...steps.map((rawEvidence, index) => ({ rawEvidence, stepNumber: index + 1 })),
+      ...terminalEvidence.map((rawEvidence) => {
+        const evidence = record(rawEvidence);
+        return {
+          rawEvidence,
+          stepNumber: typeof evidence?.step_number === "number" &&
+              Number.isInteger(evidence.step_number)
+            ? evidence.step_number
+            : 1,
+        };
+      }),
+    ];
 
-    for (const [stepIndex, rawStep] of steps.entries()) {
-      const step = record(rawStep);
-      if (step === null || typeof step.screenshot !== "string") continue;
-      const sourceReference = step.screenshot;
-      step.screenshot = null;
+    for (const { rawEvidence, stepNumber } of references) {
+      const evidence = record(rawEvidence);
+      if (evidence === null || typeof evidence.screenshot !== "string") continue;
+      const sourceReference = evidence.screenshot;
+      evidence.screenshot = null;
       if (trace === null) {
-        evidenceWarning(summary, plan, stepIndex, "has no matching plan trace");
+        evidenceWarning(summary, plan, stepNumber, "has no matching plan trace");
         continue;
       }
       if (extname(sourceReference).toLowerCase() !== ".png") {
@@ -1384,7 +1429,7 @@ async function copyScreenshotEvidenceInto(
         sourceMetadata = await lstat(resolved);
       } catch (error) {
         if (isMissingPathError(error)) {
-          evidenceWarning(summary, plan, stepIndex, "does not exist");
+          evidenceWarning(summary, plan, stepNumber, "does not exist");
           continue;
         }
         unsafeEvidence("referenced file metadata could not be read");
@@ -1403,7 +1448,7 @@ async function copyScreenshotEvidenceInto(
         physicalSource = await realpath(resolved);
       } catch (error) {
         if (isMissingPathError(error)) {
-          evidenceWarning(summary, plan, stepIndex, "could not be physically resolved");
+          evidenceWarning(summary, plan, stepNumber, "could not be physically resolved");
           continue;
         }
         unsafeEvidence("referenced file could not be physically resolved");
@@ -1412,7 +1457,7 @@ async function copyScreenshotEvidenceInto(
         unsafeEvidence("referenced file resolves outside the iOS artifact");
       }
 
-      const stableName = `${safeSlug(planName)}-run-${String(runIndex).padStart(2, "0")}-step-${String(stepIndex + 1).padStart(2, "0")}.png`;
+      const stableName = `${safeSlug(planName)}-run-${String(runIndex).padStart(2, "0")}-step-${String(stepNumber).padStart(2, "0")}.png`;
       if (destinations.has(stableName)) {
         throw new Error(`evidence destination collision: ${stableName}`);
       }
@@ -1427,7 +1472,7 @@ async function copyScreenshotEvidenceInto(
         unsafeEvidence("invalid PNG signature");
       }
       await writeFile(join(evidenceRoot, stableName), bytes);
-      step.screenshot = `evidence/screenshots/${stableName}`;
+      evidence.screenshot = `evidence/screenshots/${stableName}`;
     }
   }
 

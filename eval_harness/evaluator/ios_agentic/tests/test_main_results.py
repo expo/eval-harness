@@ -7,6 +7,7 @@ from eval_harness.evaluator.ios_agentic.core.scoring import (
     AssertionResult,
     SoftAssertionResult,
     StepResult,
+    TerminalEvidence,
     TestPlanResult,
 )
 from eval_harness.evaluator.ios_agentic.main import (
@@ -36,6 +37,46 @@ def completed_plan(score: int = 3, full_points: int = 3) -> TestPlanResult:
 
 
 class SuiteOutputTests(unittest.TestCase):
+    def test_spec_evaluator_error_serialization_preserves_unscored_terminal_evidence(self) -> None:
+        """Specification: abort evidence survives without becoming a scored step.
+
+        Oracle: evaluator-error scores stay null, scored steps stay empty, and
+        the terminal screenshot diagnostic is serialized at plan level.
+        Catches: dropping abort evidence or fabricating zero-point assertions.
+        """
+        result = TestPlanResult(
+            score=0,
+            full_points=3,
+            status="evaluator_error",
+            error_stage="step_1",
+            error_reason="driver_error: screen unavailable",
+        )
+        result.terminal_evidence = [
+            TerminalEvidence(
+                step_number=1,
+                step_name="show note",
+                screenshot_path=None,
+                screenshot_error="simctl screenshot failed",
+            )
+        ]
+
+        record = _serialize_plan_result(Path("test_insert.txt"), 2, result)
+
+        self.assertIsNone(record["score"])
+        self.assertIsNone(record["full_points"])
+        self.assertEqual(record["steps"], [])
+        self.assertEqual(
+            record["terminal_evidence"],
+            [
+                {
+                    "step_number": 1,
+                    "step_name": "show note",
+                    "screenshot": None,
+                    "screenshot_error": "simctl screenshot failed",
+                }
+            ],
+        )
+
     def test_spec_plan_serialization_preserves_assertion_and_screenshot_evidence(self) -> None:
         """Specification: public results retain evidence needed for postmortems.
 
@@ -214,7 +255,7 @@ class CompleteThenRaiseEvaluator:
         self.calls = 0
         self.bridge = RecordingBridge()
 
-    def evaluate_test_plan(self, plan_path: Path) -> TestPlanResult:
+    def evaluate_test_plan(self, plan_path: Path, run_index: int = 1) -> TestPlanResult:
         self.calls += 1
         if self.calls == 1:
             return completed_plan()

@@ -268,7 +268,7 @@ class AgentDeviceEvaluatorOutcomeTests(unittest.TestCase):
         """Specification: evaluator aborts preserve the terminal UI for review.
 
         Oracle: aborted formal step one uses the same deterministic filename.
-        Catches: returning before capture or omitting evidence from plan_aborted.
+        Catches: returning before capture or leaving evidence only in JSONL.
         """
         bridge = RecordingScreenshotBridge(AgentDeviceResult(success=True, output="saved"))
         evaluator = self._formal_step_evaluator(bridge)
@@ -297,12 +297,110 @@ class AgentDeviceEvaluatorOutcomeTests(unittest.TestCase):
             ),
             patch.object(AgentDeviceEvaluator, "_receive_phase_response", abort_phase),
         ):
-            result = asyncio.run(evaluator._evaluate_test_plan_async(Path("test_insert.txt")))
+            result = asyncio.run(
+                evaluator._evaluate_test_plan_async(Path("test_insert.txt"), run_index=2)
+            )
 
         self.assertEqual(result.status, "evaluator_error")
+        self.assertEqual(result.steps, [])
+        self.assertEqual(len(result.terminal_evidence), 1)
+        evidence = result.terminal_evidence[0]
+        self.assertEqual(evidence.step_number, 1)
+        self.assertEqual(evidence.step_name, "show note")
+        self.assertEqual(evidence.screenshot_path, "screenshots/step-01-final.png")
+        self.assertIsNone(evidence.screenshot_error)
         aborted = next(fields for event, fields in RecordingTracer.latest.events if event == "plan_aborted")
         self.assertEqual(aborted["screenshot"], "screenshots/step-01-final.png")
         self.assertIsNone(aborted["screenshot_error"])
+        self.assertEqual(
+            RecordingTracer.latest.summary,
+            {
+                "plan": "test_insert.txt",
+                "run_index": 2,
+                "platform": "ios",
+                "driver": "agent-device",
+                "status": "evaluator_error",
+                "error_stage": "step_1",
+                "error_reason": "driver_error: screen unavailable",
+                "score": None,
+                "full_points": None,
+                "total_usage": {
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "cache_creation_input_tokens": 0,
+                    "cache_read_input_tokens": 0,
+                    "total_cost_usd": 0.0,
+                    "n_responses": 0,
+                },
+                "steps": [],
+                "terminal_evidence": [
+                    {
+                        "step_number": 1,
+                        "step_name": "show note",
+                        "screenshot": "screenshots/step-01-final.png",
+                        "screenshot_error": None,
+                    }
+                ],
+            },
+        )
+
+    def test_spec_unterminated_formal_step_preserves_screenshot_failure(self) -> None:
+        """Specification: a turn-budget exit retains capture diagnostics.
+
+        Oracle: the unscored plan has null-score evidence for its formal step.
+        Catches: handling explicit aborts while dropping unterminated responses.
+        """
+        bridge = RecordingScreenshotBridge(
+            AgentDeviceResult(success=False, output="", error="simctl screenshot failed")
+        )
+        evaluator = self._formal_step_evaluator(bridge)
+
+        async def unterminated_phase(_self, _client, state, _turn_agg, _agg_usage) -> None:
+            state.turns_used = 50
+
+        with (
+            patch(
+                "eval_harness.evaluator.ios_agentic.agent_device.evaluator.parse_test_plan",
+                return_value={
+                    "full_points": 3,
+                    "steps": [{"name": "show note", "description": "", "points": 3}],
+                    "seeding": "",
+                },
+            ),
+            patch(
+                "eval_harness.evaluator.ios_agentic.agent_device.evaluator.Tracer",
+                RecordingTracer,
+            ),
+            patch(
+                "eval_harness.evaluator.ios_agentic.agent_device.evaluator.ClaudeSDKClient",
+                PassiveSdkClient,
+            ),
+            patch.object(
+                AgentDeviceEvaluator,
+                "_receive_phase_response",
+                unterminated_phase,
+            ),
+        ):
+            result = asyncio.run(
+                evaluator._evaluate_test_plan_async(Path("test_insert.txt"), run_index=3)
+            )
+
+        self.assertEqual(result.status, "evaluator_error")
+        self.assertEqual(result.error_stage, "step_1")
+        self.assertEqual(
+            result.error_reason,
+            "step response ended without complete_step or abort_step",
+        )
+        self.assertEqual(result.steps, [])
+        self.assertEqual(len(result.terminal_evidence), 1)
+        evidence = result.terminal_evidence[0]
+        self.assertIsNone(evidence.screenshot_path)
+        self.assertEqual(evidence.screenshot_error, "simctl screenshot failed")
+        self.assertEqual(RecordingTracer.latest.summary["run_index"], 3)
+        self.assertEqual(
+            RecordingTracer.latest.summary["terminal_evidence"][0]["screenshot_error"],
+            "simctl screenshot failed",
+        )
 
     def test_regression_restart_failure_is_an_evaluator_error(self) -> None:
         """Regression: a driver restart fault is not an app score of zero.

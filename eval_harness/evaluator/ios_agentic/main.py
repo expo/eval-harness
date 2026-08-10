@@ -118,6 +118,15 @@ def _serialize_plan_result(
             "full_points": None,
             "macro_pct": None,
             "steps": [_serialize_step_result(step) for step in result.steps],
+            "terminal_evidence": [
+                {
+                    "step_number": evidence.step_number,
+                    "step_name": evidence.step_name,
+                    "screenshot": evidence.screenshot_path,
+                    "screenshot_error": evidence.screenshot_error,
+                }
+                for evidence in result.terminal_evidence
+            ],
         }
 
     if result.status != "completed":
@@ -298,7 +307,7 @@ def _run_suite(
                 print(f"{'#'*60}")
 
                 try:
-                    result = evaluator.evaluate_test_plan(plan_path)
+                    result = evaluator.evaluate_test_plan(plan_path, run_index=run_index)
                     record = _serialize_plan_result(plan_path, run_index, result)
                 except Exception as exc:
                     record = {

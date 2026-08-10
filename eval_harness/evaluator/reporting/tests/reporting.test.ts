@@ -1485,13 +1485,32 @@ describe("copyScreenshotEvidence", () => {
       .toBeLessThan(html.indexOf("Passed final state"));
   });
 
-  test("warns without guessing when an aborted plan has a screenshot but no summary", async () => {
-    // Catches diagnostic files from a formal abort being assigned to a plan without ownership data.
+  test("copies and renders an evaluator-aborted screenshot without fabricating a scored step", async () => {
+    // Catches formal-abort evidence remaining stranded in the producer trace.
     const root = tempRoot();
     const args = inputs(root);
     const trace = join(args.iosArtifact!, "traces/test-plans/test_insert_aborted");
     mkdirSync(join(trace, "screenshots"), { recursive: true });
     writeFileSync(join(trace, "screenshots/step-01-final.png"), PNG_BYTES);
+    writeJson(join(trace, "summary.json"), {
+      plan: "test_insert.txt",
+      run_index: 1,
+      platform: "ios",
+      driver: "agent-device",
+      status: "evaluator_error",
+      error_stage: "step_1",
+      error_reason: "driver_error: agent aborted",
+      score: null,
+      full_points: null,
+      total_usage: {},
+      steps: [],
+      terminal_evidence: [{
+        step_number: 1,
+        step_name: "Insert a note",
+        screenshot: "screenshots/step-01-final.png",
+        screenshot_error: null,
+      }],
+    });
     writeJson(join(args.iosArtifact!, "result.json"), {
       status: "failed",
       expected_plan_count: 1,
@@ -1507,15 +1526,10 @@ describe("copyScreenshotEvidence", () => {
         score: null,
         full_points: null,
         macro_pct: null,
-        steps: [{
-          description: "FAILED: formal evaluation aborted",
-          points: 0,
-          max_points: 1,
-          iterations: 1,
-          hard_assertions: [],
-          soft_assertions: [],
-          hard_assertion_count: 0,
-          soft_assertion_count: 0,
+        steps: [],
+        terminal_evidence: [{
+          step_number: 1,
+          step_name: "Insert a note",
           screenshot: "screenshots/step-01-final.png",
           screenshot_error: null,
         }],
@@ -1526,12 +1540,70 @@ describe("copyScreenshotEvidence", () => {
 
     expect(summary.status).toBe("failed");
     const plan = summary.ios.test_plans[0] as Record<string, unknown>;
-    const step = (plan.steps as Array<Record<string, unknown>>)[0]!;
-    expect(step.screenshot).toBeNull();
-    expect(summary.warnings).toContain(
-      "screenshot for test_insert.txt run 1 step 1 has no matching plan trace",
+    expect(plan.steps).toEqual([]);
+    expect(plan.score).toBeNull();
+    const terminalEvidence = plan.terminal_evidence as Array<Record<string, unknown>>;
+    expect(terminalEvidence).toEqual([
+      {
+        step_number: 1,
+        step_name: "Insert a note",
+        screenshot: "evidence/screenshots/test-insert-run-01-step-01.png",
+        screenshot_error: null,
+      },
+    ]);
+    expect(readdirSync(join(args.outDir, "evidence/screenshots"))).toEqual([
+      "test-insert-run-01-step-01.png",
+    ]);
+    expect(readFileSync(
+      join(args.outDir, terminalEvidence[0]!.screenshot as string),
+    )).toEqual(PNG_BYTES);
+
+    const html = renderReport(summary);
+    expect(html).toContain("Evaluator-aborted final state");
+    expect(html).toContain("Insert a note");
+    expect(html).toContain(
+      'src="evidence/screenshots/test-insert-run-01-step-01.png"',
     );
+    expect(html).toContain('href="#ios-plan-01-run-01"');
+    expect(html).toContain('id="ios-plan-01-run-01"');
+  });
+
+  test("renders an aborted-step screenshot error as a plan diagnostic", async () => {
+    // Catches a best-effort capture failure being silently discarded.
+    const root = tempRoot();
+    const args = inputs(root);
+    const result = readJson(join(args.iosArtifact!, "result.json"));
+    const plan = (result.test_plans as Array<Record<string, unknown>>)[0]!;
+    plan.status = "evaluator_error";
+    plan.error_stage = "step_1";
+    plan.error_reason = "driver_error: screen unavailable";
+    plan.score = null;
+    plan.full_points = null;
+    plan.macro_pct = null;
+    plan.steps = [];
+    plan.terminal_evidence = [{
+      step_number: 1,
+      step_name: "Insert a note",
+      screenshot: null,
+      screenshot_error: "simctl screenshot failed",
+    }];
+    result.status = "failed";
+    result.macro_avg_pct = null;
+    result.evaluator_errors = [{
+      test_plan: "test_insert.txt",
+      run_index: 1,
+      stage: "step_1",
+      reason: "driver_error: screen unavailable",
+    }];
+    writeJson(join(args.iosArtifact!, "result.json"), result);
+
+    const summary = await normalizeRunWithEvidence(args);
+    const html = renderReport(summary);
+
+    expect(summary.scores.ios_macro_pct).toBeNull();
     expect(readdirSync(join(args.outDir, "evidence/screenshots"))).toEqual([]);
+    expect(html).toContain("Screenshot capture warning");
+    expect(html).toContain("simctl screenshot failed");
   });
 
   test("rejects unsafe existing output destinations without touching their targets", async () => {

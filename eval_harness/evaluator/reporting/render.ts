@@ -189,11 +189,11 @@ function stepFailed(stepValue: unknown): boolean {
 }
 
 type Evidence = {
-  failed: boolean;
+  kind: "passed" | "failed" | "aborted";
   plan: string;
   run: string;
-  stepOrdinal: number;
   detailId: string;
+  detailLabel: string;
   description: string;
   screenshot: string;
 };
@@ -202,11 +202,15 @@ function paddedOrdinal(value: number): string {
   return String(value + 1).padStart(2, "0");
 }
 
-function stepAnchorId(planIndex: number, runValue: unknown, stepIndex: number): string {
+function planAnchorId(planIndex: number, runValue: unknown): string {
   const run = typeof runValue === "number" && Number.isInteger(runValue)
     ? String(runValue).padStart(2, "0")
     : String(runValue ?? "unknown").toLowerCase().replace(/[^a-z0-9_-]+/g, "-") || "unknown";
-  return `ios-plan-${paddedOrdinal(planIndex)}-run-${run}-step-${paddedOrdinal(stepIndex)}`;
+  return `ios-plan-${paddedOrdinal(planIndex)}-run-${run}`;
+}
+
+function stepAnchorId(planIndex: number, runValue: unknown, stepIndex: number): string {
+  return `${planAnchorId(planIndex, runValue)}-step-${paddedOrdinal(stepIndex)}`;
 }
 
 function safeScreenshotPath(value: unknown): string | null {
@@ -221,24 +225,48 @@ function collectEvidence(plans: unknown[]): Evidence[] {
   const evidence: Evidence[] = [];
   for (const [planIndex, rawPlan] of plans.entries()) {
     const plan = record(rawPlan);
-    if (plan === null || !Array.isArray(plan.steps)) continue;
-    for (const [stepIndex, rawStep] of plan.steps.entries()) {
+    if (plan === null) continue;
+    const steps = Array.isArray(plan.steps) ? plan.steps : [];
+    for (const [stepIndex, rawStep] of steps.entries()) {
       const step = record(rawStep);
       if (step === null) continue;
       const screenshot = safeScreenshotPath(step.screenshot);
       if (screenshot === null) continue;
       evidence.push({
-        failed: stepFailed(step),
+        kind: stepFailed(step) ? "failed" : "passed",
         plan: text(plan.test_plan, "Unknown test plan"),
         run: text(plan.run_index, "—"),
-        stepOrdinal: stepIndex + 1,
         detailId: stepAnchorId(planIndex, plan.run_index, stepIndex),
+        detailLabel: `View step ${String(stepIndex + 1).padStart(2, "0")} details`,
         description: text(step.description, "Untitled evaluation step"),
         screenshot,
       });
     }
+    const terminalEvidence = Array.isArray(plan.terminal_evidence)
+      ? plan.terminal_evidence
+      : [];
+    for (const rawEvidence of terminalEvidence) {
+      const terminal = record(rawEvidence);
+      if (terminal === null) continue;
+      const screenshot = safeScreenshotPath(terminal.screenshot);
+      if (screenshot === null) continue;
+      const stepNumber = typeof terminal.step_number === "number" &&
+          Number.isInteger(terminal.step_number)
+        ? terminal.step_number
+        : 1;
+      evidence.push({
+        kind: "aborted",
+        plan: text(plan.test_plan, "Unknown test plan"),
+        run: text(plan.run_index, "—"),
+        detailId: planAnchorId(planIndex, plan.run_index),
+        detailLabel: "View plan diagnostics",
+        description: text(terminal.step_name, `Formal step ${stepNumber}`),
+        screenshot,
+      });
+    }
   }
-  return evidence.sort((left, right) => Number(right.failed) - Number(left.failed));
+  const rank = { failed: 2, aborted: 1, passed: 0 } as const;
+  return evidence.sort((left, right) => rank[right.kind] - rank[left.kind]);
 }
 
 function renderEvidence(plans: unknown[]): string {
@@ -248,15 +276,23 @@ function renderEvidence(plans: unknown[]): string {
   }
   return `<div class="evidence-grid">
     ${evidence.map((item) => {
-      const status: StageStatus = item.failed ? "failed" : "passed";
-      const label = item.failed ? "Failed final state" : "Passed final state";
+      const status: StageStatus = item.kind === "failed"
+        ? "failed"
+        : item.kind === "aborted"
+        ? "warning"
+        : "passed";
+      const label = item.kind === "failed"
+        ? "Failed final state"
+        : item.kind === "aborted"
+        ? "Evaluator-aborted final state"
+        : "Passed final state";
       return `<figure class="evidence-card evidence-${status}">
         <div class="evidence-frame"><img src="${escapeHtml(item.screenshot)}" alt="${escapeHtml(`${label}: ${item.description}`)}" loading="lazy"></div>
         <figcaption>
           <div class="evidence-caption-top">${statusBadge(status)}<span>${escapeHtml(label)}</span></div>
           <strong>${escapeHtml(item.description)}</strong>
           <span><code>${escapeHtml(item.plan)}</code> · run ${escapeHtml(item.run)}</span>
-          <a class="evidence-link" href="#${escapeHtml(item.detailId)}">View step ${String(item.stepOrdinal).padStart(2, "0")} details</a>
+          <a class="evidence-link" href="#${escapeHtml(item.detailId)}">${escapeHtml(item.detailLabel)}</a>
         </figcaption>
       </figure>`;
     }).join("")}
@@ -346,10 +382,25 @@ function renderEvaluationDetails(skills: unknown[], plans: unknown[]): string {
   const planDetails = plans.map((rawPlan, planIndex) => {
     const plan = record(rawPlan) ?? { value: rawPlan };
     const steps = Array.isArray(plan.steps) ? plan.steps : [];
-    return `<details class="detail-block">
+    const terminalEvidence = Array.isArray(plan.terminal_evidence)
+      ? plan.terminal_evidence
+      : [];
+    return `<details class="detail-block" id="${escapeHtml(planAnchorId(planIndex, plan.run_index))}">
       <summary><span>iOS · <code>${escapeHtml(text(plan.test_plan, "Unknown"))}</code> · run ${escapeHtml(text(plan.run_index, "—"))}</span>${statusBadge(planStatus(plan))}</summary>
       <div class="detail-content">
-        ${renderKeyValues(Object.entries(plan).filter(([key]) => key !== "steps"))}
+        ${renderKeyValues(Object.entries(plan).filter(([key]) => !["steps", "terminal_evidence"].includes(key)))}
+        ${terminalEvidence.length === 0 ? "" : `
+          <h4>Diagnostic evidence</h4>
+          ${terminalEvidence.map((rawEvidence) => {
+            const evidence: JsonRecord = record(rawEvidence) ?? { value: rawEvidence };
+            return `<div class="diagnostic-evidence">${renderKeyValues([
+              ["Formal step", evidence.step_number],
+              ["Step name", evidence.step_name],
+              ["Screenshot", evidence.screenshot],
+              ["Screenshot capture warning", evidence.screenshot_error],
+            ])}</div>`;
+          }).join("")}
+        `}
         <h4>Scored steps</h4>
         ${steps.length === 0
           ? `<p class="muted">No scored steps were emitted.</p>`
@@ -395,7 +446,7 @@ export function renderReport(summary: ConsolidatedSummary): string {
   const evaluator = record(run.evaluator) ?? {};
   const jobs = record(run.jobs) ?? {};
   const evidence = collectEvidence(summary.ios.test_plans);
-  const failedEvidence = evidence.filter((item) => item.failed).length;
+  const failedEvidence = evidence.filter((item) => item.kind === "failed").length;
   const iosStatus = scoreStatus(summary.scores.ios_macro_pct, false);
   const recallStatus = scoreStatus(summary.scores.skill_trigger_recall, true);
   const uptakeStatus = scoreStatus(summary.scores.skill_uptake_rate, true);
@@ -499,6 +550,7 @@ export function renderReport(summary: ConsolidatedSummary): string {
     .evidence-grid { display: grid; gap: 18px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .evidence-card { background: var(--white); border: 1px solid var(--line); margin: 0; min-width: 0; }
     .evidence-failed { border-top: 4px solid var(--fail); }
+    .evidence-warning { border-top: 4px solid var(--warn); }
     .evidence-passed { border-top: 4px solid var(--pass); }
     .evidence-frame { align-items: center; background: #E8EDF4; display: flex; justify-content: center; min-height: 260px; overflow: hidden; padding: 12px; }
     .evidence-frame img { display: block; height: auto; max-height: 520px; max-width: 100%; object-fit: contain; }

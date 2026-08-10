@@ -57,6 +57,7 @@ from ..core.scoring import (
     AssertionResult,
     SoftAssertionResult,
     StepResult,
+    TerminalEvidence,
     TestPlanResult,
     score_step,
 )
@@ -95,15 +96,27 @@ class AgentDeviceEvaluator:
             platform=platform, timeout=timeout, verbose=verbose,
         )
 
-    def evaluate_test_plan(self, test_plan_path: Path) -> TestPlanResult:
-        return asyncio.run(self._evaluate_test_plan_async(test_plan_path))
+    def evaluate_test_plan(
+        self,
+        test_plan_path: Path,
+        run_index: int = 1,
+    ) -> TestPlanResult:
+        return asyncio.run(self._evaluate_test_plan_async(test_plan_path, run_index))
 
-    async def _evaluate_test_plan_async(self, test_plan_path: Path) -> TestPlanResult:
+    async def _evaluate_test_plan_async(
+        self,
+        test_plan_path: Path,
+        run_index: int = 1,
+    ) -> TestPlanResult:
         tracer = Tracer(plan_stem=test_plan_path.stem, root=_trace_root_for(test_plan_path))
         os.environ["EVAL_SCREENSHOT_DIR"] = str(tracer.root / "screenshots")
         tracer.capture_console()
         try:
-            return await self._evaluate_test_plan_inner_async(test_plan_path, tracer)
+            return await self._evaluate_test_plan_inner_async(
+                test_plan_path,
+                tracer,
+                run_index,
+            )
         finally:
             tracer.close()
 
@@ -111,6 +124,7 @@ class AgentDeviceEvaluator:
         self,
         test_plan_path: Path,
         tracer: Tracer,
+        run_index: int,
     ) -> TestPlanResult:
         plan = parse_test_plan(test_plan_path)
         result = TestPlanResult(score=0, full_points=plan["full_points"])
@@ -340,6 +354,32 @@ class AgentDeviceEvaluator:
                         screenshot=screenshot_path,
                         screenshot_error=screenshot_error,
                     )
+                    terminal_evidence = TerminalEvidence(
+                        step_number=i,
+                        step_name=step["name"],
+                        screenshot_path=screenshot_path,
+                        screenshot_error=screenshot_error,
+                    )
+                    result.terminal_evidence.append(terminal_evidence)
+                    tracer.write_summary({
+                        "plan": test_plan_path.name,
+                        "run_index": run_index,
+                        "platform": self.platform,
+                        "driver": "agent-device",
+                        "status": "evaluator_error",
+                        "error_stage": result.error_stage,
+                        "error_reason": result.error_reason,
+                        "score": None,
+                        "full_points": None,
+                        "total_usage": agg_usage.snapshot(),
+                        "steps": [],
+                        "terminal_evidence": [{
+                            "step_number": terminal_evidence.step_number,
+                            "step_name": terminal_evidence.step_name,
+                            "screenshot": terminal_evidence.screenshot_path,
+                            "screenshot_error": terminal_evidence.screenshot_error,
+                        }],
+                    })
                     return result
 
                 step_result = score_step(step, state.assertions, state.soft_assertions, state.completed, state.turns_used)
@@ -379,6 +419,7 @@ class AgentDeviceEvaluator:
 
         tracer.write_summary({
             "plan": test_plan_path.name,
+            "run_index": run_index,
             "platform": self.platform,
             "driver": "agent-device",
             "score": result.score,
