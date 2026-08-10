@@ -24,6 +24,7 @@ class IosArtifactTests(unittest.TestCase):
             root = Path(td)
             run_id = "ios_20260810"
             artifact = root / "ios-eval-report"
+            author_manifest = root / "authored-app" / "manifest.json"
             plan_traces = root / "evaluator-traces"
             plan_run = plan_traces / "test_insert_20260810"
 
@@ -43,6 +44,25 @@ class IosArtifactTests(unittest.TestCase):
             write(plan_run / "conversation.jsonl", "{}\n")
             write(plan_run / "console.log", "trace log")
             write(plan_run / "screenshots" / "step-01-final.png", "png")
+            write(
+                author_manifest,
+                json.dumps(
+                    {
+                        "build_health": {
+                            "app_authored": {
+                                "status": "passed",
+                                "detail": None,
+                                "log": f"author-agent-metadata/{run_id}/logs/c-agent.log",
+                            },
+                            "expo_export": {
+                                "status": "warning",
+                                "detail": None,
+                                "log": f"author-agent-metadata/{run_id}/logs/d-expo-export.log",
+                            },
+                        }
+                    }
+                ),
+            )
 
             fake_bin = root / "bin"
             fake_bun = fake_bin / "bun"
@@ -70,6 +90,12 @@ printf '%s\n' '{"n_sessions":1,"sessions":[]}' > "$out"
                     "EVALUATOR_TRACES_ROOT": str(plan_traces),
                     "EVALUATOR_MODEL": "claude-opus-4-8",
                     "EVALUATOR_REASONING_EFFORT": "high",
+                    "IOS_DEPENDENCY_INSTALL_STATUS": "passed",
+                    "IOS_NATIVE_BUILD_STATUS": "passed",
+                    "IOS_NATIVE_BUILD_LOG": "logs/s6-release.log",
+                    "IOS_APP_LAUNCH_STATUS": "failed",
+                    "IOS_EVALUATION_STATUS": "not_run",
+                    "AUTHOR_MANIFEST": str(author_manifest),
                 }
             )
             result = subprocess.run(
@@ -108,6 +134,16 @@ printf '%s\n' '{"n_sessions":1,"sessions":[]}' > "$out"
             self.assertEqual(manifest["evaluator_reasoning_effort"], "high")
             self.assertEqual(manifest["artifacts"]["result"], "result.json")
             self.assertEqual(manifest["artifacts"]["test_plan_traces"], "traces/test-plans/")
+            self.assertEqual(manifest["build_health"]["dependency_install"]["status"], "passed")
+            self.assertEqual(manifest["build_health"]["native_build"]["status"], "passed")
+            self.assertEqual(manifest["build_health"]["app_launch"]["status"], "failed")
+            self.assertEqual(manifest["build_health"]["evaluation"]["status"], "not_run")
+            self.assertEqual(
+                manifest["build_health"]["app_launch"]["log"], "logs/s6b-open.log"
+            )
+            self.assertIsNone(manifest["build_health"]["evaluation"]["detail"])
+            self.assertEqual(manifest["build_health"]["app_authored"]["status"], "passed")
+            self.assertEqual(manifest["build_health"]["expo_export"]["status"], "warning")
 
     def test_evaluator_phase_clears_stale_output_before_an_early_failure(self) -> None:
         """A failed evaluator startup must not publish result data from a prior run."""
@@ -172,6 +208,10 @@ SCENARIO=skills_available_unmentioned
             self.assertFalse((artifact / "telemetry" / "anthropic.jsonl").exists())
             manifest = json.loads((artifact / "manifest.json").read_text(encoding="utf-8"))
             self.assertIsNone(manifest["score"])
+            self.assertEqual(manifest["build_health"]["dependency_install"]["status"], "not_run")
+            self.assertEqual(manifest["build_health"]["native_build"]["status"], "not_run")
+            self.assertEqual(manifest["build_health"]["app_launch"]["status"], "not_run")
+            self.assertEqual(manifest["build_health"]["evaluation"]["status"], "not_run")
 
     def test_collector_rejects_output_root_outside_repository(self) -> None:
         """The collector must not mutate an arbitrary caller-supplied directory."""

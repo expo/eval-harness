@@ -31,6 +31,10 @@ fi
 OUT="$ROOT/ios-eval-report"
 rm -rf -- "$OUT" || { echo "  ❌ could not reset iOS artifact root: $OUT"; exit 1; }
 mkdir -p "$OUT" || { echo "  ❌ could not create iOS artifact root: $OUT"; exit 1; }
+AUTHOR_MANIFEST=""
+if [ -f "$ROOT/authored-app/manifest.json" ]; then
+  AUTHOR_MANIFEST="$ROOT/authored-app/manifest.json"
+fi
 if [ -d "$ROOT/author-agent-workspace/$RUN_ID" ]; then
   WORKSPACE="$ROOT/author-agent-workspace/$RUN_ID"
 elif [ -d "$ROOT/agent-workspace/$RUN_ID" ]; then
@@ -56,7 +60,13 @@ PRD="${PRD_OVERRIDE:-${PRD:-dataset/prds/hot_chocolate/prd/mvp.txt}}"
 TEST_PLAN="${TEST_PLAN_OVERRIDE:-}"
 EVALUATOR_MODEL="${EVALUATOR_MODEL:-claude-opus-4-8}"
 EVALUATOR_REASONING_EFFORT="$(eval::resolve_reasoning_effort "${EVALUATOR_REASONING_EFFORT:-}")" || exit $?
-export RUN_ID RUN_START_MTIME OUT WORKSPACE TELEMETRY_DIR EVAL_PHASE_START_MTIME METRO_MODE AGENT AGENT_MODEL AGENT_REASONING_EFFORT PRD TEST_PLAN SCENARIO EVALUATOR_MODEL EVALUATOR_REASONING_EFFORT
+IOS_DEPENDENCY_INSTALL_STATUS=not_run
+IOS_NATIVE_BUILD_STATUS=not_run
+IOS_NATIVE_BUILD_LOG=""
+IOS_APP_LAUNCH_STATUS=not_run
+IOS_EVALUATION_STATUS=not_run
+export RUN_ID RUN_START_MTIME OUT WORKSPACE TELEMETRY_DIR EVAL_PHASE_START_MTIME METRO_MODE AGENT AGENT_MODEL AGENT_REASONING_EFFORT PRD TEST_PLAN SCENARIO EVALUATOR_MODEL EVALUATOR_REASONING_EFFORT \
+  AUTHOR_MANIFEST IOS_DEPENDENCY_INSTALL_STATUS IOS_NATIVE_BUILD_STATUS IOS_NATIVE_BUILD_LOG IOS_APP_LAUNCH_STATUS IOS_EVALUATION_STATUS
 
 ANTHROPIC_PROXY_PORT=8082
 OTLP_PORT=4318
@@ -99,10 +109,12 @@ if [ ! -f "$WORKSPACE/package.json" ]; then
 fi
 
 echo "================= STAGE D: npm install + resolve app config + native iOS build ================="
+IOS_DEPENDENCY_INSTALL_STATUS=failed
 if ! eval::npm_install "$WORKSPACE" "$OUT"; then
   echo "  ❌ authored app failed a clean npm install on the eval worker; skipping build/eval and collecting diagnostics"
   exit 1
 fi
+IOS_DEPENDENCY_INSTALL_STATUS=passed
 
 eval::configure_ios_app_mode || exit $?
 echo "  iOS app mode: $EVAL_IOS_APP_MODE"
@@ -134,6 +146,8 @@ fi
 
 eval::boot_sim_and_runner "$OUT"
 if [ "$EVAL_IOS_APP_MODE" = "release" ]; then
+  IOS_NATIVE_BUILD_STATUS=failed
+  IOS_NATIVE_BUILD_LOG="logs/s6-release.log"
   export EVAL_APP_USE_SIMCTL_LAUNCH=1
   unset EVAL_APP_DEEP_LINK
   eval::build_release_ios_app "$WORKSPACE" "$OUT" "$EVAL_DEVNAME" || {
@@ -141,20 +155,29 @@ if [ "$EVAL_IOS_APP_MODE" = "release" ]; then
     exit 1
   }
 else
-  eval::start_metro_dev_build "$WORKSPACE" "$OUT" "$EVAL_DEVNAME"
+  IOS_NATIVE_BUILD_STATUS=failed
+  IOS_NATIVE_BUILD_LOG="logs/s6-devbuild.log"
+  if ! eval::start_metro_dev_build "$WORKSPACE" "$OUT" "$EVAL_DEVNAME"; then
+    echo "  ❌ dev-client app build/install failed; skipping eval and collecting diagnostics"
+    exit 1
+  fi
   eval::capture_dev_client_deep_link "$OUT" || {
     DEV_CLIENT_URL="${DEV_CLIENT_URL:-http://127.0.0.1:8081}"
     ENCODED_DEV_CLIENT_URL="$(DEV_CLIENT_URL="$DEV_CLIENT_URL" python3 -c 'import os, urllib.parse; print(urllib.parse.quote(os.environ["DEV_CLIENT_URL"], safe=""))')"
     [ -n "$SCHEME" ] && export EVAL_APP_DEEP_LINK="$SCHEME://expo-development-client/?url=$ENCODED_DEV_CLIENT_URL"
   }
 fi
+IOS_NATIVE_BUILD_STATUS=passed
+IOS_APP_LAUNCH_STATUS=failed
 if ! eval::probe_snapshot "$OUT" "${EVAL_APP_BUNDLE_ID:-host.exp.Exponent}"; then
   echo "  ❌ authored app failed launch readiness probe; skipping evaluator"
   exit 1
 fi
+IOS_APP_LAUNCH_STATUS=passed
 
 export TRACE_PHASE=evaluate
 export TRACE_SINCE_MTIME="$(date +%s)"
+IOS_EVALUATION_STATUS=failed
 if ! eval::run_evaluator "$EVAL" "$TEST_PLAN" "$PRD" "$OUT/result.json" "$OUT" \
   --model "$EVALUATOR_MODEL" --reasoning-effort "$EVALUATOR_REASONING_EFFORT"; then
   echo "  ❌ evaluator failed; artifacts will still be collected by the EXIT trap"
@@ -165,5 +188,6 @@ echo "================= RESULT ================="
 if ! eval::require_evaluator_result "$OUT/result.json"; then
   exit 1
 fi
+IOS_EVALUATION_STATUS=passed
 cat "$OUT/result.json"
 exit 0

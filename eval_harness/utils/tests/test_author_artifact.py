@@ -86,6 +86,8 @@ printf '%s\n' '{"n_sessions":1,"sessions":[]}' > "$out"
                     "RUN_START_MTIME": "0",
                     "GCS_BUCKET": "",
                     "MUSE_DATA_ROOT": str(metadata / "muse-xdg-data"),
+                    "AUTHOR_APP_AUTHORED_STATUS": "passed",
+                    "AUTHOR_EXPO_EXPORT_STATUS": "warning",
                 }
             )
             result = subprocess.run(
@@ -144,6 +146,18 @@ printf '%s\n' '{"n_sessions":1,"sessions":[]}' > "$out"
             self.assertEqual(
                 manifest["artifacts"]["workspace"],
                 f"author-agent-workspace/{run_id}/",
+            )
+            self.assertEqual(manifest["build_health"]["app_authored"]["status"], "passed")
+            self.assertIsNone(manifest["build_health"]["app_authored"]["detail"])
+            self.assertEqual(
+                manifest["build_health"]["app_authored"]["log"],
+                f"author-agent-metadata/{run_id}/logs/c-agent.log",
+            )
+            self.assertEqual(manifest["build_health"]["expo_export"]["status"], "warning")
+            self.assertIsNone(manifest["build_health"]["expo_export"]["detail"])
+            self.assertEqual(
+                manifest["build_health"]["expo_export"]["log"],
+                f"author-agent-metadata/{run_id}/logs/d-expo-export.log",
             )
 
     def test_collector_rejects_artifact_root_outside_repository(self) -> None:

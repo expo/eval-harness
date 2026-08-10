@@ -85,6 +85,12 @@ AGENT_REASONING_EFFORT="${AGENT_REASONING_EFFORT:-}" \
 EVALUATOR_MODEL="${EVALUATOR_MODEL:-}" EVALUATOR_REASONING_EFFORT="${EVALUATOR_REASONING_EFFORT:-}" \
 PRD="${PRD:-}" TEST_PLAN="${TEST_PLAN:-}" METRO_MODE="${METRO_MODE:-}" \
 EVAL_IOS_APP_MODE="${EVAL_IOS_APP_MODE:-}" EVAL_APP_BUNDLE_ID="${EVAL_APP_BUNDLE_ID:-}" \
+AUTHOR_MANIFEST="${AUTHOR_MANIFEST:-}" \
+IOS_DEPENDENCY_INSTALL_STATUS="${IOS_DEPENDENCY_INSTALL_STATUS:-not_run}" \
+IOS_NATIVE_BUILD_STATUS="${IOS_NATIVE_BUILD_STATUS:-not_run}" \
+IOS_NATIVE_BUILD_LOG="${IOS_NATIVE_BUILD_LOG:-}" \
+IOS_APP_LAUNCH_STATUS="${IOS_APP_LAUNCH_STATUS:-not_run}" \
+IOS_EVALUATION_STATUS="${IOS_EVALUATION_STATUS:-not_run}" \
 "$PY" - "$OUT/manifest.json" <<'PYEOF'
 import json
 import os
@@ -106,6 +112,53 @@ if result_path and os.path.isfile(result_path):
 agent = os.environ.get("AGENT") or "claude-code"
 if agent == "claude":
     agent = "claude-code"
+allowed_statuses = {"passed", "warning", "failed", "not_run"}
+
+
+def stage(status, log):
+    normalized_status = status if status in allowed_statuses else "not_run"
+    return {
+        "status": normalized_status,
+        "detail": None,
+        "log": log if normalized_status != "not_run" else None,
+    }
+
+
+def preserved_author_stage(name):
+    path = os.environ.get("AUTHOR_MANIFEST")
+    if not path:
+        return None
+    try:
+        with open(path, encoding="utf-8") as handle:
+            candidate = json.load(handle).get("build_health", {}).get(name)
+    except (OSError, UnicodeError, json.JSONDecodeError, AttributeError):
+        return None
+    if not isinstance(candidate, dict):
+        return None
+    status = candidate.get("status")
+    detail = candidate.get("detail")
+    log = candidate.get("log")
+    if status not in allowed_statuses or not isinstance(detail, (str, type(None))) or not isinstance(log, (str, type(None))):
+        return None
+    return {"status": status, "detail": detail, "log": log}
+
+
+build_health = {
+    "dependency_install": stage(
+        os.environ.get("IOS_DEPENDENCY_INSTALL_STATUS"), "logs/s5-npm.log"
+    ),
+    "native_build": stage(
+        os.environ.get("IOS_NATIVE_BUILD_STATUS"),
+        os.environ.get("IOS_NATIVE_BUILD_LOG") or None,
+    ),
+    "app_launch": stage(os.environ.get("IOS_APP_LAUNCH_STATUS"), "logs/s6b-open.log"),
+    "evaluation": stage(os.environ.get("IOS_EVALUATION_STATUS"), "logs/s7-eval.log"),
+}
+for author_stage in ("app_authored", "expo_export"):
+    preserved = preserved_author_stage(author_stage)
+    if preserved is not None:
+        build_health[author_stage] = preserved
+
 manifest = {
     "schema_version": 2,
     "artifact_type": "ios-eval-report",
@@ -125,6 +178,7 @@ manifest = {
     "full_points": full_points,
     "macro_avg_pct": macro,
     "micro_pct": micro,
+    "build_health": build_health,
     "artifacts": {
         "result": "result.json",
         "report": "report.html",

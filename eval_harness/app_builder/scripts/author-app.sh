@@ -20,7 +20,10 @@ OUT="$METADATA_ROOT/$RUN_ID"
 ARTIFACT_ROOT="$ROOT/authored-app"
 mkdir -p "$OUT" "$WORKSPACE"
 TELEMETRY_DIR="$OUT/telemetry"; mkdir -p "$TELEMETRY_DIR/otel"
-export RUN_ID RUN_START_MTIME OUT WORKSPACE TELEMETRY_DIR WORKSPACE_ROOT METADATA_ROOT ARTIFACT_ROOT
+AUTHOR_APP_AUTHORED_STATUS=not_run
+AUTHOR_EXPO_EXPORT_STATUS=not_run
+export RUN_ID RUN_START_MTIME OUT WORKSPACE TELEMETRY_DIR WORKSPACE_ROOT METADATA_ROOT ARTIFACT_ROOT \
+  AUTHOR_APP_AUTHORED_STATUS AUTHOR_EXPO_EXPORT_STATUS
 
 AGENT="${AGENT:-claude-code}"
 AGENT="$(eval::normalize_authoring_agent "$AGENT")" || exit $?
@@ -156,9 +159,11 @@ if [ "$AGENT" = "claude-code" ] || [ "$AGENT" = "codex" ]; then
   export OTEL_RESOURCE_ATTRIBUTES="run.id=$RUN_ID,phase=agent-build,service.name=eval-harness"
 fi
 
+AUTHOR_APP_AUTHORED_STATUS=failed
 eval::run_coding_agent "$AGENT" "$ROOT" "$WORKSPACE" "$EVAL/$PRD" "$OUT" "$AGENT_MODEL" "$AGENT_REASONING_EFFORT" "${MUSE_API_KEY:-}"
 AGENT_RC=$?
 eval::require_authored_app "$AGENT_RC" "$WORKSPACE" || exit $?
+AUTHOR_APP_AUTHORED_STATUS=passed
 
 echo "================= STAGE D: build-health bundle check ================="
 # Needs the authored app's own node_modules (a real `expo export`), so this
@@ -171,7 +176,12 @@ BH_TO=""
 if command -v gtimeout >/dev/null 2>&1; then BH_TO="gtimeout 240";
 elif command -v timeout >/dev/null 2>&1; then BH_TO="timeout 240";
 else BH_TO="bun $ROOT/eval_harness/utils/shell/timeout_exec.ts 240"; fi
-( cd "$ROOT" && $BH_TO bun eval_harness/evaluator/skill_invocation/build_health/bundle_check.ts "$WORKSPACE" ) \
-  || echo "  ⚠️  build-health bundle check failed to run (continuing; non-blocking)"
+AUTHOR_EXPO_EXPORT_STATUS=warning
+if ( cd "$ROOT" && $BH_TO bun eval_harness/evaluator/skill_invocation/build_health/bundle_check.ts "$WORKSPACE" ) \
+  >"$OUT/d-expo-export.log" 2>&1; then
+  AUTHOR_EXPO_EXPORT_STATUS=passed
+else
+  echo "  ⚠️  build-health bundle check failed to run (continuing; see d-expo-export.log)"
+fi
 
 exit 0

@@ -147,6 +147,8 @@ AGENT_MODEL="${AGENT_MODEL:-}" AGENT_REASONING_EFFORT="${AGENT_REASONING_EFFORT:
 MUSE_CLI_VERSION="${MUSE_CLI_VERSION:-}" METRO_MODE="${METRO_MODE:-}" \
 PRD="${PRD:-}" EXPO_MCP_AUTH_STATUS="${EXPO_MCP_AUTH_STATUS:-}" \
 SCENARIO="${SCENARIO:-}" PROMPT_VARIANT="${PROMPT_VARIANT:-}" PROMPT_FILE="${PROMPT_FILE:-}" \
+AUTHOR_APP_AUTHORED_STATUS="${AUTHOR_APP_AUTHORED_STATUS:-not_run}" \
+AUTHOR_EXPO_EXPORT_STATUS="${AUTHOR_EXPO_EXPORT_STATUS:-not_run}" \
 "$PY" - "$ARTIFACT_ROOT/manifest.json" <<'PYEOF'
 import json
 import os
@@ -160,6 +162,18 @@ trace_names = {
     "muse-code": "muse-code-authoring.json",
 }
 metadata = f"author-agent-metadata/{run_id}"
+allowed_statuses = {"passed", "warning", "failed", "not_run"}
+
+
+def stage(status, log):
+    normalized_status = status if status in allowed_statuses else "not_run"
+    return {
+        "status": normalized_status,
+        "detail": None,
+        "log": log if normalized_status != "not_run" else None,
+    }
+
+
 manifest = {
     "schema_version": 2,
     "artifact_type": "authored-app",
@@ -175,6 +189,14 @@ manifest = {
     "scenario": os.environ.get("SCENARIO") or None,
     "prompt_variant": os.environ.get("PROMPT_VARIANT") or "baseline",
     "prompt_file": os.environ.get("PROMPT_FILE") or "dataset/prompts/baseline.md",
+    "build_health": {
+        "app_authored": stage(
+            os.environ.get("AUTHOR_APP_AUTHORED_STATUS"), f"{metadata}/logs/c-agent.log"
+        ),
+        "expo_export": stage(
+            os.environ.get("AUTHOR_EXPO_EXPORT_STATUS"), f"{metadata}/logs/d-expo-export.log"
+        ),
+    },
     "artifacts": {
         "workspace": f"author-agent-workspace/{run_id}/",
         "metadata": f"{metadata}/",
