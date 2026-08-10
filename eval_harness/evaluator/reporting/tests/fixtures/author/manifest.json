@@ -1,0 +1,28 @@
+{
+  "schema_version": 2,
+  "artifact_type": "authored-app",
+  "run_id": "run-fixture-1",
+  "git_sha": "abc1234",
+  "agent": "muse-code",
+  "agent_model": "muse-spark-1.2",
+  "agent_reasoning_effort": "high",
+  "prd": "dataset/prds/notes/prd/mvp.txt",
+  "scenario": "skills_available_unmentioned",
+  "prompt_variant": "realistic",
+  "build_health": {
+    "app_authored": {
+      "status": "passed",
+      "detail": null,
+      "log": "author-agent-metadata/run-fixture-1/logs/c-agent.log"
+    },
+    "expo_export": {
+      "status": "warning",
+      "detail": "The author-side export probe did not complete.",
+      "log": "author-agent-metadata/run-fixture-1/logs/d-expo-export.log"
+    }
+  },
+  "artifacts": {
+    "workspace": "author-agent-workspace/run-fixture-1/",
+    "author_trace": "author-agent-metadata/run-fixture-1/telemetry/traces/muse-code-authoring.json"
+  }
+}
