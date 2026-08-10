@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -232,6 +233,12 @@ function writeV2Fixture(root: string): {
     JSON.stringify({ "expo-test": ["ready-file"] }),
   );
   return { authored, evalArtifact, prdSkills, checksDir };
+}
+
+function scratchDirectories(parent: string): string[] {
+  return readdirSync(parent).filter((entry) =>
+    entry.startsWith("expo-skill-eval-")
+  );
 }
 
 const EXPECTED_HAPPY_REPORT = `<!doctype html>
@@ -980,6 +987,125 @@ test("[REGRESSION] CLI discards extracted sources after analyzing a v2 archive",
   });
 });
 
+test("[REGRESSION] absolute artifact provenance never records the temporary scratch path", () => {
+  // Catches metrics that point at an extracted archive after the CLI has
+  // already deleted it. The production change that should fail this test is
+  // omitting the original absolute archive input as the display root.
+  withTempDir((root) => {
+    const fixture = writeV2Fixture(root);
+    const archive = join(root, "authored-v2.tar.gz");
+    const evalArchive = join(root, "ios-eval-v2.tar.gz");
+    const outDir = join(root, "absolute-report");
+    const scratchParent = join(root, "controlled-tmp");
+    mkdirSync(scratchParent);
+    createArchive(
+      { file: archive, cwd: fixture.authored, gzip: true, sync: true },
+      ["."],
+    );
+    createArchive(
+      { file: evalArchive, cwd: fixture.evalArtifact, gzip: true, sync: true },
+      ["."],
+    );
+
+    const spawned = Bun.spawnSync([
+      process.execPath,
+      CLI_PATH,
+      "analyze-artifacts",
+      "--authored-artifact",
+      archive,
+      "--scenario",
+      "skills_available_unmentioned",
+      "--eval-artifact",
+      evalArchive,
+      "--out-dir",
+      outDir,
+      "--prd-skills",
+      fixture.prdSkills,
+      "--checks-dir",
+      fixture.checksDir,
+    ], {
+      env: { ...process.env, TMPDIR: scratchParent },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+
+    expect(spawned.exitCode).toBe(0);
+    expect(scratchDirectories(scratchParent)).toEqual([]);
+    const artifacts = JSON.parse(
+      readFileSync(join(outDir, "metrics.json"), "utf8"),
+    ).artifacts as Record<string, string | null>;
+    expect(artifacts.authored_root).toBe(archive);
+    expect(artifacts.eval_root).toBe(evalArchive);
+    expect(Object.values(artifacts).join("\n")).not.toContain(
+      "expo-skill-eval-",
+    );
+  });
+});
+
+test("[REGRESSION] directory inputs keep their own stable provenance", () => {
+  withTempDir((root) => {
+    const fixture = writeV2Fixture(root);
+    const outDir = join(root, "directory-report");
+    const spawned = Bun.spawnSync([
+      process.execPath,
+      CLI_PATH,
+      "analyze-artifacts",
+      "--authored-artifact",
+      fixture.authored,
+      "--scenario",
+      "skills_available_unmentioned",
+      "--out-dir",
+      outDir,
+      "--prd-skills",
+      fixture.prdSkills,
+      "--checks-dir",
+      fixture.checksDir,
+    ], { stdout: "pipe", stderr: "pipe" });
+
+    expect(spawned.exitCode).toBe(0);
+    const artifacts = JSON.parse(
+      readFileSync(join(outDir, "metrics.json"), "utf8"),
+    ).artifacts as Record<string, string | null>;
+    expect(artifacts.authored_root).toBe(fixture.authored);
+    expect(artifacts.app_dir).toBe(join(
+      fixture.authored,
+      "author-agent-workspace",
+      "run-1",
+    ));
+  });
+});
+
+test("[REGRESSION] failed archive analysis removes its controlled scratch directory", () => {
+  // Catches cleanup that only runs after a successful analysis. A malformed
+  // archive fails during extraction, after the scratch directory is created.
+  withTempDir((root) => {
+    const archive = join(root, "corrupt.tar.gz");
+    const outDir = join(root, "failed-report");
+    const scratchParent = join(root, "controlled-tmp");
+    mkdirSync(scratchParent);
+    writeFileSync(archive, "not an archive");
+
+    const spawned = Bun.spawnSync([
+      process.execPath,
+      CLI_PATH,
+      "analyze-artifacts",
+      "--authored-artifact",
+      archive,
+      "--scenario",
+      "skills_available_unmentioned",
+      "--out-dir",
+      outDir,
+    ], {
+      env: { ...process.env, TMPDIR: scratchParent },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+
+    expect(spawned.exitCode).not.toBe(0);
+    expect(scratchDirectories(scratchParent)).toEqual([]);
+  });
+});
+
 test("[CHAR] Bun CLI accepts Python's unique long-option abbreviations", () => {
   withTempDir((root) => {
     const fixture = writeFixture(root);
@@ -1056,7 +1182,22 @@ test("[REGRESSION] shell entrypoint runs with Bun and no Python executable", () 
   // environment-to-CLI argument propagation.
   withTempDir((root) => {
     const fixture = writeFixture(root);
-    const outDir = join(root, "shell-out");
+    const workflowRoot = join(root, "workflow-root");
+    mkdirSync(workflowRoot);
+    symlinkSync(
+      join(REPO_ROOT, "eval_harness"),
+      join(workflowRoot, "eval_harness"),
+      "dir",
+    );
+    const outDir = join(workflowRoot, "skill-eval-report");
+    const shellEntrypoint = join(
+      workflowRoot,
+      "eval_harness",
+      "evaluator",
+      "skill_invocation",
+      "scripts",
+      "eval-skill-use.sh",
+    );
     const bin = join(root, "bin");
     mkdirSync(bin);
     const requiredCommands: Array<readonly [string, string]> = [
@@ -1070,14 +1211,13 @@ test("[REGRESSION] shell entrypoint runs with Bun and no Python executable", () 
     for (const [name, target] of requiredCommands) {
       symlinkSync(target, join(bin, name));
     }
-    const spawned = Bun.spawnSync(["/bin/bash", SHELL_ENTRYPOINT], {
-      cwd: REPO_ROOT,
+    const spawned = Bun.spawnSync(["/bin/bash", shellEntrypoint], {
+      cwd: workflowRoot,
       env: {
         PATH: bin,
         AUTHORED_ARTIFACT: fixture.authored,
         EVAL_ARTIFACT: "",
         SCENARIO: "skills_available_unmentioned",
-        OUT_DIR: outDir,
         PRD_SKILLS: fixture.prdSkills,
         CHECKS_DIR: fixture.checksDir,
       },
@@ -1090,5 +1230,46 @@ test("[REGRESSION] shell entrypoint runs with Bun and no Python executable", () 
     expect(spawned.stdout.toString()).toContain("app=test-app\n");
     expect(JSON.parse(readFileSync(join(outDir, "metrics.json"), "utf8")))
       .toMatchObject({ app: "test-app", expected_skills: ["expo-test"] });
+  });
+});
+
+test("[SECURITY] shell entrypoint rejects an unsafe output directory without touching it", () => {
+  // Catches recursive deletion of arbitrary OUT_DIR values by the workflow
+  // wrapper. The sentinel is outside the only allowed report location.
+  withTempDir((root) => {
+    const fixture = writeFixture(root);
+    const sentinel = join(root, "sentinel");
+    mkdirSync(sentinel);
+    writeFileSync(join(sentinel, "keep.txt"), "must remain");
+    const bin = join(root, "bin");
+    mkdirSync(bin);
+    const requiredCommands: Array<readonly [string, string]> = [
+      ["bun", process.execPath],
+      ["dirname", "/usr/bin/dirname"],
+      ["find", "/usr/bin/find"],
+      ["mkdir", "/bin/mkdir"],
+      ["rm", "/bin/rm"],
+      ["sort", "/usr/bin/sort"],
+    ];
+    for (const [name, target] of requiredCommands) {
+      symlinkSync(target, join(bin, name));
+    }
+
+    const spawned = Bun.spawnSync(["/bin/bash", SHELL_ENTRYPOINT], {
+      cwd: REPO_ROOT,
+      env: {
+        PATH: bin,
+        AUTHORED_ARTIFACT: fixture.authored,
+        OUT_DIR: sentinel,
+      },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+
+    expect(spawned.exitCode).toBe(2);
+    expect(spawned.stderr.toString()).toContain("OUT_DIR must resolve to");
+    expect(existsSync(join(sentinel, "keep.txt"))).toBe(true);
+    expect(readFileSync(join(sentinel, "keep.txt"), "utf8"))
+      .toBe("must remain");
   });
 });

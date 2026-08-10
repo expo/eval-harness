@@ -81,12 +81,8 @@ export async function runCli(argv: string[]): Promise<number> {
       outDir: parsed.outDir,
       prdSkillsPath: parsed.prdSkills,
       checksDir: parsed.checksDir,
-      ...(path.isAbsolute(parsed.authoredArtifact)
-        ? {}
-        : { authoredArtifactDisplayRoot: parsed.authoredArtifact }),
-      ...(evalArtifact === null ||
-          parsed.evalArtifact === null ||
-          path.isAbsolute(parsed.evalArtifact)
+      authoredArtifactDisplayRoot: parsed.authoredArtifact,
+      ...(evalArtifact === null || parsed.evalArtifact === null
         ? {}
         : { evalArtifactDisplayRoot: parsed.evalArtifact }),
     });
