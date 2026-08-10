@@ -174,6 +174,8 @@ class AgentDeviceEvaluatorOutcomeTests(unittest.TestCase):
         evaluator.seed_iterations = 200
         evaluator.max_iterations = 50
         evaluator.verbose = False
+        evaluator.model = "claude-opus-4-8"
+        evaluator.reasoning_effort = "high"
 
         with (
             patch(
@@ -194,6 +196,43 @@ class AgentDeviceEvaluatorOutcomeTests(unittest.TestCase):
 
         self.assertIsNotNone(RecordingTracer.latest)
         self.assertEqual(RecordingTracer.latest.close_calls, 1)
+
+    def test_uses_configured_model_and_adaptive_thinking(self) -> None:
+        evaluator = AgentDeviceEvaluator.__new__(AgentDeviceEvaluator)
+        evaluator.platform = "ios"
+        evaluator.hybrid_restart = False
+        evaluator.bridge = SuccessfulRestartBridge()
+        evaluator.prd_text = ""
+        evaluator.seed_iterations = 100
+        evaluator.max_iterations = 50
+        evaluator.verbose = False
+        evaluator.model = "claude-opus-4-8"
+        evaluator.reasoning_effort = "high"
+
+        with (
+            patch(
+                "eval_harness.evaluator.ios_agentic.agent_device.evaluator.parse_test_plan",
+                return_value={"full_points": 0, "steps": [], "seeding": ""},
+            ),
+            patch(
+                "eval_harness.evaluator.ios_agentic.agent_device.evaluator.Tracer",
+                RecordingTracer,
+            ),
+            patch(
+                "eval_harness.evaluator.ios_agentic.agent_device.evaluator.ClaudeAgentOptions",
+            ) as options_class,
+            patch(
+                "eval_harness.evaluator.ios_agentic.agent_device.evaluator.ClaudeSDKClient",
+                FailingSdkClient,
+            ),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "SDK connection failed"):
+                asyncio.run(evaluator._evaluate_test_plan_async(Path("test_empty.txt")))
+
+        options = options_class.call_args.kwargs
+        self.assertEqual(options["model"], "claude-opus-4-8")
+        self.assertEqual(options["effort"], "high")
+        self.assertEqual(options["thinking"], {"type": "adaptive"})
 
 
 class AgentDeviceEvaluatorLifecycleTests(unittest.TestCase):

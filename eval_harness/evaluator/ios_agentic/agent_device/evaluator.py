@@ -80,6 +80,8 @@ class AgentDeviceEvaluator:
         prd_path: Path | None = None,
         hybrid_restart: bool = False,
         seed_iterations: int = 100,
+        model: str = "claude-opus-4-8",
+        reasoning_effort: str = "high",
     ):
         self.platform = platform
         self.max_iterations = max_iterations
@@ -87,6 +89,8 @@ class AgentDeviceEvaluator:
         self.verbose = verbose
         self.prd_text = prd_path.read_text() if prd_path else ""
         self.hybrid_restart = hybrid_restart
+        self.model = model
+        self.reasoning_effort = reasoning_effort
         self.bridge = AgentDeviceBridge(
             platform=platform, timeout=timeout, verbose=verbose,
         )
@@ -174,7 +178,9 @@ class AgentDeviceEvaluator:
             hooks=build_hooks(tool_timing),
             include_hook_events=False,
             max_turns=max(self.seed_iterations, self.max_iterations),
-            max_thinking_tokens=1024,
+            model=self.model,
+            effort=self.reasoning_effort,
+            thinking={"type": "adaptive"},
         )
 
         agg_usage = UsageAccumulator()

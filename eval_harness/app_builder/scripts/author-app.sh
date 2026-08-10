@@ -24,6 +24,7 @@ AGENT="${AGENT:-claude-code}"
 AGENT="$(eval::normalize_authoring_agent "$AGENT")" || exit $?
 AGENT_MODEL="${AGENT_MODEL:-}"
 AGENT_MODEL="$(eval::resolve_authoring_model "$AGENT" "$AGENT_MODEL")" || exit $?
+AGENT_REASONING_EFFORT="$(eval::resolve_reasoning_effort "${AGENT_REASONING_EFFORT:-}")" || exit $?
 METRO_MODE="dev-build"
 PRD="${PRD:-dataset/prds/hot_chocolate/prd/mvp.txt}"
 # Authoring-time enforced skill scenario (see eval::run_coding_agent in
@@ -47,7 +48,7 @@ PROMPT_VARIANT="${PROMPT_VARIANT:-}"
 _resolve_prompt="$ROOT/eval_harness/utils/shell/resolve_prompt.sh"
 PROMPT_FILE="$(ROOT="$ROOT" PROMPT_VARIANT="$PROMPT_VARIANT" bash "$_resolve_prompt")" || exit 1
 PROMPT_VARIANT="$(ROOT="$ROOT" PROMPT_VARIANT="$PROMPT_VARIANT" bash "$_resolve_prompt" --variant)" || exit 1
-export AGENT AGENT_MODEL METRO_MODE PRD SCENARIO SKILL_MENTION PROMPT_VARIANT PROMPT_FILE
+export AGENT AGENT_MODEL AGENT_REASONING_EFFORT METRO_MODE PRD SCENARIO SKILL_MENTION PROMPT_VARIANT PROMPT_FILE
 
 # Lets the agent's own `eas init --id "$EAS_PROJECT_ID"` (see the prompt) link its freshly
 # authored project to the same EAS project the harness itself uses, rather than needing to mint
@@ -68,6 +69,7 @@ echo "RUN_ID=$RUN_ID  AGENT=$AGENT  WORKSPACE=$WORKSPACE"
   echo "RUN_START_MTIME=$RUN_START_MTIME"
   echo "AGENT=$AGENT"
   echo "AGENT_MODEL=$AGENT_MODEL"
+  printf 'AGENT_REASONING_EFFORT=%q\n' "$AGENT_REASONING_EFFORT"
   echo "PRD=$PRD"
   echo "METRO_MODE=$METRO_MODE"
   echo "SCENARIO=$SCENARIO"
@@ -152,7 +154,7 @@ if [ "$AGENT" = "claude-code" ] || [ "$AGENT" = "codex" ]; then
   export OTEL_RESOURCE_ATTRIBUTES="run.id=$RUN_ID,phase=agent-build,service.name=eval-harness"
 fi
 
-eval::run_coding_agent "$AGENT" "$ROOT" "$WORKSPACE" "$EVAL/$PRD" "$OUT" "$AGENT_MODEL" "${MUSE_API_KEY:-}"
+eval::run_coding_agent "$AGENT" "$ROOT" "$WORKSPACE" "$EVAL/$PRD" "$OUT" "$AGENT_MODEL" "$AGENT_REASONING_EFFORT" "${MUSE_API_KEY:-}"
 AGENT_RC=$?
 eval::require_authored_app "$AGENT_RC" "$WORKSPACE" || exit $?
 

@@ -352,6 +352,13 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Device automation driver (Maestro remains available only as the optional restart fallback)",
     )
     parser.add_argument("--max-iterations", type=int, default=50, help="Max turns per formal (scored) step")
+    parser.add_argument("--model", default="claude-opus-4-8", help="Claude model for evaluation")
+    parser.add_argument(
+        "--reasoning-effort",
+        choices=["low", "medium", "high"],
+        default="high",
+        help="Claude reasoning effort for evaluation",
+    )
     parser.add_argument("--seed-iterations", type=int, default=100,
                         help="Max turns for the pre-flight seed phase that runs the test plan's "
                              "<seeding_and_precondition> instructions BEFORE the formal scored steps. "
@@ -404,6 +411,8 @@ def main() -> int:
         max_iterations=args.max_iterations,
         timeout=args.timeout,
         verbose=args.verbose,
+        model=args.model,
+        reasoning_effort=args.reasoning_effort,
     )
     evaluator = AgentDeviceEvaluator(
         **evaluator_kwargs,

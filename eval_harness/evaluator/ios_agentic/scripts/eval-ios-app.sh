@@ -43,7 +43,9 @@ PRD="${PRD_OVERRIDE:-${PRD:-dataset/prds/hot_chocolate/prd/mvp.txt}}"
 # to $PRD's app from dataset/prd_test_plans.json. Set TEST_PLAN_OVERRIDE to
 # point at one specific file/directory instead (local debugging only).
 TEST_PLAN="${TEST_PLAN_OVERRIDE:-}"
-export RUN_ID RUN_START_MTIME OUT WORKSPACE TELEMETRY_DIR METRO_MODE AGENT AGENT_MODEL PRD TEST_PLAN SCENARIO
+EVALUATOR_MODEL="${EVALUATOR_MODEL:-claude-opus-4-8}"
+EVALUATOR_REASONING_EFFORT="$(eval::resolve_reasoning_effort "${EVALUATOR_REASONING_EFFORT:-}")" || exit $?
+export RUN_ID RUN_START_MTIME OUT WORKSPACE TELEMETRY_DIR METRO_MODE AGENT AGENT_MODEL PRD TEST_PLAN SCENARIO EVALUATOR_MODEL EVALUATOR_REASONING_EFFORT
 
 ANTHROPIC_PROXY_PORT=8082
 OTLP_PORT=4318
@@ -142,7 +144,8 @@ fi
 
 export TRACE_PHASE=evaluate
 export TRACE_SINCE_MTIME="$(date +%s)"
-if ! eval::run_evaluator "$EVAL" "$TEST_PLAN" "$PRD" "$OUT/result.json" "$OUT"; then
+if ! eval::run_evaluator "$EVAL" "$TEST_PLAN" "$PRD" "$OUT/result.json" "$OUT" \
+  --model "$EVALUATOR_MODEL" --reasoning-effort "$EVALUATOR_REASONING_EFFORT"; then
   echo "  ❌ evaluator failed; artifacts will still be collected by the EXIT trap"
   exit 1
 fi

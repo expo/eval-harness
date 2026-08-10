@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 from eval_harness.evaluator.ios_agentic.core.scoring import StepResult, TestPlanResult
-from eval_harness.evaluator.ios_agentic.main import _build_suite_output, _run_suite
+from eval_harness.evaluator.ios_agentic.main import _build_parser, _build_suite_output, _run_suite
 
 
 def completed_plan(score: int = 3, full_points: int = 3) -> TestPlanResult:
@@ -111,6 +111,23 @@ class SuiteOutputTests(unittest.TestCase):
                 }
             ],
         )
+
+
+class CliArgumentTests(unittest.TestCase):
+    def test_parses_evaluator_model_and_reasoning_effort(self) -> None:
+        args = _build_parser().parse_args(
+            [
+                "--prd",
+                "dataset/prds/notes/prd/mvp.txt",
+                "--model",
+                "claude-opus-4-8",
+                "--reasoning-effort",
+                "high",
+            ]
+        )
+
+        self.assertEqual(args.model, "claude-opus-4-8")
+        self.assertEqual(args.reasoning_effort, "high")
 
 
 class RecordingBridge:

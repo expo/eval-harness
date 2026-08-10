@@ -7,6 +7,7 @@ one by **id**, via the `prompt_variant` workflow input.
 |---|---|---|
 | `baseline` | [`baseline.md`](baseline.md) | Default. Required project files, `npm install` + `npx expo install --check` before stopping, and native-build self-verification via the `agent-verify` EAS profile. |
 | `minimal` | [`minimal.md`](minimal.md) | Role and task only, none of baseline's verification instructions. Isolates the harness's guardrails from the agent's own defaults. |
+| `realistic` | [`realistic.md`](realistic.md) | A concise, conversational request for a complete, discoverable, polished Expo experience without baseline's technical build instructions. |
 
 ## Adding a variant
 

@@ -38,6 +38,17 @@ class ResolvePromptTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.strip(), "dataset/prompts/minimal.md")
 
+    def test_realistic_prompt_is_registered_verbatim(self) -> None:
+        result = run_resolve(PROMPT_VARIANT="realistic")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "dataset/prompts/realistic.md")
+        self.assertEqual(
+            (ROOT / result.stdout.strip()).read_text().strip(),
+            "Can you build this as an Expo app based on the product brief below?\n"
+            "I want the core experience to feel complete, with the main actions easy to find and the important details handled thoughtfully.\n"
+            "It should feel polished enough to give to a real user, not like a demo or rough prototype.",
+        )
+
     def test_every_registered_variant_resolves(self) -> None:
         # Guards the registry itself: an entry whose file was renamed or deleted
         # must fail here, not mid-run on a paid worker.

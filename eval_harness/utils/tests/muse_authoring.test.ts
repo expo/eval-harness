@@ -95,6 +95,16 @@ test("authoring normalizes Muse and selects all agent defaults", () => {
   expect(output(unknown)).toContain("unknown coding agent");
 });
 
+test("reasoning effort defaults high and rejects unsupported values", () => {
+  const ok = runBash(`source "$0"; printf '%s|%s|%s|%s' \\
+    "$(eval::resolve_reasoning_effort '')" \\
+    "$(eval::resolve_reasoning_effort low)" \\
+    "$(eval::resolve_reasoning_effort medium)" \\
+    "$(eval::resolve_reasoning_effort high)"`);
+  expect(output(ok)).toBe("high|low|medium|high");
+  expect(runBash(`source "$0"; eval::resolve_reasoning_effort ultra`).exitCode).toBe(2);
+});
+
 test("Muse rejects a missing Meta credential without applying Claude auth rules", () => {
   const missing = runBash(`source "$0"; eval::require_author_agent_credential muse-code`);
   expect(missing.exitCode).not.toBe(0);
@@ -232,7 +242,7 @@ cp "$XDG_CONFIG_HOME/muse/settings.json" "$CAPTURE_SETTINGS"
     source "$0"
     eval::_agent_timeout() { :; }
     eval::gate() { return "$1"; }
-    eval::run_coding_agent muse-code "$ROOT" "$WORKSPACE" "$PRD" "$OUT" muse-spark-1.2
+    eval::run_coding_agent muse-code "$ROOT" "$WORKSPACE" "$PRD" "$OUT" muse-spark-1.2 high
   `, {
     ROOT: REPO_ROOT,
     WORKSPACE: workspace,
@@ -310,7 +320,7 @@ cat > "$CAPTURE_EXEC_STDIN"
     eval::_agent_timeout() { :; }
     eval::gate() { return "$1"; }
     eval::require_authoring_credentials muse-code "$ROOT"
-    eval::run_coding_agent muse-code "$ROOT" "$WORKSPACE" "$PRD" "$OUT" muse-spark-1.2 "$MUSE_API_KEY"
+    eval::run_coding_agent muse-code "$ROOT" "$WORKSPACE" "$PRD" "$OUT" muse-spark-1.2 high "$MUSE_API_KEY"
   `, {
     ROOT: REPO_ROOT,
     WORKSPACE: workspace,
@@ -360,7 +370,7 @@ cat >/dev/null
     source "$0"
     eval::_agent_timeout() { :; }
     eval::gate() { return "$1"; }
-    eval::run_coding_agent muse-code "$ROOT" "$WORKSPACE" "$PRD" "$OUT" model
+    eval::run_coding_agent muse-code "$ROOT" "$WORKSPACE" "$PRD" "$OUT" model high
   `, {
     ROOT: REPO_ROOT,
     WORKSPACE: workspace,
