@@ -141,13 +141,17 @@ if [ -d "$WORKSPACE" ]; then
   if command -v rsync >/dev/null 2>&1; then
     rsync -a \
       --exclude node_modules --exclude .expo --exclude .git \
-      --exclude ios/build --exclude android/.gradle --exclude android/build \
-      --exclude .mcp.json \
+      --exclude ios/Pods --exclude ios/build --exclude ios/DerivedData \
+      --exclude android/.gradle --exclude android/build \
+      --exclude .cache --exclude .eval-bundle-export-tmp --exclude .mcp.json \
       "$WORKSPACE/" "$BUNDLE/app/" 2>/dev/null
   else
     cp -R "$WORKSPACE/." "$BUNDLE/app/" 2>/dev/null
     rm -rf "$BUNDLE/app/node_modules" "$BUNDLE/app/.expo" "$BUNDLE/app/.git" \
-           "$BUNDLE/app/ios/build" "$BUNDLE/app/android/.gradle" "$BUNDLE/app/.mcp.json" 2>/dev/null
+           "$BUNDLE/app/ios/Pods" "$BUNDLE/app/ios/build" "$BUNDLE/app/ios/DerivedData" \
+           "$BUNDLE/app/android/.gradle" "$BUNDLE/app/android/build" \
+           "$BUNDLE/app/.cache" "$BUNDLE/app/.eval-bundle-export-tmp" \
+           "$BUNDLE/app/.mcp.json" 2>/dev/null
   fi
 fi
 

@@ -8,6 +8,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[4]
 SCRIPT = ROOT / "eval_harness/evaluator/ios_agentic/scripts/eval-ios-app.sh"
 EVALUATOR_SH = ROOT / "eval_harness/utils/shell/evaluator.sh"
+APP_RUNTIME_SH = ROOT / "eval_harness/utils/shell/app_runtime.sh"
 
 
 def validate_result(contents: str | None) -> subprocess.CompletedProcess[str]:
@@ -31,7 +32,45 @@ def validate_result(contents: str | None) -> subprocess.CompletedProcess[str]:
         )
 
 
+def resolve_ios_app_mode(mode: str | None = None) -> subprocess.CompletedProcess[str]:
+    env = os.environ.copy()
+    env.pop("EVAL_IOS_APP_MODE", None)
+    env.pop("EVAL_DEV_CLIENT_CLEAR_STATE", None)
+    if mode is not None:
+        env["EVAL_IOS_APP_MODE"] = mode
+    return subprocess.run(
+        [
+            "bash",
+            "-c",
+            'source "$1"; eval::configure_ios_app_mode; '
+            'printf "%s|%s" "$EVAL_IOS_APP_MODE" "${EVAL_DEV_CLIENT_CLEAR_STATE:-unset}"',
+            "bash",
+            str(APP_RUNTIME_SH),
+        ],
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
 class EvalIosScriptTests(unittest.TestCase):
+    def test_spec_release_is_default_and_dev_client_remains_available(self) -> None:
+        """Specification: evaluation supports both builds with a stable default.
+
+        Oracle: release is the product-like path; development-client is an
+        explicit debug path whose shared launcher container is preserved.
+        Catches: defaulting replays to Metro or destructively clearing launcher state.
+        """
+        default = resolve_ios_app_mode()
+        development = resolve_ios_app_mode("dev-client")
+
+        self.assertEqual(default.returncode, 0, default.stderr)
+        self.assertEqual(default.stdout, "release|unset")
+        self.assertEqual(development.returncode, 0, development.stderr)
+        self.assertEqual(development.stdout, "dev-client|0")
+
     def test_regression_missing_authored_artifact_is_a_failed_evaluation(self) -> None:
         """Regression: missing evaluator input must not produce a green EAS job.
 

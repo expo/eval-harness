@@ -91,7 +91,7 @@ if ! eval::npm_install "$WORKSPACE" "$OUT"; then
   exit 1
 fi
 
-EVAL_IOS_APP_MODE="${EVAL_IOS_APP_MODE:-dev-client}"
+eval::configure_ios_app_mode || exit $?
 echo "  iOS app mode: $EVAL_IOS_APP_MODE"
 if [ "$EVAL_IOS_APP_MODE" = "dev-client" ]; then
   echo "  ensuring expo-dev-client is installed (dev-build deep-link handshake)"
@@ -102,7 +102,6 @@ if [ "$EVAL_IOS_APP_MODE" = "dev-client" ]; then
   node "$ROOT/eval_harness/utils/ios/patch_dev_client_default_url.mjs" "$WORKSPACE" "$DEV_CLIENT_DEFAULT_URL" >"$OUT/d-devclient-config.log" 2>&1 \
     || echo "  ⚠️  dev-client defaultLaunchURL patch failed (see d-devclient-config.log)"
   cat "$OUT/d-devclient-config.log"
-  export EVAL_DEV_CLIENT_CLEAR_STATE="${EVAL_DEV_CLIENT_CLEAR_STATE:-1}"
 fi
 
 BUNDLE_ID=""; SCHEME=""

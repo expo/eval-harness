@@ -1,3 +1,25 @@
+eval::configure_ios_app_mode() {
+  EVAL_IOS_APP_MODE="${EVAL_IOS_APP_MODE:-release}"
+  case "$EVAL_IOS_APP_MODE" in
+    release) ;;
+    dev-client)
+      # The authored app and Expo's development launcher share one container.
+      # Clearing it deletes the launcher connection state as well as app data,
+      # so preservation is the safe debug-mode default. An explicit 1 remains
+      # available for focused lifecycle diagnostics.
+      if [ -z "${EVAL_DEV_CLIENT_CLEAR_STATE+x}" ]; then
+        EVAL_DEV_CLIENT_CLEAR_STATE=0
+      fi
+      export EVAL_DEV_CLIENT_CLEAR_STATE
+      ;;
+    *)
+      echo "  ❌ invalid EVAL_IOS_APP_MODE=$EVAL_IOS_APP_MODE (expected release or dev-client)" >&2
+      return 2
+      ;;
+  esac
+  export EVAL_IOS_APP_MODE
+}
+
 eval::npm_install() { # app_dir out_dir
   local app_dir="$1" out="$2"
   echo "================= STAGE 5: app deps ($app_dir) ================="
