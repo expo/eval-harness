@@ -55,24 +55,33 @@ eval::run_evaluator() { # eval_dir test_plan prd out_json out_dir [extra args...
   esac
   echo "  test_plan=${test_plan:-<auto-resolved from prd_test_plans.json>}"
   echo "  prd=$prd"
+  local evaluator_timeout="${EVAL_IOS_EVALUATOR_TIMEOUT_SEC-7200}"
+  case "$evaluator_timeout" in
+    ""|0*|*[!0-9]*)
+      echo "  ❌ EVAL_IOS_EVALUATOR_TIMEOUT_SEC must be an integer from 1 to 86400 seconds" >&2
+      return 2
+      ;;
+  esac
+  if [ "${#evaluator_timeout}" -gt 5 ] || [ "$evaluator_timeout" -gt 86400 ]; then
+    echo "  ❌ EVAL_IOS_EVALUATOR_TIMEOUT_SEC must be an integer from 1 to 86400 seconds" >&2
+    return 2
+  fi
   bash "$_EVAL_STAGES_DIR/check_claude_auth.sh" || return 1
-  local TO=""
-  if command -v gtimeout >/dev/null 2>&1; then TO="gtimeout 1800";
-  elif command -v timeout >/dev/null 2>&1; then TO="timeout 1800";
-  else TO="bun $_EVAL_STAGES_DIR/timeout_exec.ts 1800"; fi
   # Branch on test_plan rather than expanding a possibly-empty array — macOS
   # ships bash 3.2, where "${arr[@]}" on an empty array trips `set -u`.
   local rc
   if [ "${EVAL_STREAM_LOGS:-1}" = "1" ]; then
     if [ -n "$test_plan" ]; then
-      ( cd "$eval_dir" && $TO uv run python -m eval_harness.evaluator.ios_agentic.main \
+      ( cd "$eval_dir" && bun "$_EVAL_STAGES_DIR/timeout_exec.ts" "$evaluator_timeout" \
+          uv run python -m eval_harness.evaluator.ios_agentic.main \
           "$test_plan" \
           --prd "$prd" \
           -d agent-device \
           --seed-iterations 200 --max-iterations 50 \
           -o "$out_json" --verbose "$@" ) 2>&1 | tee "$out/s7-eval.log"
     else
-      ( cd "$eval_dir" && $TO uv run python -m eval_harness.evaluator.ios_agentic.main \
+      ( cd "$eval_dir" && bun "$_EVAL_STAGES_DIR/timeout_exec.ts" "$evaluator_timeout" \
+          uv run python -m eval_harness.evaluator.ios_agentic.main \
           --prd "$prd" \
           -d agent-device \
           --seed-iterations 200 --max-iterations 50 \
@@ -81,14 +90,16 @@ eval::run_evaluator() { # eval_dir test_plan prd out_json out_dir [extra args...
     rc=${PIPESTATUS[0]}
   else
     if [ -n "$test_plan" ]; then
-      ( cd "$eval_dir" && $TO uv run python -m eval_harness.evaluator.ios_agentic.main \
+      ( cd "$eval_dir" && bun "$_EVAL_STAGES_DIR/timeout_exec.ts" "$evaluator_timeout" \
+          uv run python -m eval_harness.evaluator.ios_agentic.main \
           "$test_plan" \
           --prd "$prd" \
           -d agent-device \
           --seed-iterations 200 --max-iterations 50 \
           -o "$out_json" --verbose "$@" ) >"$out/s7-eval.log" 2>&1
     else
-      ( cd "$eval_dir" && $TO uv run python -m eval_harness.evaluator.ios_agentic.main \
+      ( cd "$eval_dir" && bun "$_EVAL_STAGES_DIR/timeout_exec.ts" "$evaluator_timeout" \
+          uv run python -m eval_harness.evaluator.ios_agentic.main \
           --prd "$prd" \
           -d agent-device \
           --seed-iterations 200 --max-iterations 50 \

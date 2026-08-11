@@ -65,6 +65,179 @@ def resolve_ios_app_mode(mode: str | None = None) -> subprocess.CompletedProcess
 
 
 class EvalIosScriptTests(unittest.TestCase):
+    def run_evaluator_timeout_fixture(
+        self,
+        timeout_override: str | None = None,
+        *,
+        wrapper_exit_code: int = 0,
+        stream_logs: str = "0",
+        test_plan: str = "",
+    ) -> tuple[subprocess.CompletedProcess[str], list[str] | None, bool]:
+        """Run the real evaluator shell function with only external CLIs faked."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            stages = root / "shell"
+            fake_bin = root / "bin"
+            eval_dir = root / "repo"
+            out = root / "ios-eval-report"
+            out_json = out / "result.json"
+            timeout_args_path = root / "timeout-args"
+            model_marker = root / "model-ran"
+            stages.mkdir()
+            fake_bin.mkdir()
+            eval_dir.mkdir()
+            out.mkdir()
+            shutil.copy2(
+                ROOT / "eval_harness/utils/shell/timeout_exec.ts",
+                stages / "timeout_exec.ts",
+            )
+            (stages / "check_claude_auth.sh").write_text(
+                "#!/usr/bin/env bash\nexit 0\n",
+                encoding="utf-8",
+            )
+            (fake_bin / "bun").write_text(
+                """#!/usr/bin/env bash
+set -u
+printf '%s\n' "$@" >"$TIMEOUT_ARGS_PATH"
+if [ "${FAKE_TIMEOUT_EXIT_CODE:-0}" -ne 0 ]; then
+  printf 'timeout_exec.ts: command exceeded %ss; terminating process group\n' "$2" >&2
+  exit "$FAKE_TIMEOUT_EXIT_CODE"
+fi
+shift 2
+"$@"
+""",
+                encoding="utf-8",
+            )
+            (fake_bin / "uv").write_text(
+                """#!/usr/bin/env bash
+set -u
+touch "$MODEL_MARKER"
+exit 0
+""",
+                encoding="utf-8",
+            )
+            for executable in (
+                stages / "check_claude_auth.sh",
+                fake_bin / "bun",
+                fake_bin / "uv",
+            ):
+                executable.chmod(0o755)
+
+            env = os.environ.copy()
+            env.pop("EVAL_IOS_EVALUATOR_TIMEOUT_SEC", None)
+            env.update(
+                {
+                    "PATH": f"{fake_bin}:{env['PATH']}",
+                    "TIMEOUT_ARGS_PATH": str(timeout_args_path),
+                    "MODEL_MARKER": str(model_marker),
+                    "FAKE_TIMEOUT_EXIT_CODE": str(wrapper_exit_code),
+                    "EVAL_STREAM_LOGS": stream_logs,
+                }
+            )
+            if timeout_override is not None:
+                env["EVAL_IOS_EVALUATOR_TIMEOUT_SEC"] = timeout_override
+
+            result = subprocess.run(
+                [
+                    "bash",
+                    "-c",
+                    '_EVAL_STAGES_DIR="$2"; source "$1"; '
+                    'eval::reject_claude_quota_exhaustion() { return 0; }; '
+                    'eval::gate() { return "$1"; }; '
+                    'eval::run_evaluator "$3" "$6" "dataset/prds/notes/prd/mvp.txt" '
+                    '"$4" "$5" --model claude-opus-4-8',
+                    "bash",
+                    str(EVALUATOR_SH),
+                    str(stages),
+                    str(eval_dir),
+                    str(out_json),
+                    str(out),
+                    test_plan,
+                ],
+                cwd=ROOT,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            timeout_args = (
+                timeout_args_path.read_text(encoding="utf-8").splitlines()
+                if timeout_args_path.exists()
+                else None
+            )
+            return result, timeout_args, model_marker.exists()
+
+    def test_evaluator_default_budget_covers_full_multi_plan_suite(self) -> None:
+        """Default Stage 7 execution is not killed by the historical 30-minute cap.
+
+        Catches: restoring 1800 seconds or bypassing the repository timeout wrapper.
+        """
+        result, timeout_args, model_ran = self.run_evaluator_timeout_fixture()
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIsNotNone(timeout_args)
+        assert timeout_args is not None
+        self.assertTrue(timeout_args[0].endswith("/timeout_exec.ts"))
+        self.assertEqual(timeout_args[1:3], ["7200", "uv"])
+        self.assertNotIn("1800", timeout_args)
+        self.assertTrue(model_ran)
+
+    def test_evaluator_budget_override_reaches_timeout_wrapper_exactly(self) -> None:
+        """A replay can select a larger bounded budget without changing model caps.
+
+        Catches: ignoring the environment override or passing it to the model CLI.
+        """
+        result, timeout_args, model_ran = self.run_evaluator_timeout_fixture(
+            "8100",
+            stream_logs="1",
+            test_plan="dataset/test_plans/primitives/test_insert.txt",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIsNotNone(timeout_args)
+        assert timeout_args is not None
+        self.assertEqual(timeout_args[1:4], ["8100", "uv", "run"])
+        self.assertEqual(timeout_args.count("8100"), 1)
+        seed_index = timeout_args.index("--seed-iterations")
+        max_index = timeout_args.index("--max-iterations")
+        self.assertEqual(timeout_args[seed_index + 1], "200")
+        self.assertEqual(timeout_args[max_index + 1], "50")
+        self.assertTrue(model_ran)
+
+    def test_invalid_evaluator_budget_fails_before_model_execution(self) -> None:
+        """Only canonical positive integers up to one day are accepted.
+
+        Catches: platform timeout utilities interpreting malformed or unbounded input.
+        """
+        for timeout in ("", "0", "-1", "1.5", "nan", "07200", "86401", "999999999999"):
+            with self.subTest(timeout=timeout):
+                result, timeout_args, model_ran = self.run_evaluator_timeout_fixture(
+                    timeout
+                )
+
+                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                self.assertIn(
+                    "EVAL_IOS_EVALUATOR_TIMEOUT_SEC must be an integer from 1 to 86400 seconds",
+                    result.stderr,
+                )
+                self.assertIsNone(timeout_args)
+                self.assertFalse(model_ran)
+
+    def test_evaluator_preserves_timeout_exit_status_and_diagnostic(self) -> None:
+        """Stage 7 surfaces timeout_exec's canonical rc 124 and diagnostic."""
+        result, timeout_args, model_ran = self.run_evaluator_timeout_fixture(
+            "8100",
+            wrapper_exit_code=124,
+        )
+
+        self.assertEqual(result.returncode, 124, result.stdout + result.stderr)
+        self.assertIsNotNone(timeout_args)
+        self.assertIn(
+            "timeout_exec.ts: command exceeded 8100s; terminating process group",
+            result.stdout,
+        )
+        self.assertFalse(model_ran)
+
     def run_prerequisite_failure(
         self,
         prerequisite: str,
