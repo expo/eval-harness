@@ -310,6 +310,70 @@ class AgentDeviceBridge:
                 return n.get("label") == "AgentDeviceRunner"
         return False
 
+    @staticmethod
+    def _has_valid_ios_snapshot_tree(nodes: list[dict]) -> bool:
+        """Validate the structural fields emitted by iOS agent-device 0.17.6."""
+        if not nodes or any(not isinstance(node, dict) for node in nodes):
+            return False
+
+        nodes_by_index: dict[int, dict] = {}
+        for node in nodes:
+            index = node.get("index")
+            depth = node.get("depth")
+            if (
+                not isinstance(index, int)
+                or isinstance(index, bool)
+                or index < 0
+                or index in nodes_by_index
+                or not isinstance(depth, int)
+                or isinstance(depth, bool)
+                or depth < 0
+            ):
+                return False
+            nodes_by_index[index] = node
+
+        root = nodes[0]
+        if (
+            root.get("type") != "Application"
+            or root.get("index") != 0
+            or root.get("depth") != 0
+            or root.get("parentIndex") is not None
+        ):
+            return False
+
+        for index, node in nodes_by_index.items():
+            if index == 0:
+                continue
+            parent_index = node.get("parentIndex")
+            if (
+                not isinstance(parent_index, int)
+                or isinstance(parent_index, bool)
+                or parent_index < 0
+            ):
+                return False
+            parent = nodes_by_index.get(parent_index)
+            if parent is None or node["depth"] != parent["depth"] + 1:
+                return False
+
+            seen: set[int] = set()
+            cursor = index
+            while cursor != 0:
+                if cursor in seen:
+                    return False
+                seen.add(cursor)
+                current = nodes_by_index.get(cursor)
+                if current is None:
+                    return False
+                next_cursor = current.get("parentIndex")
+                if (
+                    not isinstance(next_cursor, int)
+                    or isinstance(next_cursor, bool)
+                    or next_cursor < 0
+                ):
+                    return False
+                cursor = next_cursor
+        return True
+
     def _has_target_app_content(self, nodes: list[dict]) -> bool:
         """True when the bound target session exposes useful, non-shell UI.
 
@@ -321,16 +385,10 @@ class AgentDeviceBridge:
         evidence the iOS raw snapshot actually supplies: a well-formed
         Application-rooted tree plus meaningful, rendered or hittable content.
         """
-        app = next((node for node in nodes if node.get("type") == "Application"), None)
-        if not nodes or app is None or app is not nodes[0]:
+        if not self._has_valid_ios_snapshot_tree(nodes):
             return False
+        app = nodes[0]
         if app.get("label") == "AgentDeviceRunner":
-            return False
-        if (
-            app.get("index") != 0
-            or app.get("depth") != 0
-            or app.get("parentIndex") is not None
-        ):
             return False
         if any(node.get("type") == "Alert" for node in nodes):
             return False
@@ -404,28 +462,6 @@ class AgentDeviceBridge:
             "screen",
             "container",
         }
-        nodes_by_index = {
-            node.get("index"): node
-            for node in nodes
-            if isinstance(node.get("index"), int)
-            and not isinstance(node.get("index"), bool)
-        }
-
-        def descends_from_application(node: dict) -> bool:
-            parent_index = node.get("parentIndex")
-            seen: set[int] = set()
-            while isinstance(parent_index, int) and not isinstance(parent_index, bool):
-                if parent_index in seen:
-                    return False
-                if parent_index == 0:
-                    return True
-                seen.add(parent_index)
-                parent = nodes_by_index.get(parent_index)
-                if parent is None:
-                    return False
-                parent_index = parent.get("parentIndex")
-            return False
-
         def has_positive_rect(node: dict) -> bool:
             rect = node.get("rect")
             if not isinstance(rect, dict):
@@ -443,8 +479,6 @@ class AgentDeviceBridge:
 
         for node in nodes:
             if node.get("type") not in content_types:
-                continue
-            if not descends_from_application(node):
                 continue
             if node.get("hittable") is not True and not has_positive_rect(node):
                 continue

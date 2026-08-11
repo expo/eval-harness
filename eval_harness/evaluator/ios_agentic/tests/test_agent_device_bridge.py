@@ -605,10 +605,35 @@ class AgentDeviceBridgeRestartTests(unittest.TestCase):
         malformed_application[0]["parentIndex"] = 99
         disconnected_content = raw_snapshot_with_content("Button", "Ready", hittable=True)
         disconnected_content[2]["parentIndex"] = 99
+        duplicate_index = authored_content_without_identifiers()
+        duplicate_index.append(copy.deepcopy(duplicate_index[3]))
+        negative_index = authored_content_without_identifiers()
+        negative_index[2]["index"] = -1
+        boolean_index = authored_content_without_identifiers()
+        boolean_index[2]["index"] = True
+        string_index = authored_content_without_identifiers()
+        string_index[2]["index"] = "2"
+        inconsistent_depth = authored_content_without_identifiers()
+        inconsistent_depth[2]["depth"] = 7
+        negative_depth = authored_content_without_identifiers()
+        negative_depth[2]["depth"] = -1
+        boolean_parent = authored_content_without_identifiers()
+        boolean_parent[2]["parentIndex"] = True
+        cyclic_parents = authored_content_without_identifiers()
+        cyclic_parents[2]["parentIndex"] = 3
+        cyclic_parents[3]["parentIndex"] = 2
         cases = {
             "missing Application root": missing_application,
             "malformed Application root": malformed_application,
             "content disconnected from root": disconnected_content,
+            "duplicate index": duplicate_index,
+            "negative index": negative_index,
+            "boolean index": boolean_index,
+            "string index": string_index,
+            "inconsistent depth": inconsistent_depth,
+            "negative depth": negative_depth,
+            "boolean parent index": boolean_parent,
+            "cyclic parent chain": cyclic_parents,
             "zero-size non-hittable content": raw_snapshot_with_content(
                 "Button", "Ready", positive_rect=False
             ),
