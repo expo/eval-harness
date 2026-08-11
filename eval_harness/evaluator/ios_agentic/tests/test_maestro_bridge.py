@@ -26,7 +26,72 @@ class RecordingMaestroBridge(MaestroBridge):
         return MaestroResult(success=True, output="ready")
 
 
+class CommandMaestroBridge(MaestroBridge):
+    def _find_maestro(self) -> str:
+        return "maestro"
+
+    def _build_env(self) -> dict:
+        return {}
+
+
 class MaestroBridgeSimulatorRoutingTests(unittest.TestCase):
+    @patch.dict(os.environ, {"EVAL_DEV_UDID": "SELECTED-UDID"})
+    def test_maestro_commands_target_selected_simulator_udid(self) -> None:
+        """Maestro's UI driver must use the same selected simulator as simctl.
+
+        Catches: routing only the native launch to the selected UDID while
+        hierarchy/test silently attach to another booted simulator.
+        """
+        commands: list[list[str]] = []
+
+        def run(command, **kwargs):
+            commands.append(command)
+            output = '{"root": {}}' if "hierarchy" in command else "ready"
+            return subprocess.CompletedProcess(command, 0, stdout=output, stderr="")
+
+        with patch(
+            "eval_harness.evaluator.ios_agentic.maestro.bridge.subprocess.run",
+            side_effect=run,
+        ):
+            bridge = CommandMaestroBridge()
+            self.addCleanup(bridge.cleanup)
+            bridge.capture_hierarchy()
+            result = bridge.execute_yaml("- assertVisible: Ready")
+
+        self.assertTrue(result.success, result.error)
+        self.assertEqual(
+            commands[0],
+            ["maestro", "--udid=SELECTED-UDID", "hierarchy"],
+        )
+        self.assertEqual(
+            commands[1][:3],
+            ["maestro", "--udid=SELECTED-UDID", "test"],
+        )
+
+    @patch.dict(os.environ, {"EVAL_DEV_UDID": ""})
+    def test_maestro_commands_preserve_legacy_device_autodiscovery(self) -> None:
+        """Standalone Maestro use keeps its historical no-UDID fallback."""
+        commands: list[list[str]] = []
+
+        def run(command, **kwargs):
+            commands.append(command)
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                stdout='{"root": {}}',
+                stderr="",
+            )
+
+        with patch(
+            "eval_harness.evaluator.ios_agentic.maestro.bridge.subprocess.run",
+            side_effect=run,
+        ):
+            bridge = CommandMaestroBridge()
+            self.addCleanup(bridge.cleanup)
+            bridge.capture_hierarchy()
+
+        self.assertEqual(commands, [["maestro", "hierarchy"]])
+
     @patch.dict(os.environ, {"EVAL_DEV_UDID": "SELECTED-UDID"})
     def test_restart_lifecycle_targets_selected_simulator_udid(self) -> None:
         """Hybrid lifecycle operations cannot drift across booted runtimes.

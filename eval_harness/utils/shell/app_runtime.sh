@@ -154,8 +154,13 @@ for pattern in (
 PY
 }
 
+eval::ios_authored_build_failure_in_log() { # log
+  grep -Eiq -- '(^|[[:space:]])(fatal[[:space:]]+)?error:|CommandError|Unable to resolve|Cannot find module|Module not found|BUILD[[:space:]]+FAILED|Metro.{0,80}(error|failed)|(SyntaxError|TypeError|ReferenceError):|(^|[^[:alnum:]_])(Compile[[:alnum:]_]*|SwiftCompile|SwiftEmitModule|Ld|PhaseScriptExecution|CodeSign|ProcessInfoPlistFile|ProcessProductPackaging|CopySwiftLibs|GenerateDSYMFile)([^[:alnum:]_]|$).{0,160}(failed|error)' "$1"
+}
+
 eval::ios_newer_required_version_from_log() { # log
   local log="$1" required_version
+  eval::ios_authored_build_failure_in_log "$log" && return 1
   eval::ios_runtime_mismatch_in_log "$log" || return 1
   required_version="$(eval::ios_required_version_from_log "$log")"
   [ -n "$required_version" ] || return 1
@@ -183,6 +188,7 @@ eval::build_release_ios_app() { # app_dir out_dir device_udid
   echo "================= STAGE 6 (release app): capability-adaptive simulator build + install ================="
   mkdir -p "$HOME/.expo"
   local build_scratch build_output release_app rc required_version="" help_rc
+  local direct_build_root direct_build_succeeded=0
   build_scratch="$(mktemp -d "${TMPDIR:-/tmp}/eval-ios-release.XXXXXX")" || return 1
   build_output="$build_scratch/build"
   EVAL_IOS_NATIVE_BUILD_OUTCOME=not_run
@@ -250,30 +256,43 @@ eval::build_release_ios_app() { # app_dir out_dir device_udid
     else
       EVAL_IOS_RELEASE_MODE=direct_install
       export EVAL_IOS_RELEASE_MODE
-      ( cd "$app_dir" && bun "$_EVAL_STAGES_DIR/timeout_exec.ts" 1800 npx expo run:ios \
-          --configuration Release --device "$device" ) >"$out/s6-release.log" 2>&1
-      rc=$?
-      release_app="$(find "$app_dir/ios/build" -maxdepth 8 -type d -name '*.app' -print -quit 2>/dev/null)"
-      [ -n "$release_app" ] && required_version="$(eval::ios_app_minimum_version "$release_app")"
-      if [ -n "$required_version" ] && [ -n "${EVAL_IOS_RUNTIME_VERSION:-}" ] && \
-          eval::ios_version_is_newer "$required_version" "$EVAL_IOS_RUNTIME_VERSION"; then
-        eval::mark_ios_runtime_unsupported "$required_version"
-        rc=$?
-      elif [ "$rc" = 0 ]; then
-        EVAL_IOS_NATIVE_BUILD_OUTCOME=passed
-        EVAL_IOS_INSTALL_OUTCOME=passed
-        export EVAL_IOS_NATIVE_BUILD_OUTCOME EVAL_IOS_INSTALL_OUTCOME
-      elif required_version="$(eval::ios_newer_required_version_from_log "$out/s6-release.log")"; then
-        eval::mark_ios_runtime_unsupported "$required_version"
-        rc=$?
-      elif [ -n "$release_app" ] && [ -f "$release_app/Info.plist" ] && \
-          grep -Eiq -- '(^|[^[:alpha:]])BUILD[[:space:]]+SUCCEEDED([^[:alpha:]]|$)' "$out/s6-release.log"; then
-        EVAL_IOS_NATIVE_BUILD_OUTCOME=passed
-        EVAL_IOS_INSTALL_OUTCOME=failed
-        export EVAL_IOS_NATIVE_BUILD_OUTCOME EVAL_IOS_INSTALL_OUTCOME
-      else
+      direct_build_root="$app_dir/ios/build"
+      if ! rm -rf -- "$direct_build_root"; then
+        echo "could not clear prior iOS build output: $direct_build_root" >"$out/s6-release.log"
         EVAL_IOS_NATIVE_BUILD_OUTCOME=failed
         export EVAL_IOS_NATIVE_BUILD_OUTCOME
+        rc=1
+      else
+        ( cd "$app_dir" && bun "$_EVAL_STAGES_DIR/timeout_exec.ts" 1800 npx expo run:ios \
+            --configuration Release --device "$device" ) >"$out/s6-release.log" 2>&1
+        rc=$?
+        if grep -Eiq -- '(^|[^[:alpha:]])BUILD[[:space:]]+SUCCEEDED([^[:alpha:]]|$)' "$out/s6-release.log"; then
+          direct_build_succeeded=1
+        fi
+        release_app="$(find "$direct_build_root" -maxdepth 8 -type d -name '*.app' -print -quit 2>/dev/null)"
+        if [ -n "$release_app" ] && { [ "$rc" = 0 ] || [ "$direct_build_succeeded" = 1 ]; }; then
+          required_version="$(eval::ios_app_minimum_version "$release_app")"
+        fi
+        if [ -n "$required_version" ] && [ -n "${EVAL_IOS_RUNTIME_VERSION:-}" ] && \
+            eval::ios_version_is_newer "$required_version" "$EVAL_IOS_RUNTIME_VERSION"; then
+          eval::mark_ios_runtime_unsupported "$required_version"
+          rc=$?
+        elif [ "$rc" = 0 ]; then
+          EVAL_IOS_NATIVE_BUILD_OUTCOME=passed
+          EVAL_IOS_INSTALL_OUTCOME=passed
+          export EVAL_IOS_NATIVE_BUILD_OUTCOME EVAL_IOS_INSTALL_OUTCOME
+        elif required_version="$(eval::ios_newer_required_version_from_log "$out/s6-release.log")"; then
+          eval::mark_ios_runtime_unsupported "$required_version"
+          rc=$?
+        elif [ -n "$release_app" ] && [ -f "$release_app/Info.plist" ] && \
+            [ "$direct_build_succeeded" = 1 ]; then
+          EVAL_IOS_NATIVE_BUILD_OUTCOME=passed
+          EVAL_IOS_INSTALL_OUTCOME=failed
+          export EVAL_IOS_NATIVE_BUILD_OUTCOME EVAL_IOS_INSTALL_OUTCOME
+        else
+          EVAL_IOS_NATIVE_BUILD_OUTCOME=failed
+          export EVAL_IOS_NATIVE_BUILD_OUTCOME
+        fi
       fi
     fi
   fi

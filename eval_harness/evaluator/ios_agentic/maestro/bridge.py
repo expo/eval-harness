@@ -50,7 +50,11 @@ class MaestroBridge:
         if deep_link:
             cfg["deep_link"] = deep_link
         self.config = cfg
-        self.simulator = os.environ.get("EVAL_DEV_UDID") or "booted"
+        selected_simulator = os.environ.get("EVAL_DEV_UDID")
+        self.simulator = selected_simulator or "booted"
+        self._maestro_device_args = (
+            [f"--udid={selected_simulator}"] if selected_simulator else []
+        )
         self.timeout = timeout
         self.verbose = verbose
         self.maestro_bin = self._find_maestro()
@@ -96,7 +100,7 @@ class MaestroBridge:
         """Run `maestro hierarchy` and return the raw JSON output."""
         try:
             result = subprocess.run(
-                [self.maestro_bin, "hierarchy"],
+                [self.maestro_bin, *self._maestro_device_args, "hierarchy"],
                 capture_output=True, text=True, timeout=30, env=self._env,
             )
             output = result.stdout
@@ -127,7 +131,7 @@ class MaestroBridge:
 
         try:
             result = subprocess.run(
-                [self.maestro_bin, "test", str(yaml_path)],
+                [self.maestro_bin, *self._maestro_device_args, "test", str(yaml_path)],
                 capture_output=True, text=True,
                 timeout=timeout, env=self._env,
             )

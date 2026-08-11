@@ -367,6 +367,53 @@ describe("normalizeRun", () => {
     expect(nonNewerSummary.status).toBe("failed");
     expect(nonNewerSummary.warnings).toContain("iOS evaluator job failed");
     expect(nonNewerSummary.warnings.join(" ")).not.toContain("iOS environment unsupported:");
+
+    const compatibleAvailableRoot = tempRoot();
+    const compatibleAvailable = inputs(compatibleAvailableRoot, { skill: false, ios: true });
+    compatibleAvailable.iosJobStatus = "failure";
+    compatibleAvailable.skillJobStatus = "skipped";
+    const compatibleReason =
+      "authored app requires iOS 20.0; available iOS simulator runtimes: 26.5, 18.6";
+    writeJson(join(compatibleAvailable.iosArtifact!, "result.json"), {
+      status: "unsupported_environment",
+      expected_plan_count: 0,
+      terminal_plan_count: 0,
+      macro_avg_pct: null,
+      evaluator_errors: [],
+      test_plans: [],
+      environment: { required_ios: "20.0", available_ios: ["26.5", "18.6"] },
+      reason: compatibleReason,
+    });
+    const compatibleManifest = readJson(
+      join(compatibleAvailable.iosArtifact!, "manifest.json"),
+    );
+    const compatibleHealth = compatibleManifest.build_health as Record<string, unknown>;
+    compatibleHealth.native_build = {
+      status: "passed",
+      detail: null,
+      log: "logs/s6-release.log",
+    };
+    compatibleHealth.app_launch = {
+      status: "warning",
+      detail: compatibleReason,
+      log: "logs/s6-release.log",
+    };
+    compatibleHealth.evaluation = { status: "not_run", detail: null, log: null };
+    compatibleManifest.environment = {
+      selected_ios: "18.6",
+      required_ios: "20.0",
+      available_ios: ["26.5", "18.6"],
+      classification: "unsupported_environment",
+    };
+    writeJson(join(compatibleAvailable.iosArtifact!, "manifest.json"), compatibleManifest);
+
+    const compatibleSummary = await normalizeRun(compatibleAvailable);
+
+    expect(compatibleSummary.status).toBe("failed");
+    expect(compatibleSummary.warnings).toContain("iOS evaluator job failed");
+    expect(compatibleSummary.warnings.join(" ")).not.toContain(
+      "iOS environment unsupported:",
+    );
   });
 
   test("rejects authoritative JSON symlinks, hardlinks, and FIFOs", async () => {

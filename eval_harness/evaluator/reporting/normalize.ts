@@ -286,14 +286,17 @@ function validUnsupportedIosEvidence(
   const requiredIos = resultEnvironment?.required_ios;
   const selectedIos = manifestEnvironment?.selected_ios;
   const availableIos = manifestEnvironment?.available_ios;
+  const versionsConsistent = Array.isArray(availableIos) && availableIos.length > 0 &&
+    availableIos.includes(selectedIos) &&
+    availableIos.every((available) => iosVersionIsNewer(requiredIos, available)) &&
+    availableIos.every((available) => !iosVersionIsNewer(available, selectedIos));
   return resultEnvironment !== null && manifestEnvironment !== null &&
     nonEmptyString(result.reason) &&
     nonEmptyString(requiredIos) && nonEmptyString(selectedIos) &&
     iosVersionIsNewer(requiredIos, selectedIos) &&
     manifestEnvironment.classification === "unsupported_environment" &&
     manifestEnvironment.required_ios === requiredIos &&
-    Array.isArray(availableIos) && availableIos.length > 0 &&
-    availableIos.includes(selectedIos) &&
+    versionsConsistent &&
     equalStringArrays(availableIos, resultEnvironment.available_ios) &&
     Array.isArray(result.test_plans) && result.test_plans.length === 0 &&
     nativeBuild?.status === "passed" &&

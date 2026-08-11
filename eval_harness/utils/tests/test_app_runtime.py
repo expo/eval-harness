@@ -26,6 +26,7 @@ class ReleaseIosBuildTests(unittest.TestCase):
         build_exit: int = 0,
         build_output_text: str = "",
         direct_app: bool = False,
+        stale_direct_minimum_ios: str | None = None,
     ) -> tuple[subprocess.CompletedProcess[str], Path, Path, Path]:
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
@@ -36,6 +37,18 @@ class ReleaseIosBuildTests(unittest.TestCase):
         app.mkdir()
         out.mkdir()
         bin_dir.mkdir()
+        if stale_direct_minimum_ios is not None:
+            stale_app = (
+                app
+                / "ios/build/Build/Products/Release-iphonesimulator/Stale.app"
+            )
+            stale_app.mkdir(parents=True)
+            (stale_app / "Info.plist").write_text(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+                "<plist version=\"1.0\"><dict><key>MinimumOSVersion</key>"
+                f"<string>{stale_direct_minimum_ios}</string></dict></plist>",
+                encoding="utf-8",
+            )
 
         bun_args = root / "bun-args.txt"
         install_args = root / "install-args.txt"
@@ -232,6 +245,40 @@ class ReleaseIosBuildTests(unittest.TestCase):
         self.assertIn("OUTCOME=17|generic_output|failed|not_run||", result.stdout)
         self.assertNotIn("unsupported_environment", result.stdout)
 
+    def test_future_target_warning_does_not_mask_authored_build_failure(self) -> None:
+        """A coincident high-target warning cannot erase an authored failure.
+
+        Catches: treating any parseable future deployment warning as exclusive
+        proof of environment incompatibility when native or Metro work fails.
+        """
+        failures = [
+            "CompileSwift failed for authored source.",
+            "CommandError: Unable to resolve module ./missing from App.tsx",
+        ]
+        cases = [
+            ("Usage: expo run:ios [options]\n  --output <dir>", "generic_output"),
+            ("Usage: expo run:ios [options]\n  --device <device>", "direct_install"),
+        ]
+
+        for authored_failure in failures:
+            output = (
+                f"{authored_failure}\n"
+                "The iOS Simulator deployment target 'IPHONEOS_DEPLOYMENT_TARGET' "
+                "is set to 27.0, but the range of supported deployment target "
+                "versions is 12.0 to 26.5.99."
+            )
+            for help_text, mode in cases:
+                with self.subTest(mode=mode, failure=authored_failure):
+                    result, _, _, _ = self.run_release_build(
+                        help_text=help_text,
+                        build_exit=17,
+                        build_output_text=output,
+                    )
+
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    self.assertIn(f"OUTCOME=17|{mode}|failed|not_run||", result.stdout)
+                    self.assertNotIn("unsupported_environment", result.stdout)
+
     def test_old_cli_built_app_install_failure_preserves_native_build_success(self) -> None:
         """SDK 53/54 can fail after producing the simulator app.
 
@@ -263,6 +310,23 @@ class ReleaseIosBuildTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("OUTCOME=17|direct_install|failed|not_run||", result.stdout)
+
+    def test_old_cli_stale_future_target_app_does_not_claim_unsupported(self) -> None:
+        """A stale product cannot turn a source failure into an environment N/A.
+
+        Catches: inspecting a persistent pre-invocation `.app` target before
+        proving that the current Expo invocation successfully built it.
+        """
+        result, _, _, _ = self.run_release_build(
+            help_text="Usage: expo run:ios [options]\n  --device <device>",
+            build_exit=17,
+            build_output_text="CompileSwift failed for authored source",
+            stale_direct_minimum_ios="27.0",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("OUTCOME=17|direct_install|failed|not_run||", result.stdout)
+        self.assertNotIn("unsupported_environment", result.stdout)
 
 
 class ProbeSnapshotSimulatorRoutingTests(unittest.TestCase):
