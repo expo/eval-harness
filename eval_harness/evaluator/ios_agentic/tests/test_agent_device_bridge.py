@@ -1,3 +1,4 @@
+import copy
 import os
 import tempfile
 import unittest
@@ -50,23 +51,7 @@ class RecordingDevClientRestartBridge(AgentDeviceBridge):
         return AgentDeviceResult(success=True, output="ok")
 
     def _snapshot_raw(self) -> list[dict]:
-        return [
-            {
-                "type": "Application",
-                "label": "Authored App",
-                "bundleId": "com.example.authored",
-                "pid": 42,
-                "visibleToUser": True,
-            },
-            {
-                "type": "Button",
-                "identifier": "authored-app-ready",
-                "label": "Ready",
-                "bundleId": "com.example.authored",
-                "pid": 42,
-                "visibleToUser": True,
-            }
-        ]
+        return authored_content()
 
 
 class SequencedAlertRestartBridge(AgentDeviceBridge):
@@ -98,67 +83,131 @@ class SequencedAlertRestartBridge(AgentDeviceBridge):
 
 
 def permission_alert(title: str, deny: str, allow: str) -> list[dict]:
-    return [
-        {"type": "Application", "label": "Authored App"},
-        {"type": "Alert", "label": title},
-        {"type": "Button", "label": deny, "ref": "e7"},
-        {"type": "Button", "label": allow, "ref": "e8"},
-    ]
+    nodes = raw_snapshot_with_content("Alert", title, positive_rect=True)
+    nodes.append(
+        {
+            **copy.deepcopy(nodes[2]),
+            "index": 3,
+            "type": "Button",
+            "label": deny,
+            "hittable": True,
+        }
+    )
+    nodes.append(
+        {
+            **copy.deepcopy(nodes[2]),
+            "index": 4,
+            "type": "Button",
+            "label": allow,
+            "hittable": True,
+        }
+    )
+    return nodes
+
+
+AGENT_DEVICE_0176_NO_TEST_ID_SNAPSHOT = [
+    {
+        "index": 0,
+        "type": "Application",
+        "label": "Notes",
+        "identifier": None,
+        "value": None,
+        "rect": {"x": 0, "y": 0, "width": 402, "height": 874},
+        "enabled": True,
+        "focused": False,
+        "selected": False,
+        "hittable": True,
+        "depth": 0,
+        "parentIndex": None,
+    },
+    {
+        "index": 1,
+        "type": "Window",
+        "label": None,
+        "identifier": None,
+        "value": None,
+        "rect": {"x": 0, "y": 0, "width": 402, "height": 874},
+        "enabled": True,
+        "focused": False,
+        "selected": False,
+        "hittable": False,
+        "depth": 1,
+        "parentIndex": 0,
+    },
+    {
+        "index": 2,
+        "type": "StaticText",
+        "label": "Notes",
+        "identifier": None,
+        "value": None,
+        "rect": {"x": 24, "y": 72, "width": 130, "height": 34},
+        "enabled": True,
+        "focused": False,
+        "selected": False,
+        "hittable": False,
+        "depth": 2,
+        "parentIndex": 1,
+    },
+    {
+        "index": 3,
+        "type": "Button",
+        "label": "New note",
+        "identifier": None,
+        "value": None,
+        "rect": {"x": 24, "y": 124, "width": 354, "height": 48},
+        "enabled": True,
+        "focused": False,
+        "selected": False,
+        "hittable": True,
+        "depth": 2,
+        "parentIndex": 1,
+    },
+]
 
 
 def authored_content() -> list[dict]:
-    return [
-        {
-            "type": "Application",
-            "label": "Authored App",
-            "bundleId": "com.example.authored",
-            "pid": 42,
-            "visibleToUser": True,
-        },
-        {
-            "type": "Button",
-            "identifier": "authored-app-ready",
-            "label": "Ready",
-            "bundleId": "com.example.authored",
-            "pid": 42,
-            "visibleToUser": True,
-        },
-    ]
+    nodes = copy.deepcopy(AGENT_DEVICE_0176_NO_TEST_ID_SNAPSHOT)
+    nodes[3]["identifier"] = "authored-app-ready"
+    return nodes
 
 
 def authored_content_without_identifiers() -> list[dict]:
-    """Realistic raw iOS tree for an accessible app that defines no testIDs."""
-    return [
+    """Raw iOS 0.17.6 tree for an accessible app that defines no testIDs."""
+    return copy.deepcopy(AGENT_DEVICE_0176_NO_TEST_ID_SNAPSHOT)
+
+
+def raw_snapshot_with_content(
+    type_: str,
+    label: str | None,
+    *,
+    identifier: str | None = None,
+    hittable: bool = False,
+    positive_rect: bool = True,
+) -> list[dict]:
+    """Build a minimal tree using only the pinned iOS SnapshotNode fields."""
+    nodes = copy.deepcopy(AGENT_DEVICE_0176_NO_TEST_ID_SNAPSHOT[:2])
+    nodes.append(
         {
-            "type": "Application",
-            "label": "Notes",
-            "bundleId": "com.example.authored",
-            "appName": "Notes",
-            "pid": 42,
-            "visibleToUser": True,
-        },
-        {
-            "type": "Window",
-            "bundleId": "com.example.authored",
-            "pid": 42,
-            "visibleToUser": True,
-        },
-        {
-            "type": "StaticText",
-            "label": "Notes",
-            "bundleId": "com.example.authored",
-            "pid": 42,
-            "visibleToUser": True,
-        },
-        {
-            "type": "Button",
-            "label": "New note",
-            "bundleId": "com.example.authored",
-            "pid": 42,
-            "visibleToUser": True,
-            "hittable": True,
-        },
-    ]
+            "index": 2,
+            "type": type_,
+            "label": label,
+            "identifier": identifier,
+            "value": None,
+            "rect": {
+                "x": 24,
+                "y": 72,
+                "width": 120 if positive_rect else 0,
+                "height": 44 if positive_rect else 0,
+            },
+            "enabled": True,
+            "focused": False,
+            "selected": False,
+            "hittable": hittable,
+            "depth": 2,
+            "parentIndex": 1,
+        }
+    )
+    return nodes
 
 
 class RecordingMaestroRestart:
@@ -352,7 +401,11 @@ class AgentDeviceBridgeRestartTests(unittest.TestCase):
                 result = bridge.restart_app(clear_state=True, preflight=True)
 
                 self.assertTrue(result.success, result.error)
-                self.assertEqual(bridge.commands, [["press", "@e7"]])
+                safe_deny = deny.replace('"', '\\"')
+                self.assertEqual(
+                    bridge.commands,
+                    [["press", f'label="{safe_deny}"']],
+                )
                 self.assertEqual(
                     bridge.last_restart_diagnostics,
                     [
@@ -493,188 +546,85 @@ class AgentDeviceBridgeRestartTests(unittest.TestCase):
         accepting the runner, Expo launcher, alert, error, or a bare root view.
         """
         bridge = AgentDeviceBridge(app_id="com.example.authored")
-        cases = {
-            "agent-device runner": [
-                {
-                    "type": "Application",
-                    "label": "AgentDeviceRunner",
-                    "bundleId": "com.facebook.WebDriverAgentRunner.xctrunner",
-                    "pid": 7,
-                },
-                {
-                    "type": "StaticText",
-                    "label": "Runner Ready",
-                    "identifier": "runner-ready",
-                    "bundleId": "com.facebook.WebDriverAgentRunner.xctrunner",
-                    "pid": 7,
-                },
-            ],
-            "Expo dev-client launcher": [
-                {
-                    "type": "Application",
-                    "label": "Authored App",
-                    "bundleId": "com.example.authored",
-                    "pid": 42,
-                },
-                {
-                    "type": "StaticText",
-                    "label": "Development servers",
-                    "identifier": "launcher-title",
-                    "bundleId": "com.example.authored",
-                    "pid": 42,
-                },
-                {
-                    "type": "Button",
-                    "label": "Enter URL manually",
-                    "identifier": "launcher-enter-url",
-                    "bundleId": "com.example.authored",
-                    "pid": 42,
-                },
-            ],
-            "system alert": [
-                {
-                    "type": "Application",
-                    "label": "Notes",
-                    "bundleId": "com.example.authored",
-                    "pid": 42,
-                },
-                {"type": "Alert", "label": "System Alert", "pid": 42},
-                {
-                    "type": "Button",
-                    "label": "Allow",
-                    "identifier": "permission-allow",
-                    "pid": 42,
-                },
-            ],
-            "known error shell": [
-                {
-                    "type": "Application",
-                    "label": "Notes",
-                    "bundleId": "com.example.authored",
-                    "pid": 42,
-                },
-                {
-                    "type": "StaticText",
-                    "label": "Unable to resolve module ./missing",
-                    "identifier": "error-message",
-                    "bundleId": "com.example.authored",
-                    "pid": 42,
-                },
-            ],
-            "bare generic root": [
-                {
-                    "type": "Application",
-                    "label": "Notes",
-                    "bundleId": "com.example.authored",
-                    "pid": 42,
-                },
-                {
-                    "type": "Other",
-                    "label": "Content View",
-                    "identifier": "root",
-                    "bundleId": "com.example.authored",
-                    "pid": 42,
-                },
-            ],
-        }
-
-        for name, nodes in cases.items():
-            with self.subTest(name=name):
-                self.assertFalse(bridge._has_target_app_content(nodes))
-
-    def test_readiness_rejects_missing_or_spoofed_app_ownership(self) -> None:
-        """Readiness requires visible content positively owned by the target app.
-
-        Catches: treating absent bundle/process metadata as a match, trusting
-        content from another process, or accepting a hidden accessibility node.
-        """
-        bridge = AgentDeviceBridge(app_id="com.example.authored")
-        cases = {
-            "all provenance missing": [
-                {"type": "Application", "label": "Unknown"},
-                {"type": "Button", "label": "Ready", "visibleToUser": True},
-            ],
-            "content provenance missing": [
-                {
-                    "type": "Application",
-                    "label": "Notes",
-                    "bundleId": "com.example.authored",
-                    "pid": 42,
-                    "visibleToUser": True,
-                },
-                {"type": "Button", "label": "Ready", "visibleToUser": True},
-            ],
-            "application bundle spoofed": [
-                {
-                    "type": "Application",
-                    "label": "Other App",
-                    "bundleId": "com.example.other",
-                    "pid": 42,
-                    "visibleToUser": True,
-                },
-                {
-                    "type": "Button",
-                    "label": "Ready",
-                    "bundleId": "com.example.authored",
-                    "pid": 42,
-                    "visibleToUser": True,
-                },
-            ],
-            "content process spoofed": [
-                {
-                    "type": "Application",
-                    "label": "Notes",
-                    "bundleId": "com.example.authored",
-                    "pid": 42,
-                    "visibleToUser": True,
-                },
-                {
-                    "type": "Button",
-                    "label": "Ready",
-                    "pid": 7,
-                    "visibleToUser": True,
-                },
-            ],
-            "content hidden": [
-                {
-                    "type": "Application",
-                    "label": "Notes",
-                    "bundleId": "com.example.authored",
-                    "pid": 42,
-                    "visibleToUser": True,
-                },
-                {
-                    "type": "Button",
-                    "label": "Ready",
-                    "bundleId": "com.example.authored",
-                    "pid": 42,
-                    "visibleToUser": False,
-                },
-            ],
-        }
-
-        for name, nodes in cases.items():
-            with self.subTest(name=name):
-                self.assertFalse(bridge._has_target_app_content(nodes))
-
-    def test_readiness_accepts_pid_linked_target_content_without_app_bundle(self) -> None:
-        """A target-bundle content node can establish ownership for its app PID."""
-        bridge = AgentDeviceBridge(app_id="com.example.authored")
-        nodes = [
+        runner = raw_snapshot_with_content(
+            "StaticText", "Runner Ready", identifier="runner-ready"
+        )
+        runner[0]["label"] = "AgentDeviceRunner"
+        launcher = raw_snapshot_with_content(
+            "StaticText", "Development servers", identifier="launcher-title"
+        )
+        launcher.append(
             {
-                "type": "Application",
-                "label": "Notes",
-                "pid": 42,
-                "visibleToUser": True,
-            },
-            {
+                **copy.deepcopy(launcher[2]),
+                "index": 3,
                 "type": "Button",
-                "label": "New note",
-                "bundleId": "com.example.authored",
-                "pid": 42,
-                "visibleToUser": True,
+                "label": "Enter URL manually",
+                "identifier": "launcher-enter-url",
+                "hittable": True,
+            }
+        )
+        system_alert = raw_snapshot_with_content(
+            "Button", "Allow", identifier="permission-allow", hittable=True
+        )
+        system_alert.insert(
+            2,
+            {
+                **copy.deepcopy(system_alert[2]),
+                "index": 3,
+                "type": "Alert",
+                "label": "System Alert",
+                "identifier": None,
+                "hittable": False,
             },
-        ]
+        )
+        cases = {
+            "agent-device runner": runner,
+            "Expo dev-client launcher": launcher,
+            "system alert": system_alert,
+            "known error shell": raw_snapshot_with_content(
+                "StaticText",
+                "Unable to resolve module ./missing",
+                identifier="error-message",
+            ),
+            "bare generic root": raw_snapshot_with_content(
+                "Other", "Content View", identifier="root"
+            ),
+        }
+
+        for name, nodes in cases.items():
+            with self.subTest(name=name):
+                self.assertFalse(bridge._has_target_app_content(nodes))
+
+    def test_readiness_rejects_malformed_or_nonrendered_raw_ios_trees(self) -> None:
+        """Readiness requires supported structure plus positive UI evidence."""
+        bridge = AgentDeviceBridge(app_id="com.example.authored")
+        missing_application = raw_snapshot_with_content("Button", "Ready", hittable=True)[1:]
+        malformed_application = raw_snapshot_with_content("Button", "Ready", hittable=True)
+        malformed_application[0]["index"] = 4
+        malformed_application[0]["depth"] = 1
+        malformed_application[0]["parentIndex"] = 99
+        disconnected_content = raw_snapshot_with_content("Button", "Ready", hittable=True)
+        disconnected_content[2]["parentIndex"] = 99
+        cases = {
+            "missing Application root": missing_application,
+            "malformed Application root": malformed_application,
+            "content disconnected from root": disconnected_content,
+            "zero-size non-hittable content": raw_snapshot_with_content(
+                "Button", "Ready", positive_rect=False
+            ),
+            "content without meaningful signal": raw_snapshot_with_content(
+                "Button", None, positive_rect=True
+            ),
+        }
+
+        for name, nodes in cases.items():
+            with self.subTest(name=name):
+                self.assertFalse(bridge._has_target_app_content(nodes))
+
+    def test_readiness_accepts_nonhittable_label_with_positive_rect(self) -> None:
+        """Rendered text is positive UI evidence even when it is not interactive."""
+        bridge = AgentDeviceBridge(app_id="com.example.authored")
+        nodes = raw_snapshot_with_content("StaticText", "No notes yet")
 
         self.assertTrue(bridge._has_target_app_content(nodes))
 

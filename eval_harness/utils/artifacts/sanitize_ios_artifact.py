@@ -13,6 +13,7 @@ from pathlib import Path
 
 ROOT_FILES = {"result.json", "report.html"}
 ROOT_DIRS = {"traces", "telemetry", "logs"}
+COLLECTOR_ROOT_WRITE_TARGETS = {"collect-evaluator-trace.log", "manifest.json"}
 LOG_FILES = {
     "collect-evaluator-trace.log",
     "d-devclient.log",
@@ -81,6 +82,11 @@ def ensure_physical_directory(path: Path) -> None:
 def prepare(out: Path) -> None:
     for name in ROOT_DIRS:
         ensure_physical_directory(out / name)
+    # These paths are opened for writing by the collector itself. Unlink them
+    # unconditionally before the shell or Python opens them so neither a
+    # symlink nor a second hardlink can redirect/truncate an outside inode.
+    for name in COLLECTOR_ROOT_WRITE_TARGETS:
+        remove_node(out / name)
     for name in ("result.json", "result.html", "report.html"):
         path = out / name
         if lstat_or_none(path) is not None and not is_single_link_regular(path):

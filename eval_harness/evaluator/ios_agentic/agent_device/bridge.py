@@ -311,28 +311,26 @@ class AgentDeviceBridge:
         return False
 
     def _has_target_app_content(self, nodes: list[dict]) -> bool:
-        """True when the expected app owns useful, non-shell accessibility UI."""
+        """True when the bound target session exposes useful, non-shell UI.
+
+        On pinned agent-device 0.17.6, iOS SnapshotNode does not contain a
+        bundle id, process id, or visibleToUser field. Ownership comes from the
+        configured agent-device session: the lifecycle path binds that session
+        to ``app_id``, and readiness explicitly detects/rebinds runner takeover
+        before calling this predicate. This predicate therefore validates only
+        evidence the iOS raw snapshot actually supplies: a well-formed
+        Application-rooted tree plus meaningful, rendered or hittable content.
+        """
         app = next((node for node in nodes if node.get("type") == "Application"), None)
-        if app is None or app.get("label") == "AgentDeviceRunner":
+        if not nodes or app is None or app is not nodes[0]:
             return False
-        expected_bundle = self.config["app_id"]
-        app_bundle_value = app.get("bundleId")
-        app_bundle = (
-            app_bundle_value.strip()
-            if isinstance(app_bundle_value, str) and app_bundle_value.strip()
-            else None
-        )
-        if app_bundle is not None and app_bundle != expected_bundle:
+        if app.get("label") == "AgentDeviceRunner":
             return False
-        app_pid_value = app.get("pid")
-        app_pid = (
-            app_pid_value
-            if isinstance(app_pid_value, int)
-            and not isinstance(app_pid_value, bool)
-            and app_pid_value > 0
-            else None
-        )
-        if app.get("visibleToUser") is False:
+        if (
+            app.get("index") != 0
+            or app.get("depth") != 0
+            or app.get("parentIndex") is not None
+        ):
             return False
         if any(node.get("type") == "Alert" for node in nodes):
             return False
@@ -406,36 +404,49 @@ class AgentDeviceBridge:
             "screen",
             "container",
         }
+        nodes_by_index = {
+            node.get("index"): node
+            for node in nodes
+            if isinstance(node.get("index"), int)
+            and not isinstance(node.get("index"), bool)
+        }
+
+        def descends_from_application(node: dict) -> bool:
+            parent_index = node.get("parentIndex")
+            seen: set[int] = set()
+            while isinstance(parent_index, int) and not isinstance(parent_index, bool):
+                if parent_index in seen:
+                    return False
+                if parent_index == 0:
+                    return True
+                seen.add(parent_index)
+                parent = nodes_by_index.get(parent_index)
+                if parent is None:
+                    return False
+                parent_index = parent.get("parentIndex")
+            return False
+
+        def has_positive_rect(node: dict) -> bool:
+            rect = node.get("rect")
+            if not isinstance(rect, dict):
+                return False
+            width = rect.get("width")
+            height = rect.get("height")
+            return (
+                isinstance(width, (int, float))
+                and not isinstance(width, bool)
+                and width > 0
+                and isinstance(height, (int, float))
+                and not isinstance(height, bool)
+                and height > 0
+            )
+
         for node in nodes:
-            if node.get("type") not in content_types or node.get("visibleToUser") is not True:
+            if node.get("type") not in content_types:
                 continue
-            node_bundle_value = node.get("bundleId")
-            node_bundle = (
-                node_bundle_value.strip()
-                if isinstance(node_bundle_value, str) and node_bundle_value.strip()
-                else None
-            )
-            if node_bundle is not None and node_bundle != expected_bundle:
+            if not descends_from_application(node):
                 continue
-            node_pid_value = node.get("pid")
-            node_pid = (
-                node_pid_value
-                if isinstance(node_pid_value, int)
-                and not isinstance(node_pid_value, bool)
-                and node_pid_value > 0
-                else None
-            )
-            if app_pid is not None and node_pid is not None and node_pid != app_pid:
-                continue
-            app_owns_tree = app_bundle == expected_bundle
-            pid_links_node_to_app = (
-                app_pid is not None and node_pid is not None and node_pid == app_pid
-            )
-            node_names_target = node_bundle == expected_bundle
-            if not (
-                (app_owns_tree and (node_names_target or pid_links_node_to_app))
-                or (node_names_target and pid_links_node_to_app)
-            ):
+            if node.get("hittable") is not True and not has_positive_rect(node):
                 continue
             signals = [
                 str(node.get(field) or "").strip()
@@ -1511,10 +1522,10 @@ class AgentDeviceBridge:
                     error=f"restart_app: app shell error visible: {blocking_error}; {self._debug_node_summary(nodes)}",
                 )
 
-            # Ready when the expected app process owns useful accessible UI.
-            # TestIDs are strong evidence when present but are optional; raw
-            # agent-device bundle/process metadata plus non-shell labels let
-            # unconstrained authored apps reach the evaluator too.
+            # Ready when the already target-bound agent-device session exposes
+            # useful accessible UI. TestIDs are strong evidence when present
+            # but optional; the pinned iOS raw shape has structural/geometry
+            # fields rather than bundle/process/visibility metadata.
             if self._has_target_app_content(nodes):
                 if self.verbose:
                     print(f"  [bridge] target app content ready: {self._debug_node_summary(nodes)}")

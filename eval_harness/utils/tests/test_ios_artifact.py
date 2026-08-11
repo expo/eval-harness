@@ -19,6 +19,78 @@ def write(path: Path, contents: str = "fixture") -> None:
 
 
 class IosArtifactTests(unittest.TestCase):
+    def test_collector_recreates_trace_log_without_mutating_linked_targets(self) -> None:
+        """Collector-owned redirections must never truncate an outside inode."""
+        for link_kind in ("symlink", "hardlink"):
+            with self.subTest(link_kind=link_kind), tempfile.TemporaryDirectory() as td:
+                root = Path(td)
+                run_id = f"unsafe-trace-log-{link_kind}"
+                artifact = root / "ios-eval-report"
+                outside = root / "outside"
+                outside_log = outside / "collector.log"
+                outside_manifest = outside / "manifest.json"
+                write(outside_log, "outside must remain unchanged\n")
+                write(outside_manifest, '{"outside":true}\n')
+                artifact.mkdir(parents=True)
+                if link_kind == "symlink":
+                    (artifact / "collect-evaluator-trace.log").symlink_to(outside_log)
+                    (artifact / "manifest.json").symlink_to(outside_manifest)
+                else:
+                    os.link(outside_log, artifact / "collect-evaluator-trace.log")
+                    os.link(outside_manifest, artifact / "manifest.json")
+
+                diagnostic = root / "eval_harness/utils/artifacts/create_diagnostic_artifact.py"
+                diagnostic.parent.mkdir(parents=True)
+                shutil.copy2(
+                    ROOT / "eval_harness/utils/artifacts/create_diagnostic_artifact.py",
+                    diagnostic,
+                )
+                fake_bin = root / "bin"
+                write(
+                    fake_bin / "bun",
+                    """#!/usr/bin/env bash
+set -eu
+out=""
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "--out" ]; then out="$2"; break; fi
+  shift
+done
+mkdir -p "$(dirname "$out")"
+printf '%s\n' '{"n_sessions":0,"sessions":[]}' > "$out"
+printf '%s\n' 'fresh collector trace log'
+""",
+                )
+                (fake_bin / "bun").chmod(0o755)
+                env = os.environ.copy()
+                env.update({"PATH": f"{fake_bin}:{env['PATH']}", "RUN_START_MTIME": "0"})
+
+                result = subprocess.run(
+                    ["bash", str(COLLECTOR), str(root), run_id, str(artifact)],
+                    cwd=ROOT,
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=10,
+                )
+
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(
+                    outside_log.read_text(encoding="utf-8"),
+                    "outside must remain unchanged\n",
+                )
+                self.assertEqual(
+                    outside_manifest.read_text(encoding="utf-8"),
+                    '{"outside":true}\n',
+                )
+                retained = artifact / "logs" / "collect-evaluator-trace.log"
+                self.assertEqual(
+                    retained.read_text(encoding="utf-8"),
+                    "fresh collector trace log\n",
+                )
+                self.assertFalse(retained.is_symlink())
+                self.assertEqual(retained.stat().st_nlink, 1)
+
     def test_collector_does_not_follow_or_publish_unsafe_evidence_nodes(self) -> None:
         """Linked/special evidence cannot escape or contaminate the producer root.
 
@@ -101,6 +173,14 @@ printf '%s\n' '{"n_sessions":0,"sessions":[]}' > "$out"
             self.assertEqual(
                 sorted(path.name for path in external_traces.iterdir()),
                 ["do-not-touch.txt"],
+            )
+            self.assertEqual(
+                (outside / "result.json").read_text(encoding="utf-8"),
+                '{"status":"completed","macro_avg_pct":100}',
+            )
+            self.assertEqual(
+                (outside / "report.html").read_text(encoding="utf-8"),
+                "outside report",
             )
             for required_dir in ("traces", "telemetry", "logs"):
                 path = artifact / required_dir
