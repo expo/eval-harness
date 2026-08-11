@@ -289,11 +289,18 @@ function validIosStep(value: unknown): boolean {
 
 function validTerminalEvidence(value: unknown): boolean {
   const evidence = record(value);
-  return evidence !== null &&
-    typeof evidence.step_number === "number" && Number.isInteger(evidence.step_number) &&
-    evidence.step_number >= 1 && nonEmptyString(evidence.step_name) &&
-    nullableString(evidence.screenshot) && nullableString(evidence.screenshot_error) &&
-    (evidence.screenshot !== null || evidence.screenshot_error !== null);
+  if (evidence === null || !nonEmptyString(evidence.step_name) ||
+    !nullableString(evidence.screenshot) || !nullableString(evidence.screenshot_error) ||
+    (evidence.screenshot === null && evidence.screenshot_error === null)
+  ) return false;
+  if (evidence.evidence_kind === "preflight") {
+    return evidence.step_number === null;
+  }
+  if (evidence.evidence_kind !== undefined && evidence.evidence_kind !== "formal_step") {
+    return false;
+  }
+  return typeof evidence.step_number === "number" && Number.isInteger(evidence.step_number) &&
+    evidence.step_number >= 1;
 }
 
 function validEvaluatorError(value: unknown): boolean {
@@ -1314,11 +1321,11 @@ async function cloneMachineReport(sourceRoot: string, stagingRoot: string): Prom
 function evidenceWarning(
   summary: ConsolidatedSummary,
   plan: JsonRecord,
-  stepNumber: number,
+  evidenceLabel: string,
   detail: string,
 ): void {
   summary.warnings.push(
-    `screenshot for ${String(plan.test_plan ?? "unknown plan")} run ${String(plan.run_index ?? 1)} step ${stepNumber} ${detail}`,
+    `screenshot for ${String(plan.test_plan ?? "unknown plan")} run ${String(plan.run_index ?? 1)} ${evidenceLabel} ${detail}`,
   );
 }
 
@@ -1428,26 +1435,35 @@ async function copyScreenshotEvidenceInto(
       ? plan.terminal_evidence
       : [];
     const references = [
-      ...steps.map((rawEvidence, index) => ({ rawEvidence, stepNumber: index + 1 })),
+      ...steps.map((rawEvidence, index) => ({
+        rawEvidence,
+        stableSuffix: `step-${String(index + 1).padStart(2, "0")}`,
+        evidenceLabel: `step ${index + 1}`,
+      })),
       ...terminalEvidence.map((rawEvidence) => {
         const evidence = record(rawEvidence);
+        const preflight = evidence?.evidence_kind === "preflight";
+        const stepNumber = typeof evidence?.step_number === "number" &&
+            Number.isInteger(evidence.step_number)
+          ? evidence.step_number
+          : 1;
         return {
           rawEvidence,
-          stepNumber: typeof evidence?.step_number === "number" &&
-              Number.isInteger(evidence.step_number)
-            ? evidence.step_number
-            : 1,
+          stableSuffix: preflight
+            ? "preflight"
+            : `step-${String(stepNumber).padStart(2, "0")}`,
+          evidenceLabel: preflight ? "preflight" : `step ${stepNumber}`,
         };
       }),
     ];
 
-    for (const { rawEvidence, stepNumber } of references) {
+    for (const { rawEvidence, stableSuffix, evidenceLabel } of references) {
       const evidence = record(rawEvidence);
       if (evidence === null || typeof evidence.screenshot !== "string") continue;
       const sourceReference = evidence.screenshot;
       evidence.screenshot = null;
       if (trace === null) {
-        evidenceWarning(summary, plan, stepNumber, "has no matching plan trace");
+        evidenceWarning(summary, plan, evidenceLabel, "has no matching plan trace");
         continue;
       }
       if (extname(sourceReference).toLowerCase() !== ".png") {
@@ -1463,7 +1479,7 @@ async function copyScreenshotEvidenceInto(
         sourceMetadata = await lstat(resolved);
       } catch (error) {
         if (isMissingPathError(error)) {
-          evidenceWarning(summary, plan, stepNumber, "does not exist");
+          evidenceWarning(summary, plan, evidenceLabel, "does not exist");
           continue;
         }
         unsafeEvidence("referenced file metadata could not be read");
@@ -1482,7 +1498,7 @@ async function copyScreenshotEvidenceInto(
         physicalSource = await realpath(resolved);
       } catch (error) {
         if (isMissingPathError(error)) {
-          evidenceWarning(summary, plan, stepNumber, "could not be physically resolved");
+          evidenceWarning(summary, plan, evidenceLabel, "could not be physically resolved");
           continue;
         }
         unsafeEvidence("referenced file could not be physically resolved");
@@ -1491,7 +1507,7 @@ async function copyScreenshotEvidenceInto(
         unsafeEvidence("referenced file resolves outside the iOS artifact");
       }
 
-      const stableName = `${safeSlug(planName)}-run-${String(runIndex).padStart(2, "0")}-step-${String(stepNumber).padStart(2, "0")}.png`;
+      const stableName = `${safeSlug(planName)}-run-${String(runIndex).padStart(2, "0")}-${stableSuffix}.png`;
       if (destinations.has(stableName)) {
         throw new Error(`evidence destination collision: ${stableName}`);
       }

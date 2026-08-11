@@ -37,6 +37,46 @@ def completed_plan(score: int = 3, full_points: int = 3) -> TestPlanResult:
 
 
 class SuiteOutputTests(unittest.TestCase):
+    def test_spec_preflight_evidence_serializes_without_a_formal_step_number(self) -> None:
+        """Specification: pre-plan evidence remains explicitly unscored.
+
+        Oracle: the public plan record names the preflight lifecycle kind and
+        uses a null ordinal rather than inventing formal step zero or one.
+        Catches: producer/report schema drift for restart abort evidence.
+        """
+        result = TestPlanResult(
+            score=0,
+            full_points=3,
+            status="evaluator_error",
+            error_stage="restart",
+            error_reason="unknown blocking system dialog",
+            abort_scope="suite",
+            terminal_evidence=[
+                TerminalEvidence(
+                    evidence_kind="preflight",
+                    step_number=None,
+                    step_name="pre-plan readiness",
+                    screenshot_path="screenshots/preflight-final.png",
+                )
+            ],
+        )
+
+        record = _serialize_plan_result(Path("test_insert.txt"), 1, result)
+
+        self.assertEqual(record["steps"], [])
+        self.assertIsNone(record["score"])
+        self.assertEqual(record["abort_scope"], "suite")
+        self.assertEqual(
+            record["terminal_evidence"],
+            [{
+                "evidence_kind": "preflight",
+                "step_number": None,
+                "step_name": "pre-plan readiness",
+                "screenshot": "screenshots/preflight-final.png",
+                "screenshot_error": None,
+            }],
+        )
+
     def test_spec_evaluator_error_serialization_preserves_unscored_terminal_evidence(self) -> None:
         """Specification: abort evidence survives without becoming a scored step.
 
@@ -69,6 +109,7 @@ class SuiteOutputTests(unittest.TestCase):
             record["terminal_evidence"],
             [
                 {
+                    "evidence_kind": "formal_step",
                     "step_number": 1,
                     "step_name": "show note",
                     "screenshot": None,

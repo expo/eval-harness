@@ -189,8 +189,9 @@ class AgentDeviceEvaluator:
             result.abort_scope = "suite"
             result.terminal_evidence.append(
                 TerminalEvidence(
-                    step_number=0,
+                    step_number=None,
                     step_name="pre-plan readiness",
+                    evidence_kind="preflight",
                     screenshot_path=screenshot_path,
                     screenshot_error=screenshot_error,
                 )
@@ -209,7 +210,8 @@ class AgentDeviceEvaluator:
                 "total_usage": UsageAccumulator().snapshot(),
                 "steps": [],
                 "terminal_evidence": [{
-                    "step_number": 0,
+                    "evidence_kind": "preflight",
+                    "step_number": None,
                     "step_name": "pre-plan readiness",
                     "screenshot": screenshot_path,
                     "screenshot_error": screenshot_error,
@@ -418,6 +420,7 @@ class AgentDeviceEvaluator:
                         "total_usage": agg_usage.snapshot(),
                         "steps": [],
                         "terminal_evidence": [{
+                            "evidence_kind": terminal_evidence.evidence_kind,
                             "step_number": terminal_evidence.step_number,
                             "step_name": terminal_evidence.step_name,
                             "screenshot": terminal_evidence.screenshot_path,

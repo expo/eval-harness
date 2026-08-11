@@ -247,6 +247,7 @@ function collectEvidence(plans: unknown[]): Evidence[] {
       if (terminal === null) continue;
       const screenshot = safeScreenshotPath(terminal.screenshot);
       if (screenshot === null) continue;
+      const preflight = terminal.evidence_kind === "preflight";
       const stepNumber = typeof terminal.step_number === "number" &&
           Number.isInteger(terminal.step_number)
         ? terminal.step_number
@@ -257,7 +258,10 @@ function collectEvidence(plans: unknown[]): Evidence[] {
         run: text(plan.run_index, "Not recorded"),
         detailId: planAnchorId(planIndex, plan.run_index),
         detailLabel: "View plan diagnostics",
-        description: text(terminal.step_name, `Formal step ${stepNumber}`),
+        description: text(
+          terminal.step_name,
+          preflight ? "Pre-plan lifecycle" : `Formal step ${stepNumber}`,
+        ),
         screenshot,
       });
     }
@@ -390,9 +394,18 @@ function renderEvaluationDetails(skills: unknown[], plans: unknown[]): string {
           <h4>Diagnostic evidence</h4>
           ${terminalEvidence.map((rawEvidence) => {
             const evidence: JsonRecord = record(rawEvidence) ?? { value: rawEvidence };
+            const preflight = evidence.evidence_kind === "preflight";
+            const identity: Array<[string, unknown]> = preflight
+              ? [
+                ["Evidence phase", "Pre-plan lifecycle"],
+                ["Lifecycle checkpoint", evidence.step_name],
+              ]
+              : [
+                ["Formal step", evidence.step_number],
+                ["Step name", evidence.step_name],
+              ];
             return `<div class="diagnostic-evidence">${renderKeyValues([
-              ["Formal step", evidence.step_number],
-              ["Step name", evidence.step_name],
+              ...identity,
               ["Screenshot", evidence.screenshot],
               ["Screenshot capture warning", evidence.screenshot_error],
             ])}</div>`;

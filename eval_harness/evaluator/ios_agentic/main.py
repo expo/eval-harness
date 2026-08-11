@@ -120,6 +120,7 @@ def _serialize_plan_result(
             "steps": [_serialize_step_result(step) for step in result.steps],
             "terminal_evidence": [
                 {
+                    "evidence_kind": evidence.evidence_kind,
                     "step_number": evidence.step_number,
                     "step_name": evidence.step_name,
                     "screenshot": evidence.screenshot_path,

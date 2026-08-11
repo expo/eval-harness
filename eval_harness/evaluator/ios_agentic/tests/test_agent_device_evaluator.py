@@ -325,6 +325,7 @@ class AgentDeviceEvaluatorOutcomeTests(unittest.TestCase):
         self.assertEqual(result.steps, [])
         self.assertEqual(len(result.terminal_evidence), 1)
         evidence = result.terminal_evidence[0]
+        self.assertEqual(evidence.evidence_kind, "formal_step")
         self.assertEqual(evidence.step_number, 1)
         self.assertEqual(evidence.step_name, "show note")
         self.assertEqual(evidence.screenshot_path, "screenshots/step-01-final.png")
@@ -355,6 +356,7 @@ class AgentDeviceEvaluatorOutcomeTests(unittest.TestCase):
                 "steps": [],
                 "terminal_evidence": [
                     {
+                        "evidence_kind": "formal_step",
                         "step_number": 1,
                         "step_name": "show note",
                         "screenshot": "screenshots/step-01-final.png",
@@ -458,6 +460,8 @@ class AgentDeviceEvaluatorOutcomeTests(unittest.TestCase):
         self.assertEqual(result.abort_scope, "suite")
         self.assertEqual(bridge.restart_calls, [(True, True)])
         self.assertEqual(len(result.terminal_evidence), 1)
+        self.assertEqual(result.terminal_evidence[0].evidence_kind, "preflight")
+        self.assertIsNone(result.terminal_evidence[0].step_number)
         self.assertEqual(
             result.terminal_evidence[0].screenshot_path,
             "screenshots/preflight-final.png",
@@ -473,6 +477,16 @@ class AgentDeviceEvaluatorOutcomeTests(unittest.TestCase):
         self.assertEqual(
             RecordingTracer.latest.summary["error_reason"],
             "development client launcher never reached authored app",
+        )
+        self.assertEqual(
+            RecordingTracer.latest.summary["terminal_evidence"],
+            [{
+                "evidence_kind": "preflight",
+                "step_number": None,
+                "step_name": "pre-plan readiness",
+                "screenshot": "screenshots/preflight-final.png",
+                "screenshot_error": None,
+            }],
         )
 
     def test_spec_preflight_alert_diagnostics_are_recorded_before_sdk_session(self) -> None:

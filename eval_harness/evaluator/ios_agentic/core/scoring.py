@@ -23,6 +23,7 @@ from typing import Literal
 
 PlanStatus = Literal["in_progress", "completed", "not_applicable", "evaluator_error"]
 AbortScope = Literal["plan", "suite"]
+EvidenceKind = Literal["formal_step", "preflight"]
 
 
 @dataclass
@@ -58,8 +59,9 @@ class StepResult:
 class TerminalEvidence:
     """Human-only evidence for a formal step or pre-plan lifecycle abort."""
 
-    step_number: int
+    step_number: int | None
     step_name: str
+    evidence_kind: EvidenceKind = "formal_step"
     screenshot_path: str | None = None
     screenshot_error: str | None = None
 

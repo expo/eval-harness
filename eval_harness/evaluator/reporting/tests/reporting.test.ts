@@ -1665,6 +1665,91 @@ describe("copyScreenshotEvidence", () => {
     expect(html).toContain('id="ios-plan-01-run-01"');
   });
 
+  test("preserves pre-plan abort evidence without fabricating a formal step", async () => {
+    // Catches preflight lifecycle evidence being rejected as step zero or
+    // relabeled as formal step one by the consolidated report contract.
+    const root = tempRoot();
+    const args = inputs(root);
+    const trace = join(args.iosArtifact!, "traces/test-plans/test_insert_preflight");
+    mkdirSync(join(trace, "screenshots"), { recursive: true });
+    writeFileSync(join(trace, "screenshots/preflight-final.png"), PNG_BYTES);
+    const terminalEvidence = [{
+      evidence_kind: "preflight",
+      step_number: null,
+      step_name: "pre-plan readiness",
+      screenshot: "screenshots/preflight-final.png",
+      screenshot_error: null,
+    }];
+    writeJson(join(trace, "summary.json"), {
+      plan: "test_insert.txt",
+      run_index: 1,
+      platform: "ios",
+      driver: "agent-device",
+      status: "evaluator_error",
+      error_stage: "restart",
+      error_reason: "restart_app: unknown blocking system dialog",
+      abort_scope: "suite",
+      score: null,
+      full_points: null,
+      total_usage: {},
+      steps: [],
+      terminal_evidence: terminalEvidence,
+    });
+    writeJson(join(args.iosArtifact!, "result.json"), {
+      status: "failed",
+      expected_plan_count: 1,
+      terminal_plan_count: 1,
+      macro_avg_pct: null,
+      evaluator_errors: [{
+        test_plan: "test_insert.txt",
+        run_index: 1,
+        stage: "restart",
+        reason: "restart_app: unknown blocking system dialog",
+      }],
+      test_plans: [{
+        test_plan: "test_insert.txt",
+        run_index: 1,
+        status: "evaluator_error",
+        error_stage: "restart",
+        error_reason: "restart_app: unknown blocking system dialog",
+        abort_scope: "suite",
+        score: null,
+        full_points: null,
+        macro_pct: null,
+        steps: [],
+        terminal_evidence: terminalEvidence,
+      }],
+    });
+
+    const summary = await normalizeRunWithEvidence(args);
+
+    expect(summary.status).toBe("failed");
+    expect(summary.scores.ios_macro_pct).toBeNull();
+    expect(summary.warnings).not.toContain("iOS result test plans are missing required fields");
+    const plan = summary.ios.test_plans[0] as Record<string, unknown>;
+    expect(plan.steps).toEqual([]);
+    expect(plan.score).toBeNull();
+    expect(plan.terminal_evidence).toEqual([{
+      evidence_kind: "preflight",
+      step_number: null,
+      step_name: "pre-plan readiness",
+      screenshot: "evidence/screenshots/test-insert-run-01-preflight.png",
+      screenshot_error: null,
+    }]);
+    expect(readdirSync(join(args.outDir, "evidence/screenshots"))).toEqual([
+      "test-insert-run-01-preflight.png",
+    ]);
+
+    const html = renderReport(summary);
+    expect(html).toContain("Pre-plan lifecycle");
+    expect(html).toContain("pre-plan readiness");
+    expect(html).toContain(
+      'src="evidence/screenshots/test-insert-run-01-preflight.png"',
+    );
+    expect(html).not.toContain("Formal step</dt><dd>0");
+    expect(html).toContain("No scored steps were emitted.");
+  });
+
   test("renders an aborted-step screenshot error as a plan diagnostic", async () => {
     // Catches a best-effort capture failure being silently discarded.
     const root = tempRoot();
