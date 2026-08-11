@@ -316,8 +316,23 @@ class AgentDeviceBridge:
         if app is None or app.get("label") == "AgentDeviceRunner":
             return False
         expected_bundle = self.config["app_id"]
-        app_bundle = app.get("bundleId")
-        if isinstance(app_bundle, str) and app_bundle and app_bundle != expected_bundle:
+        app_bundle_value = app.get("bundleId")
+        app_bundle = (
+            app_bundle_value.strip()
+            if isinstance(app_bundle_value, str) and app_bundle_value.strip()
+            else None
+        )
+        if app_bundle is not None and app_bundle != expected_bundle:
+            return False
+        app_pid_value = app.get("pid")
+        app_pid = (
+            app_pid_value
+            if isinstance(app_pid_value, int)
+            and not isinstance(app_pid_value, bool)
+            and app_pid_value > 0
+            else None
+        )
+        if app.get("visibleToUser") is False:
             return False
         if any(node.get("type") == "Alert" for node in nodes):
             return False
@@ -364,7 +379,6 @@ class AgentDeviceBridge:
         if known_shell:
             return False
 
-        app_pid = app.get("pid")
         content_types = {
             "StaticText",
             "Button",
@@ -393,16 +407,35 @@ class AgentDeviceBridge:
             "container",
         }
         for node in nodes:
-            if node.get("type") not in content_types or node.get("visibleToUser") is False:
+            if node.get("type") not in content_types or node.get("visibleToUser") is not True:
                 continue
-            node_bundle = node.get("bundleId")
-            if (
-                isinstance(node_bundle, str) and node_bundle and
-                node_bundle != expected_bundle
-            ):
+            node_bundle_value = node.get("bundleId")
+            node_bundle = (
+                node_bundle_value.strip()
+                if isinstance(node_bundle_value, str) and node_bundle_value.strip()
+                else None
+            )
+            if node_bundle is not None and node_bundle != expected_bundle:
                 continue
-            node_pid = node.get("pid")
+            node_pid_value = node.get("pid")
+            node_pid = (
+                node_pid_value
+                if isinstance(node_pid_value, int)
+                and not isinstance(node_pid_value, bool)
+                and node_pid_value > 0
+                else None
+            )
             if app_pid is not None and node_pid is not None and node_pid != app_pid:
+                continue
+            app_owns_tree = app_bundle == expected_bundle
+            pid_links_node_to_app = (
+                app_pid is not None and node_pid is not None and node_pid == app_pid
+            )
+            node_names_target = node_bundle == expected_bundle
+            if not (
+                (app_owns_tree and (node_names_target or pid_links_node_to_app))
+                or (node_names_target and pid_links_node_to_app)
+            ):
                 continue
             signals = [
                 str(node.get(field) or "").strip()

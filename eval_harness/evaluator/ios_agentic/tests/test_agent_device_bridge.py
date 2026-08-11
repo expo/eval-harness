@@ -56,6 +56,7 @@ class RecordingDevClientRestartBridge(AgentDeviceBridge):
                 "label": "Authored App",
                 "bundleId": "com.example.authored",
                 "pid": 42,
+                "visibleToUser": True,
             },
             {
                 "type": "Button",
@@ -63,6 +64,7 @@ class RecordingDevClientRestartBridge(AgentDeviceBridge):
                 "label": "Ready",
                 "bundleId": "com.example.authored",
                 "pid": 42,
+                "visibleToUser": True,
             }
         ]
 
@@ -106,11 +108,20 @@ def permission_alert(title: str, deny: str, allow: str) -> list[dict]:
 
 def authored_content() -> list[dict]:
     return [
-        {"type": "Application", "label": "Authored App"},
+        {
+            "type": "Application",
+            "label": "Authored App",
+            "bundleId": "com.example.authored",
+            "pid": 42,
+            "visibleToUser": True,
+        },
         {
             "type": "Button",
             "identifier": "authored-app-ready",
             "label": "Ready",
+            "bundleId": "com.example.authored",
+            "pid": 42,
+            "visibleToUser": True,
         },
     ]
 
@@ -570,6 +581,102 @@ class AgentDeviceBridgeRestartTests(unittest.TestCase):
         for name, nodes in cases.items():
             with self.subTest(name=name):
                 self.assertFalse(bridge._has_target_app_content(nodes))
+
+    def test_readiness_rejects_missing_or_spoofed_app_ownership(self) -> None:
+        """Readiness requires visible content positively owned by the target app.
+
+        Catches: treating absent bundle/process metadata as a match, trusting
+        content from another process, or accepting a hidden accessibility node.
+        """
+        bridge = AgentDeviceBridge(app_id="com.example.authored")
+        cases = {
+            "all provenance missing": [
+                {"type": "Application", "label": "Unknown"},
+                {"type": "Button", "label": "Ready", "visibleToUser": True},
+            ],
+            "content provenance missing": [
+                {
+                    "type": "Application",
+                    "label": "Notes",
+                    "bundleId": "com.example.authored",
+                    "pid": 42,
+                    "visibleToUser": True,
+                },
+                {"type": "Button", "label": "Ready", "visibleToUser": True},
+            ],
+            "application bundle spoofed": [
+                {
+                    "type": "Application",
+                    "label": "Other App",
+                    "bundleId": "com.example.other",
+                    "pid": 42,
+                    "visibleToUser": True,
+                },
+                {
+                    "type": "Button",
+                    "label": "Ready",
+                    "bundleId": "com.example.authored",
+                    "pid": 42,
+                    "visibleToUser": True,
+                },
+            ],
+            "content process spoofed": [
+                {
+                    "type": "Application",
+                    "label": "Notes",
+                    "bundleId": "com.example.authored",
+                    "pid": 42,
+                    "visibleToUser": True,
+                },
+                {
+                    "type": "Button",
+                    "label": "Ready",
+                    "pid": 7,
+                    "visibleToUser": True,
+                },
+            ],
+            "content hidden": [
+                {
+                    "type": "Application",
+                    "label": "Notes",
+                    "bundleId": "com.example.authored",
+                    "pid": 42,
+                    "visibleToUser": True,
+                },
+                {
+                    "type": "Button",
+                    "label": "Ready",
+                    "bundleId": "com.example.authored",
+                    "pid": 42,
+                    "visibleToUser": False,
+                },
+            ],
+        }
+
+        for name, nodes in cases.items():
+            with self.subTest(name=name):
+                self.assertFalse(bridge._has_target_app_content(nodes))
+
+    def test_readiness_accepts_pid_linked_target_content_without_app_bundle(self) -> None:
+        """A target-bundle content node can establish ownership for its app PID."""
+        bridge = AgentDeviceBridge(app_id="com.example.authored")
+        nodes = [
+            {
+                "type": "Application",
+                "label": "Notes",
+                "pid": 42,
+                "visibleToUser": True,
+            },
+            {
+                "type": "Button",
+                "label": "New note",
+                "bundleId": "com.example.authored",
+                "pid": 42,
+                "visibleToUser": True,
+            },
+        ]
+
+        self.assertTrue(bridge._has_target_app_content(nodes))
 
     @patch.dict(os.environ, {"EVAL_APP_READY_TIMEOUT_SEC": "0.02"})
     @patch("eval_harness.evaluator.ios_agentic.agent_device.bridge.time.sleep")

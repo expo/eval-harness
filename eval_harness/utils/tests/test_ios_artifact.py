@@ -9,6 +9,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 COLLECTOR = ROOT / "eval_harness/utils/artifacts/collect_ios_artifact.sh"
+SANITIZER = ROOT / "eval_harness/utils/artifacts/sanitize_ios_artifact.py"
 EVAL_SCRIPT = ROOT / "eval_harness/evaluator/ios_agentic/scripts/eval-ios-app.sh"
 
 
@@ -18,6 +19,112 @@ def write(path: Path, contents: str = "fixture") -> None:
 
 
 class IosArtifactTests(unittest.TestCase):
+    def test_collector_does_not_follow_or_publish_unsafe_evidence_nodes(self) -> None:
+        """Linked/special evidence cannot escape or contaminate the producer root.
+
+        Catches: trusting an allowed basename while following a symlinked
+        evidence directory, archiving hardlinked secret bytes, or retaining a
+        FIFO that can hang a later reader.
+        """
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            run_id = "unsafe-evidence-nodes"
+            artifact = root / "ios-eval-report"
+            outside = root / "outside"
+            external_traces = outside / "traces"
+            secret = "CREDENTIAL_SENTINEL_ae84f1"
+            artifact.mkdir(parents=True)
+            diagnostic = root / "eval_harness/utils/artifacts/create_diagnostic_artifact.py"
+            diagnostic.parent.mkdir(parents=True)
+            shutil.copy2(
+                ROOT / "eval_harness/utils/artifacts/create_diagnostic_artifact.py",
+                diagnostic,
+            )
+
+            write(outside / "result.json", '{"status":"completed","macro_avg_pct":100}')
+            os.link(outside / "result.json", artifact / "result.json")
+            write(outside / "report.html", "outside report")
+            (artifact / "report.html").symlink_to(outside / "report.html")
+            write(external_traces / "do-not-touch.txt", secret)
+            (artifact / "traces").parent.mkdir(parents=True, exist_ok=True)
+            (artifact / "traces").symlink_to(external_traces, target_is_directory=True)
+
+            write(outside / "evaluator.log", secret)
+            os.link(outside / "evaluator.log", artifact / "s7-eval.log")
+            write(outside / "anthropic.jsonl", secret)
+            (artifact / "telemetry").mkdir()
+            os.link(
+                outside / "anthropic.jsonl",
+                artifact / "telemetry" / "anthropic.jsonl",
+            )
+            write(artifact / "telemetry" / "otel" / "index.jsonl", "{}\n")
+            write(artifact / "telemetry" / "otel" / "credential-dump.txt", secret)
+            os.mkfifo(artifact / "telemetry" / "unsafe.fifo")
+            (artifact / "telemetry" / "unsafe-link").symlink_to(
+                outside / "report.html"
+            )
+
+            fake_bin = root / "bin"
+            fake_bun = fake_bin / "bun"
+            write(
+                fake_bun,
+                """#!/usr/bin/env bash
+set -eu
+out=""
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "--out" ]; then out="$2"; break; fi
+  shift
+done
+mkdir -p "$(dirname "$out")"
+printf '%s\n' '{"n_sessions":0,"sessions":[]}' > "$out"
+""",
+            )
+            fake_bun.chmod(0o755)
+
+            env = os.environ.copy()
+            env.update({"PATH": f"{fake_bin}:{env['PATH']}", "RUN_START_MTIME": "0"})
+            result = subprocess.run(
+                ["bash", str(COLLECTOR), str(root), run_id, str(artifact)],
+                cwd=ROOT,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=10,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                (external_traces / "do-not-touch.txt").read_text(encoding="utf-8"),
+                secret,
+            )
+            self.assertEqual(
+                sorted(path.name for path in external_traces.iterdir()),
+                ["do-not-touch.txt"],
+            )
+            for required_dir in ("traces", "telemetry", "logs"):
+                path = artifact / required_dir
+                self.assertTrue(path.is_dir(), required_dir)
+                self.assertFalse(path.is_symlink(), required_dir)
+            for required_file in ("result.json", "report.html"):
+                path = artifact / required_file
+                self.assertTrue(path.is_file(), required_file)
+                self.assertFalse(path.is_symlink(), required_file)
+                self.assertEqual(path.stat().st_nlink, 1, required_file)
+            for path in artifact.rglob("*"):
+                self.assertFalse(path.is_symlink(), str(path))
+                if path.is_file():
+                    self.assertEqual(path.stat().st_nlink, 1, str(path))
+                    self.assertNotIn(secret, path.read_bytes().decode("utf-8", "ignore"))
+                else:
+                    self.assertTrue(path.is_dir(), str(path))
+
+            payload = json.loads((artifact / "result.json").read_text(encoding="utf-8"))
+            self.assertEqual(payload["status"], "failed")
+            self.assertFalse((artifact / "telemetry" / "otel" / "credential-dump.txt").exists())
+            self.assertFalse((artifact / "telemetry" / "unsafe.fifo").exists())
+            self.assertFalse((artifact / "logs" / "s7-eval.log").exists())
+
     def test_collector_enforces_canonical_inventory_without_config_or_device_secrets(self) -> None:
         """Only safe, evaluator-owned evidence may cross the iOS artifact boundary."""
         with tempfile.TemporaryDirectory() as td:
@@ -280,6 +387,7 @@ printf '%s\n' '{"n_sessions":1,"sessions":[]}' > "$out"
             collector.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(EVAL_SCRIPT, script)
             shutil.copy2(COLLECTOR, collector)
+            shutil.copy2(SANITIZER, collector.with_name(SANITIZER.name))
             shutil.copy2(
                 ROOT / "eval_harness/utils/artifacts/create_diagnostic_artifact.py",
                 diagnostic,
@@ -371,6 +479,7 @@ SCENARIO=skills_available_unmentioned
             identity.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(EVAL_SCRIPT, script)
             shutil.copy2(COLLECTOR, collector)
+            shutil.copy2(SANITIZER, collector.with_name(SANITIZER.name))
             shutil.copy2(ROOT / "eval_harness/utils/ios/normalize_ios_identity.mjs", identity)
             harness_expo = root / "node_modules" / "@expo"
             harness_expo.mkdir(parents=True, exist_ok=True)
@@ -394,6 +503,7 @@ eval::install_uv_and_evaluator() { :; }
 eval::launch_proxy() { :; }
 eval::wait_for_port() { return 0; }
 eval::launch_otlp_receiver() { :; }
+eval::run_authored() { "$@"; }
 eval::npm_install() { return 0; }
 eval::configure_ios_app_mode() { EVAL_IOS_APP_MODE=release; EVAL_DEVNAME='iPhone 16'; export EVAL_IOS_APP_MODE EVAL_DEVNAME; }
 eval::boot_sim_and_runner() { :; }
@@ -510,6 +620,7 @@ node -e 'const fs = require("node:fs"); console.log(JSON.stringify(JSON.parse(fs
             identity.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(EVAL_SCRIPT, script)
             shutil.copy2(COLLECTOR, collector)
+            shutil.copy2(SANITIZER, collector.with_name(SANITIZER.name))
             shutil.copy2(
                 ROOT / "eval_harness/utils/artifacts/create_diagnostic_artifact.py",
                 diagnostic,
@@ -527,6 +638,7 @@ eval::install_uv_and_evaluator() { :; }
 eval::launch_proxy() { :; }
 eval::wait_for_port() { return 0; }
 eval::launch_otlp_receiver() { :; }
+eval::run_authored() { "$@"; }
 eval::npm_install() { return 0; }
 eval::configure_ios_app_mode() { EVAL_IOS_APP_MODE=release; export EVAL_IOS_APP_MODE; }
 """,
