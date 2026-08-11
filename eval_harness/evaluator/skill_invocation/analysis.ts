@@ -29,8 +29,6 @@ import {
 import {
   appNameFromPrd,
   compareUnicodeCodePoints,
-  dedupe,
-  flattenStrings,
   loadPrdSkillsAsync,
   readArtifactRunId,
   readJsonAsync,
@@ -50,6 +48,15 @@ const TRACE_CANDIDATES = [
 ] as const;
 const UNAVAILABLE_SCENARIOS = new Set(["skills_unavailable"]);
 const BASELINE_SCENARIOS = UNAVAILABLE_SCENARIOS;
+const MAX_BRAINTRUST_REFS = 32;
+const MAX_BRAINTRUST_REF_LENGTH = 2_048;
+// Match at most one byte beyond the accepted bound so overlong tokens are
+// rejected without copying an arbitrarily large source/tool-output string.
+const BRAINTRUST_URL_CANDIDATE = /https:\/\/[^\s<>"'`\\]{1,2041}/giu;
+const CREDENTIAL_QUERY_KEY =
+  /token|secret|password|credential|authorization|api[_-]?key/iu;
+const CREDENTIAL_FRAGMENT_ENTRY =
+  /(?:^|[&#])(?:token|secret|password|credential|authorization|api[_-]?key)=/iu;
 
 export type ArtifactLayout = {
   root: string;
@@ -816,28 +823,85 @@ async function collectBraintrustRefs(
   evalLayout: ArtifactLayout | null,
   trace: NormalizedTrace,
 ): Promise<string[]> {
-  const values = flattenStrings(trace).filter((item) =>
-    item.toLowerCase().includes("braintrust")
-  );
+  const refs: string[] = [];
+  const seen = new Set<string>();
+  collectBraintrustUrls(trace, refs, seen);
   const manifests = [
     authorLayout.manifestPath,
     evalLayout?.manifestPath ?? null,
   ];
-  const manifestValues = await Promise.all(manifests.map(async (manifestPath) => {
-    if (manifestPath === null || !await Bun.file(manifestPath).exists()) return [];
+  for (const manifestPath of manifests) {
+    if (refs.length >= MAX_BRAINTRUST_REFS) break;
+    if (manifestPath === null || !await Bun.file(manifestPath).exists()) continue;
     try {
-      return flattenStrings(await readJsonAsync<unknown>(manifestPath));
+      collectBraintrustUrls(
+        await readJsonAsync<unknown>(manifestPath),
+        refs,
+        seen,
+      );
     } catch {
       // Malformed optional metadata is not fatal to analysis.
-      return [];
-    }
-  }));
-  for (const items of manifestValues) {
-    for (const item of items) {
-      if (item.toLowerCase().includes("braintrust")) values.push(item);
+      continue;
     }
   }
-  return dedupe(values);
+  return refs;
+}
+
+function collectBraintrustUrls(
+  value: unknown,
+  refs: string[],
+  seen: Set<string>,
+): void {
+  if (refs.length >= MAX_BRAINTRUST_REFS) return;
+  if (typeof value === "string") {
+    for (const match of value.matchAll(BRAINTRUST_URL_CANDIDATE)) {
+      const candidate = (match[0] ?? "").replace(/[),.;!?]+$/u, "");
+      if (!isValidBraintrustRef(candidate) || seen.has(candidate)) continue;
+      seen.add(candidate);
+      refs.push(candidate);
+      if (refs.length >= MAX_BRAINTRUST_REFS) return;
+    }
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      collectBraintrustUrls(item, refs, seen);
+      if (refs.length >= MAX_BRAINTRUST_REFS) return;
+    }
+    return;
+  }
+  if (value !== null && typeof value === "object") {
+    for (const item of Object.values(value)) {
+      collectBraintrustUrls(item, refs, seen);
+      if (refs.length >= MAX_BRAINTRUST_REFS) return;
+    }
+  }
+}
+
+function isValidBraintrustRef(candidate: string): boolean {
+  if (candidate.length === 0 || candidate.length > MAX_BRAINTRUST_REF_LENGTH) {
+    return false;
+  }
+  try {
+    const parsed = new URL(candidate);
+    if (parsed.protocol !== "https:") return false;
+    if (parsed.username !== "" || parsed.password !== "" || parsed.port !== "") {
+      return false;
+    }
+    if (parsed.hostname !== "braintrust.dev" &&
+        parsed.hostname !== "www.braintrust.dev") {
+      return false;
+    }
+    for (const key of parsed.searchParams.keys()) {
+      if (CREDENTIAL_QUERY_KEY.test(key)) return false;
+    }
+    if (CREDENTIAL_FRAGMENT_ENTRY.test(parsed.hash.slice(1))) {
+      return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function isMissingPathError(error: unknown): boolean {

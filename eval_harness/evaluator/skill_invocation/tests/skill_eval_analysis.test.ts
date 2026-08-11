@@ -526,6 +526,132 @@ test("[REGRESSION] v2 artifact discovery wins over legacy layouts", async () => 
   });
 });
 
+test("[SECURITY] Braintrust refs retain only valid HTTPS reference URLs", async () => {
+  // Catches flattening arbitrary trace/manifest strings (including secrets and
+  // source) merely because they contain the word "braintrust".
+  await withTempDirAsync(async (root) => {
+    const fixture = writeV2Fixture(root);
+    const tracePath = join(
+      fixture.authored,
+      "author-agent-metadata",
+      "run-1",
+      "telemetry",
+      "traces",
+      "muse-code-authoring.json",
+    );
+    writeFileSync(
+      tracePath,
+      JSON.stringify({
+        agent: "muse-code",
+        sessions: [{
+          turns: [{
+            steps: [{
+              tool_calls: [{ name: "Skill", args: { skill: "expo-test" } }],
+              output: [
+                "See https://braintrust.dev/app/acme/p/demo/experiments/run-1.",
+                "https://www.braintrust.dev/app/acme/p/demo/experiments/run-2?view=full#row-3",
+                "duplicate https://braintrust.dev/app/acme/p/demo/experiments/run-1",
+                "BRAINTRUST_API_KEY=sk-raw-credential-must-not-survive",
+                "https://notbraintrust.dev/app/acme/p/demo/experiments/invalid",
+                "https://braintrust.dev.evil.example/phishing",
+                "https://user:secret@braintrust.dev/private",
+                "https://braintrust.dev/app/acme?token=secret-value",
+              ],
+            }],
+          }],
+        }],
+        "https://braintrust.dev/object-key-is-not-a-value": "not a reference",
+      }),
+    );
+
+    const authorManifestPath = join(fixture.authored, "manifest.json");
+    const authorManifest = JSON.parse(readFileSync(authorManifestPath, "utf8"));
+    authorManifest.telemetry = {
+      refs: [
+        "https://braintrust.dev/app/acme/p/demo/experiments/run-1",
+        "https://braintrust.dev/app/acme/p/demo/experiments/run-3",
+      ],
+      diagnostic: "braintrust request failed with BRAINTRUST_API_KEY=sk-secret",
+    };
+    writeFileSync(authorManifestPath, JSON.stringify(authorManifest));
+
+    const evalManifestPath = join(fixture.evalArtifact, "manifest.json");
+    const evalManifest = JSON.parse(readFileSync(evalManifestPath, "utf8"));
+    evalManifest.telemetry = {
+      refs: [
+        "https://www.braintrust.dev/app/acme/p/demo/experiments/run-2?view=full#row-3",
+        "https://www.braintrust.dev/app/acme/p/demo/experiments/run-4",
+      ],
+    };
+    writeFileSync(evalManifestPath, JSON.stringify(evalManifest));
+
+    const payload = await analyzeArtifacts({
+      authoredArtifact: fixture.authored,
+      evalArtifact: fixture.evalArtifact,
+      scenario: "skills_available_unmentioned",
+      outDir: join(root, "out"),
+      prdSkillsPath: fixture.prdSkills,
+      checksDir: fixture.checksDir,
+    });
+
+    expect(payload.braintrust_refs).toEqual([
+      "https://braintrust.dev/app/acme/p/demo/experiments/run-1",
+      "https://www.braintrust.dev/app/acme/p/demo/experiments/run-2?view=full#row-3",
+      "https://braintrust.dev/app/acme/p/demo/experiments/run-3",
+      "https://www.braintrust.dev/app/acme/p/demo/experiments/run-4",
+    ]);
+    const serialized = readFileSync(join(root, "out", "metrics.json"), "utf8");
+    expect(serialized).not.toContain("sk-raw-credential-must-not-survive");
+    expect(serialized).not.toContain("object-key-is-not-a-value");
+  });
+});
+
+test("[REGRESSION] Braintrust refs stay compact under Muse-sized trace output", async () => {
+  // Catches removing the URL-length/count bounds or retaining a huge tool
+  // output as one reference. The compact contract keeps the first 32 refs.
+  await withTempDirAsync(async (root) => {
+    const fixture = writeFixture(root);
+    const validRefs = Array.from(
+      { length: 40 },
+      (_, index) => `https://braintrust.dev/ref/${String(index).padStart(2, "0")}`,
+    );
+    const hugeMuseOutput =
+      `RAW_TOOL_OUTPUT braintrust ${"source-code-and-tool-output ".repeat(400_000)}`;
+    const overlongUrl = `https://braintrust.dev/${"x".repeat(2_100)}`;
+    writeFileSync(
+      fixture.trace,
+      JSON.stringify({
+        agent: "muse-code",
+        sessions: [{
+          turns: [{
+            steps: [{
+              tool_calls: [{ name: "Skill", args: { skill: "expo-test" } }],
+              output: hugeMuseOutput,
+              overlong_ref: overlongUrl,
+              refs: validRefs,
+            }],
+          }],
+        }],
+      }),
+    );
+    const outDir = join(root, "out");
+
+    const payload = await analyzeArtifacts({
+      authoredArtifact: fixture.authored,
+      evalArtifact: null,
+      scenario: "skills_available_unmentioned",
+      outDir,
+      prdSkillsPath: fixture.prdSkills,
+      checksDir: fixture.checksDir,
+    });
+
+    expect(payload.braintrust_refs).toEqual(validRefs.slice(0, 32));
+    const serialized = readFileSync(join(outDir, "metrics.json"));
+    expect(serialized.byteLength).toBeLessThan(100_000);
+    expect(serialized.toString("utf8")).not.toContain("RAW_TOOL_OUTPUT");
+  });
+});
+
 test("[REGRESSION] artifact discovery ignores nested workspace dependencies", async () => {
   await withTempDirAsync(async (root) => {
     const fixture = writeFixture(root);
