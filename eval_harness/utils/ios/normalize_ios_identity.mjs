@@ -1,9 +1,20 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
 
 const [workspace, runId, resolvedConfigPath, adjustmentPath] = process.argv.slice(2);
+const harnessRequire = createRequire(import.meta.url);
+const harnessRequireUtilsPath = harnessRequire.resolve("@expo/require-utils");
+const dynamicConfigNames = new Set([
+  "app.config.ts",
+  "app.config.mts",
+  "app.config.cts",
+  "app.config.mjs",
+  "app.config.cjs",
+  "app.config.js",
+]);
 
 if (!workspace || !runId || !resolvedConfigPath || !adjustmentPath) {
   console.error(
@@ -25,10 +36,40 @@ function hasValue(value) {
   return typeof value === "string" ? value.trim().length > 0 : Array.isArray(value) && value.length > 0;
 }
 
-function dynamicConfig(workspacePath) {
+function isWithin(root, candidate) {
+  const relative = path.relative(root, candidate);
+  return relative !== "" && !relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative);
+}
+
+function dynamicConfigFromProvenance(workspacePath, dynamicConfigPath) {
+  if (typeof dynamicConfigPath !== "string" || dynamicConfigPath.trim() === "") return null;
+  const workspaceRealPath = fs.realpathSync(workspacePath);
+  const candidate = path.resolve(workspaceRealPath, dynamicConfigPath);
+  let realPath;
+  try {
+    realPath = fs.realpathSync(candidate);
+  } catch {
+    throw new Error("resolved dynamic config path is unavailable");
+  }
+  if (!dynamicConfigNames.has(path.basename(realPath))) {
+    throw new Error("resolved dynamic config path is not a supported app.config file");
+  }
+  if (!isWithin(workspaceRealPath, realPath)) {
+    throw new Error("resolved dynamic config path is outside evaluator workspace");
+  }
+  if (!fs.statSync(realPath).isFile()) {
+    throw new Error("resolved dynamic config path is not a regular file");
+  }
+  return { path: realPath, extension: path.extname(realPath).slice(1) };
+}
+
+function dynamicConfig(workspacePath, resolved) {
+  const provenance = resolved?._internal?.dynamicConfigPath;
+  const fromProvenance = dynamicConfigFromProvenance(workspacePath, provenance);
+  if (fromProvenance) return fromProvenance;
   for (const extension of ["ts", "mts", "cts", "mjs", "cjs", "js"]) {
     const candidate = path.join(workspacePath, `app.config.${extension}`);
-    if (fs.existsSync(candidate)) return { path: candidate, extension };
+    if (fs.existsSync(candidate)) return dynamicConfigFromProvenance(workspacePath, candidate);
   }
   return null;
 }
@@ -41,7 +82,7 @@ function identityFor(run) {
   };
 }
 
-function wrapperSource(extension, backupName, backupPath, identity, packageType) {
+function wrapperSource(extension, backupName, backupPath, identity, packageType, requireUtilsPath) {
   const normalize = `const evaluatorIdentity = ${JSON.stringify(identity)};
 const missing = (value) => typeof value === "string" ? value.trim().length === 0 : !Array.isArray(value) || value.length === 0;
 const withEvaluatorIdentity = (value) => {
@@ -69,7 +110,7 @@ export default (context) => withEvaluatorIdentity(
 );
 `;
   }
-  return `const { loadModuleSync } = require("@expo/require-utils");
+  return `const { loadModuleSync } = require(${JSON.stringify(requireUtilsPath)});
 const authoredModule = loadModuleSync(${JSON.stringify(backupPath)});
 const authoredConfig = authoredModule.default ?? authoredModule;
 ${normalize}
@@ -90,7 +131,14 @@ function replaceDynamicConfig(config, identity, packageType) {
   try {
     fs.writeFileSync(
       config.path,
-      wrapperSource(config.extension, backupName, backupPath, identity, packageType),
+      wrapperSource(
+        config.extension,
+        backupName,
+        backupPath,
+        identity,
+        packageType,
+        harnessRequireUtilsPath,
+      ),
       "utf8",
     );
   } catch (error) {
@@ -137,7 +185,7 @@ if (!hasValue(resolved.scheme)) {
 let configPath = null;
 let configKind = null;
 if (adjustments.length > 0) {
-  const dynamic = dynamicConfig(workspace);
+  const dynamic = dynamicConfig(workspace, resolved);
   if (dynamic) {
     let packageType = null;
     const packagePath = path.join(workspace, "package.json");

@@ -253,6 +253,12 @@ SCENARIO=skills_available_unmentioned
             shutil.copy2(EVAL_SCRIPT, script)
             shutil.copy2(COLLECTOR, collector)
             shutil.copy2(ROOT / "eval_harness/utils/ios/normalize_ios_identity.mjs", identity)
+            harness_expo = root / "node_modules" / "@expo"
+            harness_expo.mkdir(parents=True, exist_ok=True)
+            (harness_expo / "require-utils").symlink_to(
+                ROOT / "node_modules" / "@expo" / "require-utils",
+                target_is_directory=True,
+            )
             shutil.copy2(
                 ROOT / "eval_harness/utils/artifacts/create_diagnostic_artifact.py",
                 diagnostic,

@@ -29,11 +29,6 @@ def normalize(workspace: Path, config: dict[str, object], output: Path) -> subpr
 
 def load_expo_config(workspace: Path) -> subprocess.CompletedProcess[str]:
     """Resolve the workspace with Expo's production config loader."""
-    node_modules = workspace / "node_modules"
-    node_modules.mkdir(exist_ok=True)
-    expo_packages = node_modules / "@expo"
-    if not expo_packages.exists():
-        expo_packages.symlink_to(ROOT / "node_modules" / "@expo", target_is_directory=True)
     return subprocess.run(
         [
             "node",
@@ -150,15 +145,17 @@ class IosIdentityTests(unittest.TestCase):
 """,
                 encoding="utf-8",
             )
+            initial = load_expo_config(workspace)
+            self.assertEqual(initial.returncode, 0, initial.stderr)
+            resolved_config = json.loads(initial.stdout)
+            self.assertEqual(
+                Path(resolved_config["_internal"]["dynamicConfigPath"]).resolve(),
+                (workspace / "app.config.js").resolve(),
+            )
 
             result = normalize(
                 workspace,
-                {
-                    "name": "Dynamic Notes",
-                    "slug": "dynamic-notes",
-                    "plugins": [["expo-router", {"origin": "author"}]],
-                    "ios": {"buildNumber": "7"},
-                },
+                resolved_config,
                 output,
             )
 
@@ -166,6 +163,7 @@ class IosIdentityTests(unittest.TestCase):
             self.assertEqual((source / "app.config.js").read_text(encoding="utf-8"), author_config)
             loaded = load_expo_config(workspace)
             self.assertEqual(loaded.returncode, 0, loaded.stderr)
+            self.assertFalse((workspace / "node_modules" / "@expo" / "require-utils").exists())
             effective = json.loads(loaded.stdout)
             self.assertEqual(effective["extra"]["pluginOrigin"], "author")
             self.assertEqual(effective["ios"]["buildNumber"], "7")
@@ -197,6 +195,71 @@ class IosIdentityTests(unittest.TestCase):
             self.assertEqual((workspace / "app.config.js").read_text(encoding="utf-8"), author_config)
             self.assertFalse((workspace / ".eval-ios-author-app.config.js").exists())
             self.assertEqual(json.loads(output.read_text(encoding="utf-8"))["adjustments"], [])
+
+    def test_dynamic_config_prefers_validated_expo_provenance_over_fallback(self) -> None:
+        """Expo's resolved dynamic-config path must select the wrapper target.
+
+        Catches: applying a newer harness precedence when the installed
+        project-local Expo resolver actually selected a different config.
+        """
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            workspace = root / "evaluator-materialization"
+            output = root / "ios-identity-adjustments.json"
+            cjs_config = workspace / "app.config.cjs"
+            ts_config = workspace / "app.config.ts"
+            cjs_config.parent.mkdir(parents=True, exist_ok=True)
+            cjs_config.write_text("module.exports = () => ({ name: 'CJS Notes' });\n", encoding="utf-8")
+            ts_source = "export default () => ({ name: 'TS Notes' });\n"
+            ts_config.write_text(ts_source, encoding="utf-8")
+
+            result = normalize(
+                workspace,
+                {
+                    "name": "CJS Notes",
+                    "ios": {},
+                    "_internal": {"dynamicConfigPath": str(cjs_config)},
+                },
+                output,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue((workspace / ".eval-ios-author-app.config.cjs").exists())
+            self.assertEqual(ts_config.read_text(encoding="utf-8"), ts_source)
+
+    def test_dynamic_config_rejects_escaping_expo_provenance_path(self) -> None:
+        """A config path outside the materialized workspace is never renamed.
+
+        Catches: trusting artifact-controlled `_internal.dynamicConfigPath`
+        and turning an evaluator adjustment into an arbitrary-path mutation.
+        """
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            workspace = root / "evaluator-materialization"
+            output = root / "ios-identity-adjustments.json"
+            local_config = workspace / "app.config.js"
+            escaped_config = root / "outside" / "app.config.js"
+            local_source = "module.exports = () => ({ name: 'Local Notes' });\n"
+            escaped_source = "module.exports = () => ({ name: 'Outside Notes' });\n"
+            local_config.parent.mkdir(parents=True, exist_ok=True)
+            escaped_config.parent.mkdir(parents=True, exist_ok=True)
+            local_config.write_text(local_source, encoding="utf-8")
+            escaped_config.write_text(escaped_source, encoding="utf-8")
+
+            result = normalize(
+                workspace,
+                {
+                    "name": "Notes",
+                    "ios": {},
+                    "_internal": {"dynamicConfigPath": str(escaped_config)},
+                },
+                output,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("outside evaluator workspace", result.stderr)
+            self.assertEqual(local_config.read_text(encoding="utf-8"), local_source)
+            self.assertEqual(escaped_config.read_text(encoding="utf-8"), escaped_source)
 
     def test_dynamic_expo_envelope_receives_identity_inside_expo_config(self) -> None:
         """Expo unwraps `{ expo }`, so generated fields must be placed inside it.
