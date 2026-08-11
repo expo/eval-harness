@@ -289,6 +289,7 @@ SCENARIO=skills_available_unmentioned
 """,
             )
             write(workspace / "package.json", "{}")
+            write(workspace / "app.json", '{"expo":{"scheme":"notes","ios":{}}}')
             fake_bin = root / "bin"
             write(
                 fake_bin / "bun",
@@ -305,12 +306,7 @@ done
             write(
                 fake_bin / "npx",
                 """#!/usr/bin/env bash
-if [ -f "$NPX_CONFIG_RESOLVED" ]; then
-  printf '%s\n' '{"scheme":"eval-6198f6327e24","ios":{"bundleIdentifier":"com.evalharness.6198f6327e24"}}'
-else
-  touch "$NPX_CONFIG_RESOLVED"
-  printf '%s\n' '{"scheme":"notes","ios":{}}'
-fi
+node -e 'const fs = require("node:fs"); console.log(JSON.stringify(JSON.parse(fs.readFileSync(process.argv[1], "utf8")).expo));' "$PWD/app.json"
 """,
             )
             (fake_bin / "bun").chmod(0o755)
@@ -320,7 +316,6 @@ fi
                 {
                     "PATH": f"{fake_bin}:{env['PATH']}",
                     "AUTHOR_ENV": str(author_env),
-                    "NPX_CONFIG_RESOLVED": str(root / "npx-config-resolved"),
                 }
             )
 
@@ -367,6 +362,89 @@ fi
                     },
                 ],
             )
+
+    def test_failed_ios_identity_normalization_does_not_advertise_missing_adjustment_log(self) -> None:
+        """A failed normalizer cannot create artifact evidence it never wrote.
+
+        Catches: publishing `artifacts.identity_adjustments` based only on an
+        exported intended path rather than the collected file.
+        """
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            run_id = "identity-normalization-failure"
+            script = root / "eval_harness/evaluator/ios_agentic/scripts/eval-ios-app.sh"
+            collector = root / "eval_harness/utils/artifacts/collect_ios_artifact.sh"
+            diagnostic = root / "eval_harness/utils/artifacts/create_diagnostic_artifact.py"
+            stages = root / "eval_harness/utils/shell/eval_stages.sh"
+            identity = root / "eval_harness/utils/ios/normalize_ios_identity.mjs"
+            author_env = root / "author-agent-metadata" / run_id / "author.env"
+            workspace = root / "author-agent-workspace" / run_id
+            artifact = root / "ios-eval-report"
+            script.parent.mkdir(parents=True, exist_ok=True)
+            collector.parent.mkdir(parents=True, exist_ok=True)
+            identity.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(EVAL_SCRIPT, script)
+            shutil.copy2(COLLECTOR, collector)
+            shutil.copy2(
+                ROOT / "eval_harness/utils/artifacts/create_diagnostic_artifact.py",
+                diagnostic,
+            )
+            write(identity, "process.exit(19);\n")
+            write(
+                stages,
+                """eval::resolve_reasoning_effort() { printf '%s' "${1:-high}"; }
+eval::fix_java_home() { :; }
+eval::env_banner() { :; }
+eval::stop_proxies() { :; }
+eval::install_agent_device() { :; }
+eval::install_maestro() { :; }
+eval::install_uv_and_evaluator() { :; }
+eval::launch_proxy() { :; }
+eval::wait_for_port() { return 0; }
+eval::launch_otlp_receiver() { :; }
+eval::npm_install() { return 0; }
+eval::configure_ios_app_mode() { EVAL_IOS_APP_MODE=release; export EVAL_IOS_APP_MODE; }
+""",
+            )
+            write(
+                author_env,
+                f"""RUN_ID={run_id}
+RUN_START_MTIME=0
+AGENT=claude-code
+AGENT_MODEL=sonnet
+AGENT_REASONING_EFFORT=high
+PRD=dataset/prds/notes/prd/mvp.txt
+METRO_MODE=release
+SCENARIO=skills_available_unmentioned
+""",
+            )
+            write(workspace / "package.json", "{}")
+            fake_bin = root / "bin"
+            write(fake_bin / "bun", "#!/usr/bin/env bash\nexit 1\n")
+            write(fake_bin / "npx", "#!/usr/bin/env bash\nprintf '%s\\n' '{\"scheme\":\"notes\",\"ios\":{}}'\n")
+            (fake_bin / "bun").chmod(0o755)
+            (fake_bin / "npx").chmod(0o755)
+            env = os.environ.copy()
+            env.update({"PATH": f"{fake_bin}:{env['PATH']}", "AUTHOR_ENV": str(author_env)})
+
+            result = subprocess.run(
+                ["bash", str(script)],
+                cwd=root,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+            manifest = json.loads((artifact / "manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["build_health"]["native_build"]["status"], "failed")
+            self.assertEqual(
+                manifest["build_health"]["native_build"]["detail"],
+                "evaluator could not normalize the iOS app identity; see logs/d-ios-identity-normalize.log",
+            )
+            self.assertIsNone(manifest["artifacts"].get("identity_adjustments"))
+            self.assertFalse((artifact / "logs" / "d-ios-identity-adjustments.json").exists())
 
     def test_collector_rejects_output_root_outside_repository(self) -> None:
         """The collector must not mutate an arbitrary caller-supplied directory."""

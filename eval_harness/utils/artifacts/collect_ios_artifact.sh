@@ -77,8 +77,10 @@ for log_file in "$OUT"/*.log; do
   [ -f "$log_file" ] || continue
   mv -f "$log_file" "$OUT/logs/"
 done
+IOS_IDENTITY_ADJUSTMENTS_ARTIFACT=""
 if [ -f "$OUT/d-ios-identity-adjustments.json" ]; then
   mv -f "$OUT/d-ios-identity-adjustments.json" "$OUT/logs/d-ios-identity-adjustments.json"
+  IOS_IDENTITY_ADJUSTMENTS_ARTIFACT="logs/d-ios-identity-adjustments.json"
 fi
 
 # The EXIT trap reaches this collector even when evaluator setup/build fails
@@ -120,7 +122,7 @@ IOS_NATIVE_BUILD_LOG="${IOS_NATIVE_BUILD_LOG:-}" \
 IOS_APP_LAUNCH_STATUS="${IOS_APP_LAUNCH_STATUS:-not_run}" \
 IOS_EVALUATION_STATUS="${IOS_EVALUATION_STATUS:-not_run}" \
 IOS_FAILURE_STAGE="${IOS_FAILURE_STAGE:-}" IOS_FAILURE_REASON="${IOS_FAILURE_REASON:-}" \
-IOS_IDENTITY_ADJUSTMENTS_LOG="${IOS_IDENTITY_ADJUSTMENTS_LOG:-}" \
+IOS_IDENTITY_ADJUSTMENTS_ARTIFACT="$IOS_IDENTITY_ADJUSTMENTS_ARTIFACT" \
 "$PY" - "$OUT/manifest.json" <<'PYEOF'
 import json
 import os
@@ -229,9 +231,7 @@ manifest = {
         "proxy_anthropic": "telemetry/anthropic.jsonl",
         "otel": "telemetry/otel/",
         "logs": "logs/",
-        "identity_adjustments": "logs/d-ios-identity-adjustments.json"
-        if os.environ.get("IOS_IDENTITY_ADJUSTMENTS_LOG")
-        else None,
+        "identity_adjustments": os.environ.get("IOS_IDENTITY_ADJUSTMENTS_ARTIFACT") or None,
     },
 }
 with open(sys.argv[1], "w", encoding="utf-8") as handle:

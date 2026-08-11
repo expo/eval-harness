@@ -26,7 +26,7 @@ function hasValue(value) {
 }
 
 function dynamicConfig(workspacePath) {
-  for (const extension of ["js", "cjs", "ts", "mjs"]) {
+  for (const extension of ["ts", "mts", "cts", "mjs", "cjs", "js"]) {
     const candidate = path.join(workspacePath, `app.config.${extension}`);
     if (fs.existsSync(candidate)) return { path: candidate, extension };
   }
@@ -46,18 +46,21 @@ function wrapperSource(extension, backupName, identity, packageType) {
 const missing = (value) => typeof value === "string" ? value.trim().length === 0 : !Array.isArray(value) || value.length === 0;
 const withEvaluatorIdentity = (value) => {
   const config = value && typeof value === "object" ? value : {};
-  return {
-    ...config,
-    scheme: missing(config.scheme) ? evaluatorIdentity.scheme : config.scheme,
+  const hasExpoEnvelope = config.expo && typeof config.expo === "object";
+  const expo = hasExpoEnvelope ? config.expo : config;
+  const normalized = {
+    ...expo,
+    scheme: missing(expo.scheme) ? evaluatorIdentity.scheme : expo.scheme,
     ios: {
-      ...(config.ios && typeof config.ios === "object" ? config.ios : {}),
-      bundleIdentifier: missing(config.ios && config.ios.bundleIdentifier)
+      ...(expo.ios && typeof expo.ios === "object" ? expo.ios : {}),
+      bundleIdentifier: missing(expo.ios && expo.ios.bundleIdentifier)
         ? evaluatorIdentity.bundleIdentifier
-        : config.ios.bundleIdentifier,
+        : expo.ios.bundleIdentifier,
     },
   };
+  return hasExpoEnvelope ? { ...config, expo: normalized } : normalized;
 };`;
-  const esm = extension === "mjs" || (extension === "js" && packageType === "module") || extension === "ts";
+  const esm = ["mjs", "mts", "ts"].includes(extension) || (extension === "js" && packageType === "module");
   if (esm) {
     return `import authoredConfig from "./${backupName}";
 ${normalize}

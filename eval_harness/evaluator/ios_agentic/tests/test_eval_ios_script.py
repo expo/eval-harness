@@ -98,8 +98,8 @@ class EvalIosScriptTests(unittest.TestCase):
     def test_regression_incomplete_author_is_a_diagnostic_without_evaluator_setup(self) -> None:
         """An author failure is final evidence, not an iOS build input.
 
-        Oracle: the iOS artifact preserves the author's failed primary detail
-        while every iOS execution stage stays not_run.
+        Oracle: the iOS artifact preserves the author's failed state while
+        every iOS execution stage stays not_run, even without author detail.
         Catches: attempting evaluator setup/builds for a workspace from a
         failed authoring run, which hides the source failure behind noise.
         """
@@ -156,7 +156,7 @@ SCENARIO=skills_available_unmentioned
                         "build_health": {
                             "app_authored": {
                                 "status": "failed",
-                                "detail": "author command exited 2",
+                                "detail": None,
                                 "log": "author-agent-metadata/incomplete-author/logs/c-agent.log",
                             }
                         },
@@ -189,7 +189,7 @@ SCENARIO=skills_available_unmentioned
             )
 
             self.assertEqual(result.returncode, 1, result.stderr)
-            self.assertIn("author command exited 2", result.stdout)
+            self.assertIn("authoring did not complete; skipping build/eval", result.stdout)
             self.assertFalse(setup_marker.exists())
             artifact_manifest = json.loads(
                 (root / "ios-eval-report" / "manifest.json").read_text(encoding="utf-8")
@@ -198,7 +198,7 @@ SCENARIO=skills_available_unmentioned
                 artifact_manifest["build_health"]["app_authored"],
                 {
                     "status": "failed",
-                    "detail": "author command exited 2",
+                    "detail": None,
                     "log": "author-agent-metadata/incomplete-author/logs/c-agent.log",
                 },
             )
