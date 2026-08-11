@@ -1,3 +1,4 @@
+import json
 import re
 import unittest
 from pathlib import Path
@@ -15,6 +16,18 @@ ACTIVE_WORKFLOWS = (
 
 def workflow(name: str) -> str:
     return (WORKFLOW_ROOT / name).read_text(encoding="utf-8")
+
+
+def workflow_job(name: str, job: str) -> str:
+    contents = workflow(name)
+    match = re.search(
+        rf"^  {re.escape(job)}:\n(?P<body>.*?)(?=^  \w+:\n|\Z)",
+        contents,
+        re.MULTILINE | re.DOTALL,
+    )
+    if match is None:
+        raise AssertionError(f"workflow {name} has no {job} job")
+    return match.group(0)
 
 
 def workflow_dispatch_input_names(name: str) -> tuple[str, ...]:
@@ -147,6 +160,32 @@ class WorkflowContractTests(unittest.TestCase):
                 self.assertLess(materialize, auth)
                 self.assertLess(auth, evaluate)
                 self.assertLess(evaluate, diagnostic)
+
+    def test_harness_declares_identity_normalizer_loader_directly(self) -> None:
+        """The identity helper's loader must not survive only as a transitive dependency."""
+        package = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
+        declared_dependencies = {
+            **package.get("dependencies", {}),
+            **package.get("devDependencies", {}),
+        }
+        self.assertIn("@expo/require-utils", declared_dependencies)
+
+    def test_ios_workflows_provision_harness_dependencies_before_running_helpers(self) -> None:
+        """A clean EAS evaluator checkout must install before using harness code.
+
+        Catches: relying on authored-workspace dependencies or running
+        materialization before the harness's own dependencies are installed.
+        """
+        for name in ("eval-e2e.yml", "eval-ios-app.yml"):
+            with self.subTest(workflow=name):
+                ios_job = workflow_job(name, "eval_ios")
+                checkout = ios_job.index("uses: eas/checkout")
+                install = ios_job.find("uses: eas/install_node_modules")
+                materialize = ios_job.index("artifacts/materialize.ts")
+                evaluate = ios_job.index("ios_agentic/scripts/eval-ios-app.sh")
+                self.assertLess(checkout, install)
+                self.assertLess(install, materialize)
+                self.assertLess(install, evaluate)
 
     def test_all_producers_use_the_shared_packager_and_stable_names(self) -> None:
         expected = {
