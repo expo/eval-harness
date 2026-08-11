@@ -230,8 +230,12 @@ SCENARIO=skills_available_unmentioned
             self.assertEqual(manifest["build_health"]["app_launch"]["status"], "not_run")
             self.assertEqual(manifest["build_health"]["evaluation"]["status"], "not_run")
 
-    def test_missing_expo_ios_config_is_a_structured_native_build_failure(self) -> None:
-        """Config preflight failure must remain exact, scored nowhere, and leave later stages unrun."""
+    def test_missing_expo_ios_config_receives_evaluator_identity_before_native_build(self) -> None:
+        """A valid authored app without identity must progress with evaluator-owned values.
+
+        Catches: treating bundle ID/scheme omissions as an author failure instead
+        of a deterministic evaluator adjustment, or losing its diagnostics.
+        """
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             run_id = "missing-ios-config"
@@ -239,13 +243,16 @@ SCENARIO=skills_available_unmentioned
             collector = root / "eval_harness/utils/artifacts/collect_ios_artifact.sh"
             diagnostic = root / "eval_harness/utils/artifacts/create_diagnostic_artifact.py"
             stages = root / "eval_harness/utils/shell/eval_stages.sh"
+            identity = root / "eval_harness/utils/ios/normalize_ios_identity.mjs"
             author_env = root / "author-agent-metadata" / run_id / "author.env"
             workspace = root / "author-agent-workspace" / run_id
             artifact = root / "ios-eval-report"
             script.parent.mkdir(parents=True, exist_ok=True)
             collector.parent.mkdir(parents=True, exist_ok=True)
+            identity.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(EVAL_SCRIPT, script)
             shutil.copy2(COLLECTOR, collector)
+            shutil.copy2(ROOT / "eval_harness/utils/ios/normalize_ios_identity.mjs", identity)
             shutil.copy2(
                 ROOT / "eval_harness/utils/artifacts/create_diagnostic_artifact.py",
                 diagnostic,
@@ -263,7 +270,10 @@ eval::launch_proxy() { :; }
 eval::wait_for_port() { return 0; }
 eval::launch_otlp_receiver() { :; }
 eval::npm_install() { return 0; }
-eval::configure_ios_app_mode() { EVAL_IOS_APP_MODE=release; export EVAL_IOS_APP_MODE; }
+eval::configure_ios_app_mode() { EVAL_IOS_APP_MODE=release; EVAL_DEVNAME='iPhone 16'; export EVAL_IOS_APP_MODE EVAL_DEVNAME; }
+eval::boot_sim_and_runner() { :; }
+eval::build_release_ios_app() { :; }
+eval::probe_snapshot() { return 1; }
 """,
             )
             write(
@@ -295,13 +305,24 @@ done
             write(
                 fake_bin / "npx",
                 """#!/usr/bin/env bash
-printf '%s\n' '{"scheme":"notes","ios":{}}'
+if [ -f "$NPX_CONFIG_RESOLVED" ]; then
+  printf '%s\n' '{"scheme":"eval-6198f6327e24","ios":{"bundleIdentifier":"com.evalharness.6198f6327e24"}}'
+else
+  touch "$NPX_CONFIG_RESOLVED"
+  printf '%s\n' '{"scheme":"notes","ios":{}}'
+fi
 """,
             )
             (fake_bin / "bun").chmod(0o755)
             (fake_bin / "npx").chmod(0o755)
             env = os.environ.copy()
-            env.update({"PATH": f"{fake_bin}:{env['PATH']}", "AUTHOR_ENV": str(author_env)})
+            env.update(
+                {
+                    "PATH": f"{fake_bin}:{env['PATH']}",
+                    "AUTHOR_ENV": str(author_env),
+                    "NPX_CONFIG_RESOLVED": str(root / "npx-config-resolved"),
+                }
+            )
 
             result = subprocess.run(
                 ["bash", str(script)],
@@ -312,32 +333,40 @@ printf '%s\n' '{"scheme":"notes","ios":{}}'
                 check=False,
             )
 
-            self.assertEqual(result.returncode, 1, result.stderr)
+            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
             payload = json.loads((artifact / "result.json").read_text(encoding="utf-8"))
             self.assertEqual(payload["status"], "failed")
             self.assertIsNone(payload["macro_avg_pct"])
             self.assertEqual(
                 payload["evaluator_errors"],
                 [
-                    {
-                        "stage": "native_build",
-                        "reason": "authored app is missing required Expo config "
-                        "(ios.bundleIdentifier and scheme are required)",
-                    }
+                    {"stage": "app_launch", "reason": "authored app failed launch readiness probe; skipping evaluator"}
                 ],
+                result.stdout + result.stderr,
             )
             manifest = json.loads((artifact / "manifest.json").read_text(encoding="utf-8"))
             self.assertEqual(manifest["build_health"]["dependency_install"]["status"], "passed")
-            self.assertEqual(manifest["build_health"]["native_build"]["status"], "failed")
-            self.assertEqual(
-                manifest["build_health"]["native_build"]["detail"],
-                "authored app is missing required Expo config "
-                "(ios.bundleIdentifier and scheme are required)",
-            )
-            self.assertEqual(manifest["build_health"]["app_launch"]["status"], "not_run")
+            self.assertEqual(manifest["build_health"]["native_build"]["status"], "passed")
+            self.assertEqual(manifest["build_health"]["app_launch"]["status"], "failed")
             self.assertEqual(manifest["build_health"]["evaluation"]["status"], "not_run")
-            report = (artifact / "report.html").read_text(encoding="utf-8")
-            self.assertIn("ios.bundleIdentifier and scheme are required", report)
+            self.assertEqual(
+                manifest["artifacts"].get("identity_adjustments"),
+                "logs/d-ios-identity-adjustments.json",
+            )
+            adjustment = json.loads(
+                (artifact / "logs" / "d-ios-identity-adjustments.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(adjustment["source"], "evaluator")
+            self.assertEqual(
+                adjustment["adjustments"],
+                [
+                    {
+                        "field": "ios.bundleIdentifier",
+                        "from": None,
+                        "to": "com.evalharness.6198f6327e24",
+                    },
+                ],
+            )
 
     def test_collector_rejects_output_root_outside_repository(self) -> None:
         """The collector must not mutate an arbitrary caller-supplied directory."""

@@ -1,4 +1,6 @@
+import json
 import os
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -92,6 +94,116 @@ class EvalIosScriptTests(unittest.TestCase):
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("missing author.env", result.stdout)
+
+    def test_regression_incomplete_author_is_a_diagnostic_without_evaluator_setup(self) -> None:
+        """An author failure is final evidence, not an iOS build input.
+
+        Oracle: the iOS artifact preserves the author's failed primary detail
+        while every iOS execution stage stays not_run.
+        Catches: attempting evaluator setup/builds for a workspace from a
+        failed authoring run, which hides the source failure behind noise.
+        """
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            run_id = "incomplete-author"
+            script = root / "eval_harness/evaluator/ios_agentic/scripts/eval-ios-app.sh"
+            collector = root / "eval_harness/utils/artifacts/collect_ios_artifact.sh"
+            diagnostic = root / "eval_harness/utils/artifacts/create_diagnostic_artifact.py"
+            stages = root / "eval_harness/utils/shell/eval_stages.sh"
+            author_env = root / "author-agent-metadata" / run_id / "author.env"
+            workspace = root / "author-agent-workspace" / run_id
+            manifest = root / "manifest.json"
+            script.parent.mkdir(parents=True, exist_ok=True)
+            collector.parent.mkdir(parents=True, exist_ok=True)
+            stages.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(SCRIPT, script)
+            shutil.copy2(
+                ROOT / "eval_harness/utils/artifacts/collect_ios_artifact.sh",
+                collector,
+            )
+            shutil.copy2(
+                ROOT / "eval_harness/utils/artifacts/create_diagnostic_artifact.py",
+                diagnostic,
+            )
+            stages.write_text(
+                """eval::resolve_reasoning_effort() { printf '%s' "${1:-high}"; }
+eval::fix_java_home() { :; }
+eval::env_banner() { :; }
+eval::stop_proxies() { :; }
+eval::install_agent_device() { touch "$EVAL_SETUP_MARKER"; exit 73; }
+""",
+                encoding="utf-8",
+            )
+            author_env.parent.mkdir(parents=True, exist_ok=True)
+            author_env.write_text(
+                f"""RUN_ID={run_id}
+RUN_START_MTIME=0
+AGENT=claude-code
+AGENT_MODEL=sonnet
+AGENT_REASONING_EFFORT=high
+PRD=dataset/prds/notes/prd/mvp.txt
+METRO_MODE=release
+SCENARIO=skills_available_unmentioned
+""",
+                encoding="utf-8",
+            )
+            (workspace / "package.json").parent.mkdir(parents=True, exist_ok=True)
+            (workspace / "package.json").write_text("{}", encoding="utf-8")
+            manifest.write_text(
+                json.dumps(
+                    {
+                        "run_id": run_id,
+                        "build_health": {
+                            "app_authored": {
+                                "status": "failed",
+                                "detail": "author command exited 2",
+                                "log": "author-agent-metadata/incomplete-author/logs/c-agent.log",
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            fake_bin = root / "bin"
+            fake_bin.mkdir()
+            fake_bun = fake_bin / "bun"
+            fake_bun.write_text("#!/usr/bin/env bash\nexit 1\n", encoding="utf-8")
+            fake_bun.chmod(0o755)
+            setup_marker = root / "evaluator-setup-ran"
+            env = os.environ.copy()
+            env.update(
+                {
+                    "PATH": f"{fake_bin}:{env['PATH']}",
+                    "AUTHOR_ENV": str(author_env),
+                    "EVAL_SETUP_MARKER": str(setup_marker),
+                }
+            )
+
+            result = subprocess.run(
+                ["bash", str(script)],
+                cwd=root,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 1, result.stderr)
+            self.assertIn("author command exited 2", result.stdout)
+            self.assertFalse(setup_marker.exists())
+            artifact_manifest = json.loads(
+                (root / "ios-eval-report" / "manifest.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(
+                artifact_manifest["build_health"]["app_authored"],
+                {
+                    "status": "failed",
+                    "detail": "author command exited 2",
+                    "log": "author-agent-metadata/incomplete-author/logs/c-agent.log",
+                },
+            )
+            for stage in ("dependency_install", "native_build", "app_launch", "evaluation"):
+                self.assertEqual(artifact_manifest["build_health"][stage]["status"], "not_run")
 
     def test_spec_completed_result_requires_numeric_score_fields(self) -> None:
         """Specification: a green evaluation contains a usable score artifact.

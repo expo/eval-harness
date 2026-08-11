@@ -73,9 +73,10 @@ IOS_APP_LAUNCH_STATUS=not_run
 IOS_EVALUATION_STATUS=not_run
 IOS_FAILURE_STAGE=""
 IOS_FAILURE_REASON=""
+IOS_IDENTITY_ADJUSTMENTS_LOG=""
 export RUN_ID RUN_START_MTIME OUT WORKSPACE TELEMETRY_DIR EVAL_PHASE_START_MTIME METRO_MODE AGENT AGENT_MODEL AGENT_REASONING_EFFORT PRD TEST_PLAN SCENARIO EVALUATOR_MODEL EVALUATOR_REASONING_EFFORT \
   AUTHOR_MANIFEST AUTHORED_ARTIFACT_ROOT IOS_DEPENDENCY_INSTALL_STATUS IOS_NATIVE_BUILD_STATUS IOS_NATIVE_BUILD_LOG IOS_APP_LAUNCH_STATUS IOS_EVALUATION_STATUS \
-  IOS_FAILURE_STAGE IOS_FAILURE_REASON
+  IOS_FAILURE_STAGE IOS_FAILURE_REASON IOS_IDENTITY_ADJUSTMENTS_LOG
 
 eval_fail() { # stage reason [exit_status]
   IOS_FAILURE_STAGE="$1"
@@ -83,6 +84,21 @@ eval_fail() { # stage reason [exit_status]
   export IOS_FAILURE_STAGE IOS_FAILURE_REASON
   echo "  ❌ $IOS_FAILURE_REASON"
   exit "${3:-1}"
+}
+
+author_manifest_field() { # field
+  python3 - "$AUTHOR_MANIFEST" "$1" <<'PYEOF'
+import json
+import sys
+
+try:
+    with open(sys.argv[1], encoding="utf-8") as handle:
+        value = json.load(handle)
+    value = value.get("build_health", {}).get("app_authored", {}).get(sys.argv[2])
+    print(value if isinstance(value, str) else "")
+except (OSError, ValueError, AttributeError, json.JSONDecodeError):
+    print("")
+PYEOF
 }
 
 ANTHROPIC_PROXY_PORT=8082
@@ -101,6 +117,17 @@ echo "RUN_ID=$RUN_ID  WORKSPACE=$WORKSPACE"
 EVAL_PROXY_PIDS=()
 EVAL_METRO_PID=""
 trap 'eval_status=$?; eval::stop_proxies; kill "${EVAL_METRO_PID:-}" 2>/dev/null || true; IOS_EVALUATOR_EXIT_STATUS="$eval_status" bash "$ROOT/eval_harness/utils/artifacts/collect_ios_artifact.sh" "$ROOT" "$RUN_ID" "$OUT"' EXIT
+
+if [ -n "$AUTHOR_MANIFEST" ]; then
+  AUTHOR_APP_AUTHORED_STATUS="$(author_manifest_field status)"
+  if [ "$AUTHOR_APP_AUTHORED_STATUS" != "passed" ]; then
+    AUTHOR_APP_AUTHORED_DETAIL="$(author_manifest_field detail)"
+    if [ -n "$AUTHOR_APP_AUTHORED_DETAIL" ]; then
+      eval_fail preflight "authoring did not complete: $AUTHOR_APP_AUTHORED_DETAIL"
+    fi
+    eval_fail preflight "authoring did not complete; skipping build/eval"
+  fi
+fi
 
 echo "================= STAGE D0: macOS eval toolchain ================="
 eval::install_agent_device "$OUT"
@@ -159,10 +186,27 @@ if [ "$EXPO_CONFIG_RESOLVED" -ne 1 ]; then
   IOS_NATIVE_BUILD_LOG="logs/d-expo-config.err"
   eval_fail native_build "authored app Expo config could not be resolved; see logs/d-expo-config.err"
 fi
-if [ -z "$BUNDLE_ID" ] || [ -z "$SCHEME" ]; then
+
+IOS_IDENTITY_ADJUSTMENTS_LOG="$OUT/d-ios-identity-adjustments.json"
+export IOS_IDENTITY_ADJUSTMENTS_LOG
+if ! node "$ROOT/eval_harness/utils/ios/normalize_ios_identity.mjs" \
+  "$WORKSPACE" "$RUN_ID" "$OUT/d-expo-config.json" "$IOS_IDENTITY_ADJUSTMENTS_LOG" \
+  >"$OUT/d-ios-identity-normalize.log" 2>&1; then
+  IOS_NATIVE_BUILD_STATUS=failed
+  IOS_NATIVE_BUILD_LOG="logs/d-ios-identity-normalize.log"
+  eval_fail native_build "evaluator could not normalize the iOS app identity; see logs/d-ios-identity-normalize.log"
+fi
+if ! ( cd "$WORKSPACE" && npx --yes expo config --json >"$OUT/d-expo-config.normalized.json" 2>>"$OUT/d-expo-config.err" ); then
   IOS_NATIVE_BUILD_STATUS=failed
   IOS_NATIVE_BUILD_LOG="logs/d-expo-config.err"
-  eval_fail native_build "authored app is missing required Expo config (ios.bundleIdentifier and scheme are required)"
+  eval_fail native_build "normalized Expo config could not be resolved; see logs/d-expo-config.err"
+fi
+BUNDLE_ID="$(python3 -c "import json; d=json.load(open('$OUT/d-expo-config.normalized.json')); print((d.get('ios') or {}).get('bundleIdentifier') or '')" 2>/dev/null)"
+SCHEME="$(python3 -c "import json; d=json.load(open('$OUT/d-expo-config.normalized.json')); s=d.get('scheme'); print((s[0] if isinstance(s,list) else s) or '')" 2>/dev/null)"
+if [ -z "$BUNDLE_ID" ] || [ -z "$SCHEME" ]; then
+  IOS_NATIVE_BUILD_STATUS=failed
+  IOS_NATIVE_BUILD_LOG="logs/d-ios-identity-normalize.log"
+  eval_fail native_build "evaluator identity normalization did not resolve ios.bundleIdentifier and scheme"
 fi
 if [ -n "$BUNDLE_ID" ]; then
   export EVAL_APP_BUNDLE_ID="$BUNDLE_ID"
