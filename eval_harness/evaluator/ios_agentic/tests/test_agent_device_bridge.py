@@ -1,4 +1,5 @@
 import copy
+import json
 import os
 import subprocess
 import tempfile
@@ -790,8 +791,12 @@ class AgentDeviceBridgeRestartTests(unittest.TestCase):
         boolean_index[2]["index"] = True
         string_index = authored_content_without_identifiers()
         string_index[2]["index"] = "2"
-        inconsistent_depth = authored_content_without_identifiers()
-        inconsistent_depth[2]["depth"] = 7
+        equal_parent_depth = authored_content_without_identifiers()
+        equal_parent_depth[2]["depth"] = 1
+        decreasing_parent_depth = authored_content_without_identifiers()
+        decreasing_parent_depth[2]["depth"] = 0
+        forward_parent = authored_content_without_identifiers()
+        forward_parent[2]["parentIndex"] = 3
         negative_depth = authored_content_without_identifiers()
         negative_depth[2]["depth"] = -1
         boolean_parent = authored_content_without_identifiers()
@@ -807,7 +812,9 @@ class AgentDeviceBridgeRestartTests(unittest.TestCase):
             "negative index": negative_index,
             "boolean index": boolean_index,
             "string index": string_index,
-            "inconsistent depth": inconsistent_depth,
+            "equal parent/child depth": equal_parent_depth,
+            "decreasing child depth": decreasing_parent_depth,
+            "forward parent index": forward_parent,
             "negative depth": negative_depth,
             "boolean parent index": boolean_parent,
             "cyclic parent chain": cyclic_parents,
@@ -822,6 +829,281 @@ class AgentDeviceBridgeRestartTests(unittest.TestCase):
         for name, nodes in cases.items():
             with self.subTest(name=name):
                 self.assertFalse(bridge._has_target_app_content(nodes))
+
+    def test_readiness_reports_every_structural_rejection_reason(self) -> None:
+        """Each raw-tree invariant identifies the exact failed shape.
+
+        Catches: collapsing a live schema mismatch back into an opaque timeout.
+        """
+        bridge = AgentDeviceBridge(app_id="com.example.authored")
+        non_object_node = authored_content_without_identifiers()
+        non_object_node.append("secret-node-text")
+        invalid_index = authored_content_without_identifiers()
+        invalid_index[2]["index"] = True
+        duplicate_index = authored_content_without_identifiers()
+        duplicate_index.append(copy.deepcopy(duplicate_index[3]))
+        invalid_depth = authored_content_without_identifiers()
+        invalid_depth[2]["depth"] = -1
+        invalid_root = authored_content_without_identifiers()
+        invalid_root[0]["index"] = 4
+        invalid_parent = authored_content_without_identifiers()
+        invalid_parent[2]["parentIndex"] = True
+        missing_parent = authored_content_without_identifiers()
+        missing_parent[2]["parentIndex"] = 99
+        parent_cycle = authored_content_without_identifiers()
+        parent_cycle[2]["parentIndex"] = 3
+        parent_cycle[3]["parentIndex"] = 2
+        equal_parent_depth = authored_content_without_identifiers()
+        equal_parent_depth[2]["depth"] = 1
+        decreasing_parent_depth = authored_content_without_identifiers()
+        decreasing_parent_depth[2]["depth"] = 0
+        forward_parent = authored_content_without_identifiers()
+        forward_parent[2]["parentIndex"] = 3
+        cases = {
+            "empty snapshot": ([], "snapshot_empty"),
+            "non-object node": (non_object_node, "snapshot_node_not_object"),
+            "invalid node index": (invalid_index, "node_index_invalid"),
+            "duplicate node index": (duplicate_index, "node_index_duplicate"),
+            "invalid node depth": (invalid_depth, "node_depth_invalid"),
+            "invalid Application root": (invalid_root, "application_root_invalid"),
+            "invalid parent index": (invalid_parent, "node_parent_index_invalid"),
+            "missing parent": (missing_parent, "node_parent_missing"),
+            "parent cycle": (parent_cycle, "node_parent_cycle"),
+            "equal parent/child depth": (
+                equal_parent_depth,
+                "node_depth_not_increasing",
+            ),
+            "decreasing child depth": (
+                decreasing_parent_depth,
+                "node_depth_not_increasing",
+            ),
+            "forward parent index": (
+                forward_parent,
+                "node_parent_not_preceding_child",
+            ),
+        }
+        rejection = getattr(bridge, "_target_app_content_rejection", lambda _nodes: None)
+
+        for name, (nodes, expected) in cases.items():
+            with self.subTest(name=name):
+                self.assertEqual(rejection(nodes), expected)
+                self.assertFalse(bridge._has_target_app_content(nodes))
+
+    def test_readiness_accepts_filtered_ios_tree_with_original_depth_gaps(self) -> None:
+        """Pinned `-i --raw` reparents included nodes but preserves AX depth.
+
+        Catches: requiring direct-child depth equality and timing out on rich
+        authored screens whose filtered tree skips intermediary nodes.
+        """
+        nodes = copy.deepcopy(AGENT_DEVICE_0176_NO_TEST_ID_SNAPSHOT[:2])
+        nodes.extend([
+            {
+                **copy.deepcopy(AGENT_DEVICE_0176_NO_TEST_ID_SNAPSHOT[2]),
+                "index": 2,
+                "type": "Other",
+                "label": "Notes",
+                "depth": 4,
+                "parentIndex": 1,
+            },
+            {
+                **copy.deepcopy(AGENT_DEVICE_0176_NO_TEST_ID_SNAPSHOT[3]),
+                "index": 3,
+                "label": "New note",
+                "depth": 7,
+                "parentIndex": 2,
+            },
+            {
+                **copy.deepcopy(AGENT_DEVICE_0176_NO_TEST_ID_SNAPSHOT[2]),
+                "index": 4,
+                "type": "Keyboard",
+                "label": None,
+                "depth": 3,
+                "parentIndex": 1,
+            },
+            {
+                **copy.deepcopy(AGENT_DEVICE_0176_NO_TEST_ID_SNAPSHOT[3]),
+                "index": 5,
+                "type": "Key",
+                "label": "return",
+                "depth": 8,
+                "parentIndex": 4,
+            },
+        ])
+        bridge = AgentDeviceBridge(app_id="com.example.authored")
+
+        self.assertTrue(bridge._has_valid_ios_snapshot_tree(nodes))
+        self.assertTrue(bridge._has_target_app_content(nodes))
+
+    def test_readiness_reports_non_app_shell_and_content_rejection_reasons(self) -> None:
+        """Valid trees distinguish shell ownership from absent UI evidence."""
+        bridge = AgentDeviceBridge(app_id="com.example.authored")
+        runner = raw_snapshot_with_content("StaticText", "Runner Ready")
+        runner[0]["label"] = "AgentDeviceRunner"
+        alert = raw_snapshot_with_content("Button", "Allow", hittable=True)
+        alert[2]["type"] = "Alert"
+        continue_shell = raw_snapshot_with_content("Button", "Continue", hittable=True)
+        continue_shell[0]["label"] = "Expo Go"
+        reconnect_shell = raw_snapshot_with_content("StaticText", "Unable to connect")
+        reconnect_shell.append({
+            **copy.deepcopy(reconnect_shell[2]),
+            "index": 3,
+            "type": "Button",
+            "label": "OK",
+            "hittable": True,
+        })
+        cases = {
+            "runner": (runner, "agent_device_runner"),
+            "system alert": (alert, "system_alert_visible"),
+            "app shell error": (
+                raw_snapshot_with_content("StaticText", "Unable to resolve module ./secret"),
+                "app_shell_error",
+            ),
+            "bundle loading": (
+                raw_snapshot_with_content("StaticText", "Bundling 50%"),
+                "expo_bundle_loading_shell",
+            ),
+            "Open in dialog": (
+                raw_snapshot_with_content("Button", "Open in Notes Open", hittable=True),
+                "expo_open_dialog_shell",
+            ),
+            "Continue shell": (continue_shell, "expo_continue_shell"),
+            "dev tools": (
+                raw_snapshot_with_content("Button", "Open DevTools", hittable=True),
+                "expo_dev_tools_shell",
+            ),
+            "reconnect shell": (reconnect_shell, "expo_reconnect_shell"),
+            "launcher": (
+                raw_snapshot_with_content("StaticText", "Development servers"),
+                "expo_launcher_shell",
+            ),
+            "bottom sheet": (
+                raw_snapshot_with_content("Other", "Bottom Sheet"),
+                "expo_bottom_sheet_shell",
+            ),
+            "unsupported content type": (
+                raw_snapshot_with_content("Window", "Ready"),
+                "no_supported_content_nodes",
+            ),
+            "not rendered or hittable": (
+                raw_snapshot_with_content("Button", "Ready", positive_rect=False),
+                "content_not_rendered_or_hittable",
+            ),
+            "missing meaningful signal": (
+                raw_snapshot_with_content("Other", "Content View"),
+                "content_signal_missing_or_generic",
+            ),
+        }
+        rejection = getattr(bridge, "_target_app_content_rejection", lambda _nodes: None)
+
+        for name, (nodes, expected) in cases.items():
+            with self.subTest(name=name):
+                self.assertEqual(rejection(nodes), expected)
+                self.assertFalse(bridge._has_target_app_content(nodes))
+
+    def test_readiness_schema_summary_is_bounded_and_contains_no_app_text(self) -> None:
+        """Diagnostics expose field shape without labels, identifiers, refs, or values."""
+        bridge = AgentDeviceBridge(app_id="com.example.authored")
+        nodes = authored_content_without_identifiers()
+        for index in range(4, 12):
+            nodes.append({
+                **copy.deepcopy(nodes[2]),
+                "index": index,
+                "label": f"secret-label-{index}",
+                "value": f"secret-value-{index}",
+                "identifier": f"secret-id-{index}",
+                "ref": f"secret-ref-{index}",
+        })
+        nodes[2].update({
+            "type": "SecretTypeValue",
+            "label": "secret-label-2",
+            "value": "secret-value-2",
+            "identifier": "secret-id-2",
+            "ref": "secret-ref-2",
+            "rect": {"width": "secret-width", "height": 44},
+            "hittable": "secret-hittable",
+        })
+        summarize = getattr(bridge, "_snapshot_schema_summary", lambda _nodes: None)
+
+        summary = summarize(nodes)
+
+        self.assertIsInstance(summary, dict)
+        self.assertEqual(summary["node_count"], 12)
+        self.assertTrue(summary["nodes_truncated"])
+        self.assertEqual(len(summary["nodes"]), 8)
+        self.assertEqual(
+            summary["nodes"][0],
+            {
+                "node_is_object": True,
+                "type": "Application",
+                "index": 0,
+                "depth": 0,
+                "parentIndex": None,
+                "rect_present": True,
+                "rect_is_object": True,
+                "rect_width_is_number": True,
+                "rect_height_is_number": True,
+                "rect_positive_size": True,
+                "hittable_present": True,
+                "hittable_is_boolean": True,
+                "hittable_true": True,
+            },
+        )
+        serialized = json.dumps(summary, sort_keys=True)
+        self.assertLess(len(serialized), 5_000)
+        for secret in (
+            "SecretTypeValue",
+            "secret-label",
+            "secret-value",
+            "secret-id",
+            "secret-ref",
+            "secret-width",
+            "secret-hittable",
+        ):
+            self.assertNotIn(secret, serialized)
+        for forbidden_field in ('"label"', '"value"', '"identifier"', '"ref"'):
+            self.assertNotIn(forbidden_field, serialized)
+
+    @patch.dict(os.environ, {"EVAL_APP_READY_TIMEOUT_SEC": "0.5"})
+    @patch("eval_harness.evaluator.ios_agentic.agent_device.bridge.time.sleep")
+    def test_readiness_timeout_includes_final_safe_reason_and_schema_summary(
+        self,
+        _sleep,
+    ) -> None:
+        """The final evaluator error explains rejection without app-owned strings."""
+        nodes = raw_snapshot_with_content("Other", "Content View")
+        nodes[0].update({
+            "label": "secret-app-label",
+            "value": "secret-note-body",
+            "identifier": "secret-note-id",
+        })
+        nodes[2].update({
+            "ref": "secret-note-ref",
+        })
+        bridge = SequencedAlertRestartBridge([nodes])
+
+        with patch(
+            "eval_harness.evaluator.ios_agentic.agent_device.bridge.time.time",
+            side_effect=[10.0, 10.0, 11.0],
+        ):
+            result = bridge._wait_for_target_app_content(
+                is_dev_client=False,
+                deep_link="example://ready",
+                preflight=True,
+            )
+
+        self.assertFalse(result.success)
+        self.assertIn(
+            "final_readiness_rejection=content_signal_missing_or_generic",
+            result.error,
+        )
+        self.assertIn("snapshot_schema=", result.error)
+        summary = json.loads(result.error.split("snapshot_schema=", 1)[1])
+        self.assertEqual(summary["node_count"], 3)
+        self.assertEqual(len(summary["nodes"]), 3)
+        self.assertNotIn("secret-app-label", result.error)
+        self.assertNotIn("secret-note-body", result.error)
+        self.assertNotIn("secret-note-id", result.error)
+        self.assertNotIn("secret-note-ref", result.error)
 
     def test_readiness_accepts_nonhittable_label_with_positive_rect(self) -> None:
         """Rendered text is positive UI evidence even when it is not interactive."""

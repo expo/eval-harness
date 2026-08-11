@@ -62,6 +62,13 @@ _TYPE_TOKEN = {
     "TabBar": "tab-bar",
     "Toolbar": "toolbar",
 }
+_SAFE_SNAPSHOT_TYPES = frozenset({
+    *_TYPE_TOKEN,
+    "Alert",
+    "Link",
+    "SearchField",
+    "TextView",
+})
 
 
 def _type_token(t: str | None) -> str:
@@ -314,10 +321,12 @@ class AgentDeviceBridge:
         return False
 
     @staticmethod
-    def _has_valid_ios_snapshot_tree(nodes: list[dict]) -> bool:
-        """Validate the structural fields emitted by iOS agent-device 0.17.6."""
-        if not nodes or any(not isinstance(node, dict) for node in nodes):
-            return False
+    def _ios_snapshot_tree_rejection(nodes: list[dict]) -> str | None:
+        """Return the exact violated iOS agent-device 0.17.6 tree invariant."""
+        if not nodes:
+            return "snapshot_empty"
+        if any(not isinstance(node, dict) for node in nodes):
+            return "snapshot_node_not_object"
 
         nodes_by_index: dict[int, dict] = {}
         for node in nodes:
@@ -327,12 +336,16 @@ class AgentDeviceBridge:
                 not isinstance(index, int)
                 or isinstance(index, bool)
                 or index < 0
-                or index in nodes_by_index
-                or not isinstance(depth, int)
+            ):
+                return "node_index_invalid"
+            if index in nodes_by_index:
+                return "node_index_duplicate"
+            if (
+                not isinstance(depth, int)
                 or isinstance(depth, bool)
                 or depth < 0
             ):
-                return False
+                return "node_depth_invalid"
             nodes_by_index[index] = node
 
         root = nodes[0]
@@ -342,7 +355,7 @@ class AgentDeviceBridge:
             or root.get("depth") != 0
             or root.get("parentIndex") is not None
         ):
-            return False
+            return "application_root_invalid"
 
         for index, node in nodes_by_index.items():
             if index == 0:
@@ -353,32 +366,120 @@ class AgentDeviceBridge:
                 or isinstance(parent_index, bool)
                 or parent_index < 0
             ):
-                return False
-            parent = nodes_by_index.get(parent_index)
-            if parent is None or node["depth"] != parent["depth"] + 1:
-                return False
+                return "node_parent_index_invalid"
+            if parent_index not in nodes_by_index:
+                return "node_parent_missing"
 
+        for index in nodes_by_index:
+            if index == 0:
+                continue
             seen: set[int] = set()
             cursor = index
             while cursor != 0:
                 if cursor in seen:
-                    return False
+                    return "node_parent_cycle"
                 seen.add(cursor)
-                current = nodes_by_index.get(cursor)
-                if current is None:
-                    return False
-                next_cursor = current.get("parentIndex")
-                if (
-                    not isinstance(next_cursor, int)
-                    or isinstance(next_cursor, bool)
-                    or next_cursor < 0
-                ):
-                    return False
-                cursor = next_cursor
-        return True
+                cursor = nodes_by_index[cursor]["parentIndex"]
 
-    def _has_target_app_content(self, nodes: list[dict]) -> bool:
-        """True when the bound target session exposes useful, non-shell UI.
+        for index, node in nodes_by_index.items():
+            if index == 0:
+                continue
+            parent_index = node["parentIndex"]
+            if parent_index >= index:
+                return "node_parent_not_preceding_child"
+            parent = nodes_by_index[parent_index]
+            # `snapshot -i --raw` filters intermediary AX nodes and reparents
+            # descendants while retaining their original accessibility depth.
+            if node["depth"] <= parent["depth"]:
+                return "node_depth_not_increasing"
+        return None
+
+    @classmethod
+    def _has_valid_ios_snapshot_tree(cls, nodes: list[dict]) -> bool:
+        """Validate the structural fields emitted by iOS agent-device 0.17.6."""
+        return cls._ios_snapshot_tree_rejection(nodes) is None
+
+    @staticmethod
+    def _snapshot_schema_summary(nodes: list[dict], max_nodes: int = 8) -> dict:
+        """Bounded raw-node shape only; never app-owned accessibility text."""
+        summarized: list[dict] = []
+        for raw_node in nodes[:max_nodes]:
+            node_is_object = isinstance(raw_node, dict)
+            node = raw_node if node_is_object else {}
+            raw_type = node.get("type")
+            safe_type = (
+                raw_type
+                if isinstance(raw_type, str) and raw_type in _SAFE_SNAPSHOT_TYPES
+                else None
+            )
+            rect_present = "rect" in node
+            rect = node.get("rect")
+            rect_is_object = isinstance(rect, dict)
+            width = rect.get("width") if rect_is_object else None
+            height = rect.get("height") if rect_is_object else None
+            width_is_number = (
+                isinstance(width, (int, float)) and not isinstance(width, bool)
+            )
+            height_is_number = (
+                isinstance(height, (int, float)) and not isinstance(height, bool)
+            )
+            hittable = node.get("hittable")
+            summarized.append({
+                "node_is_object": node_is_object,
+                "type": safe_type,
+                "index": (
+                    node.get("index")
+                    if isinstance(node.get("index"), int)
+                    and not isinstance(node.get("index"), bool)
+                    else None
+                ),
+                "depth": (
+                    node.get("depth")
+                    if isinstance(node.get("depth"), int)
+                    and not isinstance(node.get("depth"), bool)
+                    else None
+                ),
+                "parentIndex": (
+                    node.get("parentIndex")
+                    if isinstance(node.get("parentIndex"), int)
+                    and not isinstance(node.get("parentIndex"), bool)
+                    else None
+                ),
+                "rect_present": rect_present,
+                "rect_is_object": rect_is_object,
+                "rect_width_is_number": width_is_number,
+                "rect_height_is_number": height_is_number,
+                "rect_positive_size": (
+                    width_is_number and height_is_number and width > 0 and height > 0
+                ),
+                "hittable_present": "hittable" in node,
+                "hittable_is_boolean": isinstance(hittable, bool),
+                "hittable_true": hittable is True,
+            })
+        return {
+            "node_count": len(nodes),
+            "nodes_truncated": len(nodes) > max_nodes,
+            "nodes": summarized,
+        }
+
+    @staticmethod
+    def _has_positive_rect(node: dict) -> bool:
+        rect = node.get("rect")
+        if not isinstance(rect, dict):
+            return False
+        width = rect.get("width")
+        height = rect.get("height")
+        return (
+            isinstance(width, (int, float))
+            and not isinstance(width, bool)
+            and width > 0
+            and isinstance(height, (int, float))
+            and not isinstance(height, bool)
+            and height > 0
+        )
+
+    def _target_app_content_rejection(self, nodes: list[dict]) -> str | None:
+        """Return why the bound target session is not yet useful app UI.
 
         On pinned agent-device 0.17.6, iOS SnapshotNode does not contain a
         bundle id, process id, or visibleToUser field. Ownership comes from the
@@ -388,55 +489,54 @@ class AgentDeviceBridge:
         evidence the iOS raw snapshot actually supplies: a well-formed
         Application-rooted tree plus meaningful, rendered or hittable content.
         """
-        if not self._has_valid_ios_snapshot_tree(nodes):
-            return False
+        structural_rejection = self._ios_snapshot_tree_rejection(nodes)
+        if structural_rejection is not None:
+            return structural_rejection
         app = nodes[0]
         if app.get("label") == "AgentDeviceRunner":
-            return False
+            return "agent_device_runner"
         if any(node.get("type") == "Alert" for node in nodes):
-            return False
+            return "system_alert_visible"
         if self._blocking_app_shell_error(nodes) is not None:
-            return False
+            return "app_shell_error"
 
         tree_text = " ".join(
             str(node.get(field) or "")
             for node in nodes
             for field in ("label", "value", "identifier")
         )
-        dev_tools = (
+        if "Bundling " in tree_text or "Loading JavaScript bundle" in tree_text:
+            return "expo_bundle_loading_shell"
+        if "Open in" in tree_text and "Open" in tree_text:
+            return "expo_open_dialog_shell"
+        if "Continue" in tree_text and (
+            "Expo Go" in tree_text or "Open this project" in tree_text
+        ):
+            return "expo_continue_shell"
+        if any(marker in tree_text for marker in (
             "Runtime version:",
             "Source code explorer",
             "Open DevTools",
             "Toggle performance monitor",
             "dev-tools",
-        )
-        reconnect_errors = (
+        )):
+            return "expo_dev_tools_shell"
+        if "OK" in tree_text and any(marker in tree_text for marker in (
             "Could not connect",
             "Unable to connect",
             "Something went wrong",
             "No compatible apps",
-        )
-        launcher_markers = (
+        )):
+            return "expo_reconnect_shell"
+        if any(marker in tree_text for marker in (
             "Recently opened",
             "Development servers",
             "Enter URL manually",
             "Scan QR code",
-        )
-        known_shell = (
-            "Bundling " in tree_text or
-            "Loading JavaScript bundle" in tree_text or
-            ("Continue" in tree_text and (
-                "Expo Go" in tree_text or "Open this project" in tree_text
-            )) or
-            any(marker in tree_text for marker in dev_tools) or
-            ("OK" in tree_text and any(
-                marker in tree_text for marker in reconnect_errors
-            )) or
-            any(marker in tree_text for marker in launcher_markers) or
-            "Bottom Sheet" in tree_text
-        )
-        if known_shell:
-            return False
+        )):
+            return "expo_launcher_shell"
+        if "Bottom Sheet" in tree_text:
+            return "expo_bottom_sheet_shell"
 
         content_types = {
             "StaticText",
@@ -465,33 +565,29 @@ class AgentDeviceBridge:
             "screen",
             "container",
         }
-        def has_positive_rect(node: dict) -> bool:
-            rect = node.get("rect")
-            if not isinstance(rect, dict):
-                return False
-            width = rect.get("width")
-            height = rect.get("height")
-            return (
-                isinstance(width, (int, float))
-                and not isinstance(width, bool)
-                and width > 0
-                and isinstance(height, (int, float))
-                and not isinstance(height, bool)
-                and height > 0
-            )
-
-        for node in nodes:
-            if node.get("type") not in content_types:
-                continue
-            if node.get("hittable") is not True and not has_positive_rect(node):
-                continue
+        content_nodes = [
+            node for node in nodes if node.get("type") in content_types
+        ]
+        if not content_nodes:
+            return "no_supported_content_nodes"
+        rendered_nodes = [
+            node for node in content_nodes
+            if node.get("hittable") is True or self._has_positive_rect(node)
+        ]
+        if not rendered_nodes:
+            return "content_not_rendered_or_hittable"
+        for node in rendered_nodes:
             signals = [
                 str(node.get(field) or "").strip()
                 for field in ("label", "value", "identifier")
             ]
             if any(signal and signal.lower() not in generic_content for signal in signals):
-                return True
-        return False
+                return None
+        return "content_signal_missing_or_generic"
+
+    def _has_target_app_content(self, nodes: list[dict]) -> bool:
+        """True when the bound target session exposes useful, non-shell UI."""
+        return self._target_app_content_rejection(nodes) is None
 
     @staticmethod
     def _visible_alert_title(nodes: list[dict]) -> str | None:
@@ -1411,11 +1507,18 @@ class AgentDeviceBridge:
         ready_timeout = float(os.environ.get("EVAL_APP_READY_TIMEOUT_SEC", "30"))
         deadline = time.time() + ready_timeout
         dismiss_attempts = 0
+        last_readiness_rejection = "snapshot_unavailable"
+        last_snapshot_summary = self._snapshot_schema_summary([])
         while time.time() < deadline:
             nodes = self._snapshot_raw()
             if nodes is None:
+                last_readiness_rejection = "snapshot_unavailable"
+                last_snapshot_summary = self._snapshot_schema_summary([])
                 time.sleep(1.5)
                 continue
+
+            last_readiness_rejection = self._target_app_content_rejection(nodes)
+            last_snapshot_summary = self._snapshot_schema_summary(nodes)
 
             # If agent-device's session is showing its own runner, re-bind to
             # the target app and try again on the next iteration.
@@ -1567,14 +1670,19 @@ class AgentDeviceBridge:
                 return AgentDeviceResult(
                     success=False,
                     output="",
-                    error=f"restart_app: app shell error visible: {blocking_error}; {self._debug_node_summary(nodes)}",
+                    error=(
+                        "restart_app: app shell error visible: "
+                        f"{blocking_error}; readiness_rejection=app_shell_error; "
+                        "snapshot_schema="
+                        f"{json.dumps(last_snapshot_summary, sort_keys=True, separators=(',', ':'))}"
+                    ),
                 )
 
             # Ready when the already target-bound agent-device session exposes
             # useful accessible UI. TestIDs are strong evidence when present
             # but optional; the pinned iOS raw shape has structural/geometry
             # fields rather than bundle/process/visibility metadata.
-            if self._has_target_app_content(nodes):
+            if last_readiness_rejection is None:
                 if self.verbose:
                     print(f"  [bridge] target app content ready: {self._debug_node_summary(nodes)}")
                 return AgentDeviceResult(success=True, output="ready")
@@ -1583,7 +1691,12 @@ class AgentDeviceBridge:
 
         return AgentDeviceResult(
             success=False, output="",
-            error=f"restart_app: app did not become ready within {ready_timeout:g}s",
+            error=(
+                f"restart_app: app did not become ready within {ready_timeout:g}s; "
+                f"final_readiness_rejection={last_readiness_rejection}; "
+                "snapshot_schema="
+                f"{json.dumps(last_snapshot_summary, sort_keys=True, separators=(',', ':'))}"
+            ),
         )
 
     def cleanup(self) -> None:
