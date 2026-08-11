@@ -22,6 +22,7 @@ from typing import Literal
 
 
 PlanStatus = Literal["in_progress", "completed", "not_applicable", "evaluator_error"]
+AbortScope = Literal["plan", "suite"]
 
 
 @dataclass
@@ -55,7 +56,7 @@ class StepResult:
 
 @dataclass
 class TerminalEvidence:
-    """Human-only evidence for a formal step that did not reach scoring."""
+    """Human-only evidence for a formal step or pre-plan lifecycle abort."""
 
     step_number: int
     step_name: str
@@ -72,6 +73,7 @@ class TestPlanResult:
     status: PlanStatus = "in_progress"
     error_stage: str = ""
     error_reason: str = ""
+    abort_scope: AbortScope = "plan"
     not_applicable: bool = False  # True when seed phase signaled N/A; formal steps skipped
     na_reason: str = ""  # the agent's N/A justification (from the seed complete_step summary)
 

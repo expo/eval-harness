@@ -147,9 +147,9 @@ class AgentDeviceEvaluator:
         restart_label = "maestro hybrid" if self.hybrid_restart else "agent-device native"
         print(f"\n  Resetting app state ({restart_label})...\n")
         reset = (
-            self.bridge.restart_app_hybrid(clear_state=True)
+            self.bridge.restart_app_hybrid(clear_state=True, preflight=True)
             if self.hybrid_restart
-            else self.bridge.restart_app(clear_state=True)
+            else self.bridge.restart_app(clear_state=True, preflight=True)
         )
         # If Maestro-hybrid restart failed (e.g. 90s timeout, JVM hang, transient
         # CLI issue), fall back to the native agent-device restart before aborting
@@ -163,14 +163,58 @@ class AgentDeviceEvaluator:
             print(f"  ⚠️  maestro restart failed: {fallback_err}")
             print(f"  → falling back to agent-device native restart…")
             tracer.log("restart_fallback", primary_err=fallback_err)
-            reset = self.bridge.restart_app(clear_state=True)
+            reset = self.bridge.restart_app(clear_state=True, preflight=True)
+
+        for diagnostic in getattr(self.bridge, "last_restart_diagnostics", []):
+            tracer.log("preflight_system_alert", **diagnostic)
+
         if not reset.success:
             err = reset.error or reset.output or "(no error detail)"
             print(f"\n  ❌ restart_app failed: {err}")
-            tracer.log("plan_aborted", reason="restart_app_failed", error=err)
+            screenshot_path, screenshot_error = self._capture_evidence_screenshot(
+                tracer,
+                Path("screenshots") / "preflight-final.png",
+            )
+            tracer.log(
+                "plan_aborted",
+                reason="restart_app_failed_before_model_session",
+                error=err,
+                abort_scope="suite",
+                screenshot=screenshot_path,
+                screenshot_error=screenshot_error,
+            )
             result.status = "evaluator_error"
             result.error_stage = "restart"
             result.error_reason = err
+            result.abort_scope = "suite"
+            result.terminal_evidence.append(
+                TerminalEvidence(
+                    step_number=0,
+                    step_name="pre-plan readiness",
+                    screenshot_path=screenshot_path,
+                    screenshot_error=screenshot_error,
+                )
+            )
+            tracer.write_summary({
+                "plan": test_plan_path.name,
+                "run_index": run_index,
+                "platform": self.platform,
+                "driver": "agent-device",
+                "status": "evaluator_error",
+                "error_stage": "restart",
+                "error_reason": err,
+                "abort_scope": "suite",
+                "score": None,
+                "full_points": None,
+                "total_usage": UsageAccumulator().snapshot(),
+                "steps": [],
+                "terminal_evidence": [{
+                    "step_number": 0,
+                    "step_name": "pre-plan readiness",
+                    "screenshot": screenshot_path,
+                    "screenshot_error": screenshot_error,
+                }],
+            })
             return result
 
         # Build the SDK options. Tools are an MCP server; hooks track per-tool durations.
@@ -450,6 +494,14 @@ class AgentDeviceEvaluator:
     ) -> tuple[str | None, str | None]:
         """Best-effort human evidence capture, independent of step scoring."""
         relative = Path("screenshots") / f"step-{step_number:02d}-final.png"
+        return self._capture_evidence_screenshot(tracer, relative)
+
+    def _capture_evidence_screenshot(
+        self,
+        tracer: Tracer,
+        relative: Path,
+    ) -> tuple[str | None, str | None]:
+        """Capture one named human-evidence frame without changing scoring."""
         try:
             screenshot = self.bridge.capture_screenshot(str(tracer.root / relative))
         except Exception as exc:

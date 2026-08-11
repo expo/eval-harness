@@ -108,7 +108,7 @@ def _serialize_plan_result(
         }
 
     if result.status == "evaluator_error":
-        return {
+        record = {
             "test_plan": plan_path.name,
             "run_index": run_index,
             "status": "evaluator_error",
@@ -128,6 +128,9 @@ def _serialize_plan_result(
                 for evidence in result.terminal_evidence
             ],
         }
+        if result.abort_scope == "suite":
+            record["abort_scope"] = "suite"
+        return record
 
     if result.status != "completed":
         return {
@@ -206,16 +209,19 @@ def _build_suite_output(
     not_applicable = [
         plan for plan in plan_results if plan.get("status") == "not_applicable"
     ]
-    plan_errors = [
-        {
+    plan_errors = []
+    for plan in plan_results:
+        if plan.get("status") != "evaluator_error":
+            continue
+        error = {
             "test_plan": plan.get("test_plan"),
             "run_index": plan.get("run_index"),
             "stage": plan.get("error_stage"),
             "reason": plan.get("error_reason"),
         }
-        for plan in plan_results
-        if plan.get("status") == "evaluator_error"
-    ]
+        if plan.get("abort_scope") == "suite":
+            error["scope"] = "suite"
+        plan_errors.append(error)
     evaluator_errors = plan_errors + suite_errors
     terminal_statuses = {"completed", "not_applicable", "evaluator_error"}
     terminal_plan_count = sum(
@@ -297,6 +303,7 @@ def _run_suite(
     _write_checkpoint(output_path, output)
 
     try:
+        abort_suite = False
         for plan_path in test_plans:
             for run_index in range(1, repeat + 1):
                 print(f"\n{'#'*60}")
@@ -328,6 +335,11 @@ def _run_suite(
                     suite_errors,
                 )
                 _write_checkpoint(output_path, output)
+                if record.get("abort_scope") == "suite":
+                    abort_suite = True
+                    break
+            if abort_suite:
+                break
     finally:
         try:
             evaluator.bridge.cleanup()

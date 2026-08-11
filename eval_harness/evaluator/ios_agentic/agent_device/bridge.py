@@ -21,10 +21,10 @@ simulator boot).
      if a previous Maestro run left it running on the same simulator)
   3. (clear_state) rm -rf Expo Go's Documents/Library/tmp
   4. simctl openurl exp://localhost:8081
-  5. Option B app-readiness polling: every ~1.5s, snapshot; if "Bottom Sheet"
-     visible, blind-tap top-of-screen to dismiss; otherwise check that the
-     snapshot has > 2 nodes (Expo Go's bare shell is 2 nodes — anything more
-     means the JS bundle has rendered). Timeout 30s.
+  5. App-readiness polling: dismiss known Expo launcher surfaces; during the
+     evaluator-owned preflight only, choose the neutral deny/not-now response
+     for recognized iOS permission prompts; then require app-owned testID UI.
+     Unknown alerts abort with their title instead of being blindly dismissed.
 
 iOS-only. Android raises NotImplementedError for now.
 """
@@ -134,6 +134,10 @@ class AgentDeviceBridge:
             print(f"  [bridge] app_id={cfg['app_id']} deep_link={cfg['deep_link']}")
         # Common flags appended to every agent-device call.
         self._common_args = ["--session", session, "--platform", platform]
+        # A restart may make a neutral evaluator-owned choice before the model
+        # exists. Keep those choices reviewable without coupling this bridge to
+        # the plan tracer. The evaluator copies each entry into its trace.
+        self.last_restart_diagnostics: list[dict[str, str]] = []
 
     # ----- subprocess helpers -----
 
@@ -310,6 +314,127 @@ class AgentDeviceBridge:
         """True when React Native has rendered app-owned, testID-addressable UI."""
         content_types = {"StaticText", "Button", "Image", "SecureTextField", "TextField", "Other"}
         return any(n.get("type") in content_types and n.get("identifier") for n in nodes)
+
+    @staticmethod
+    def _visible_alert_title(nodes: list[dict]) -> str | None:
+        """Return the visible iOS alert title only when the tree identifies an alert."""
+        alerts = [n for n in nodes if n.get("type") == "Alert"]
+        if not alerts:
+            return None
+        for node in alerts:
+            label = node.get("label")
+            if (
+                isinstance(label, str)
+                and label.strip()
+                and label.strip().lower() not in {"alert", "system alert"}
+            ):
+                return label.strip()
+        for node in nodes:
+            if node.get("type") != "StaticText":
+                continue
+            label = node.get("label")
+            if isinstance(label, str) and label.strip():
+                return label.strip()
+        return "unlabelled alert"
+
+    @staticmethod
+    def _neutral_permission_button(
+        nodes: list[dict],
+        alert_title: str,
+    ) -> tuple[str, str | None] | None:
+        """Return the exact deny/not-now label and snapshot ref for a permission prompt."""
+        labels = [
+            str(node.get("label") or "").strip()
+            for node in nodes
+            if node.get("type") in {"Alert", "StaticText"}
+        ]
+        prompt_text = " ".join([alert_title, *labels])
+        permission_prompt = re.search(
+            r"would like .*?(?:access|use|send|find|connect|track|paste|record)|"
+            r"allow .+ to (?:use|access|send|find|connect|track|paste|record)",
+            prompt_text,
+            re.I,
+        )
+        if not permission_prompt:
+            return None
+
+        for node in nodes:
+            if node.get("type") != "Button":
+                continue
+            label = str(node.get("label") or "").strip()
+            normalized = (
+                label.lower()
+                .replace("’", "'")
+                .replace("‘", "'")
+                .replace("“", '"')
+                .replace("”", '"')
+            )
+            if (
+                normalized.startswith("don't allow")
+                or normalized == "deny"
+                or normalized == "not now"
+                or (normalized.startswith("ask ") and normalized.endswith(" not to track"))
+            ):
+                ref = node.get("ref")
+                return label, str(ref) if ref else None
+        return None
+
+    def _handle_visible_alert(
+        self,
+        nodes: list[dict],
+        *,
+        preflight: bool,
+    ) -> AgentDeviceResult | None:
+        """Handle an alert during readiness, or preserve it for an active evaluator."""
+        alert_title = self._visible_alert_title(nodes)
+        if alert_title is None:
+            return None
+
+        if not preflight:
+            return AgentDeviceResult(
+                success=True,
+                output="ready (system alert preserved for evaluator)",
+            )
+
+        neutral_button = self._neutral_permission_button(nodes, alert_title)
+        if neutral_button is None:
+            return AgentDeviceResult(
+                success=False,
+                output="",
+                error=(
+                    "restart_app: blocked by unrecognized iOS system alert: "
+                    f'"{alert_title}"'
+                ),
+            )
+
+        neutral_label, neutral_ref = neutral_button
+        if neutral_ref:
+            selector = neutral_ref if neutral_ref.startswith("@") else f"@{neutral_ref}"
+        else:
+            safe_label = neutral_label.replace('"', '\\"')
+            selector = f'label="{safe_label}"'
+        dismissed = self._run_cmd(["press", selector])
+        if not dismissed.success:
+            detail = dismissed.error or dismissed.output or "no error detail"
+            return AgentDeviceResult(
+                success=False,
+                output="",
+                error=(
+                    f'restart_app: failed to choose neutral permission response '
+                    f'"{neutral_label}" for "{alert_title}": {detail}'
+                ),
+            )
+
+        self.last_restart_diagnostics.append(
+            {
+                "kind": "permission_alert",
+                "phase": "preflight",
+                "alert": alert_title,
+                "action": "dismissed",
+                "button": neutral_label,
+            }
+        )
+        return None
 
     @staticmethod
     def _blocking_app_shell_error(nodes: list[dict]) -> str | None:
@@ -924,7 +1049,11 @@ class AgentDeviceBridge:
 
     # ----- App lifecycle -----
 
-    def restart_app_hybrid(self, clear_state: bool = False) -> AgentDeviceResult:
+    def restart_app_hybrid(
+        self,
+        clear_state: bool = False,
+        preflight: bool = False,
+    ) -> AgentDeviceResult:
         """
         Diagnostic / fallback restart_app that uses a MAESTRO HYBRID approach:
 
@@ -941,6 +1070,8 @@ class AgentDeviceBridge:
         in the evaluator (or in agent_device_tools.py for the LLM-facing
         restart tool).
         """
+        self.last_restart_diagnostics = []
+
         # Lazily instantiate MaestroBridge so the import cost is paid only
         # if/when restart_app is actually called.
         if not hasattr(self, "_maestro"):
@@ -972,24 +1103,41 @@ class AgentDeviceBridge:
         # path already detects and recovers from runner-takeover if it
         # actually happens later.
 
+        if preflight:
+            return self._wait_for_target_app_content(
+                is_dev_client=is_dev_client,
+                deep_link=self.config["deep_link"],
+                preflight=True,
+            )
         return AgentDeviceResult(success=True, output="ready (maestro lifecycle + agent-device interactions)")
 
-    def restart_app(self, clear_state: bool = False) -> AgentDeviceResult:
+    def restart_app(
+        self,
+        clear_state: bool = False,
+        preflight: bool = False,
+    ) -> AgentDeviceResult:
         """Default restart_app: pure agent-device + simctl, no Maestro.
 
         Delegates to the simctl + polling-loop implementation below. The polling
-        loop handles BOTH the Expo dev-tools Bottom Sheet AND the Expo Go
-        "Continue" dialog — matching the surface area the legacy Maestro hybrid
-        path covered.
+        loop handles Expo launcher surfaces and, only when ``preflight=True``,
+        recognized iOS permission prompts. In-session restarts preserve alerts
+        for the evaluator tools instead of deciding them automatically.
 
         If this method ever proves unreliable in practice, callers can swap to
         `restart_app_hybrid()` for the Maestro-fallback path. The CLI flag
         `--native-restart` is retained as a vestigial no-op for the same reason.
         """
-        return self._restart_app_simctl_only(clear_state=clear_state)
+        return self._restart_app_simctl_only(
+            clear_state=clear_state,
+            preflight=preflight,
+        )
 
     # ----- Legacy: original simctl-only restart_app, kept for diagnostic / fallback use -----
-    def _restart_app_simctl_only(self, clear_state: bool = False) -> AgentDeviceResult:
+    def _restart_app_simctl_only(
+        self,
+        clear_state: bool = False,
+        preflight: bool = False,
+    ) -> AgentDeviceResult:
         """Original simctl-based restart_app. Handles Expo Go's Continue dialog
         and Bottom Sheet backdrop in the polling loop; used directly by
         `restart_app_native` and reachable for diagnostic / fallback runs."""
@@ -997,6 +1145,7 @@ class AgentDeviceBridge:
         deep_link = self.config["deep_link"]
         is_dev_client = "expo-development-client" in deep_link
         use_simctl_launch = os.environ.get("EVAL_APP_USE_SIMCTL_LAUNCH") == "1"
+        self.last_restart_diagnostics = []
 
         # 1: terminate Expo Go via Apple's API.
         # NOTE: do NOT also terminate `com.facebook.WebDriverAgentRunner.xctrunner`
@@ -1049,7 +1198,20 @@ class AgentDeviceBridge:
         # delivers). The detect-and-recover path inside `capture_hierarchy`
         # handles runner takeover if it occurs.
 
-        # 4: Option B app-readiness polling. Uses _snapshot_raw + node-level
+        return self._wait_for_target_app_content(
+            is_dev_client=is_dev_client,
+            deep_link=deep_link,
+            preflight=preflight,
+        )
+
+    def _wait_for_target_app_content(
+        self,
+        *,
+        is_dev_client: bool,
+        deep_link: str,
+        preflight: bool,
+    ) -> AgentDeviceResult:
+        # Option B app-readiness polling. Uses _snapshot_raw + node-level
         # checks (not the rendered text) so we can distinguish "target app
         # rendered content" from "agent-device's helper runner has text on
         # screen" — the runner has its own [StaticText] nodes that would
@@ -1075,6 +1237,7 @@ class AgentDeviceBridge:
             # or alongside the Bottom Sheet; check it first so the Bottom
             # Sheet branch isn't masked by a Continue overlay above it.
             labels = " ".join((n.get("label") or "") for n in nodes)
+
             if "Bundling " in labels or "Loading JavaScript bundle" in labels:
                 if self.verbose:
                     print(f"  [bridge] app still bundling/loading: {self._debug_node_summary(nodes)}")
@@ -1094,7 +1257,9 @@ class AgentDeviceBridge:
                     )
                 continue
 
-            if "Continue" in labels:
+            if "Continue" in labels and (
+                "Expo Go" in labels or "Open this project" in labels
+            ):
                 if self.verbose:
                     print(f"  [bridge] dismissing Continue dialog: {self._debug_node_summary(nodes)}")
                 self._run_cmd(["press", 'label="Continue"'])
@@ -1189,6 +1354,20 @@ class AgentDeviceBridge:
                         success=False, output="",
                         error="restart_app: failed to dismiss Bottom Sheet after 10 attempts",
                     )
+                continue
+
+            # Launcher/dev-tool alerts above have existing deterministic
+            # handlers. Only after those are ruled out do we classify an iOS
+            # system alert as a permission prompt or an unknown blocker.
+            diagnostic_count = len(self.last_restart_diagnostics)
+            alert_outcome = self._handle_visible_alert(nodes, preflight=preflight)
+            if alert_outcome is not None:
+                return alert_outcome
+            if len(self.last_restart_diagnostics) > diagnostic_count:
+                # A recognized permission alert was dismissed. Wait for the
+                # app-owned accessibility tree rather than treating the alert
+                # as readiness evidence.
+                time.sleep(1.0)
                 continue
 
             blocking_error = self._blocking_app_shell_error(nodes)

@@ -17,12 +17,26 @@ from eval_harness.evaluator.ios_agentic.prompts.prompt_agent import build_system
 
 
 class FailedRestartBridge:
-    def restart_app(self, clear_state: bool = False) -> AgentDeviceResult:
+    def __init__(self) -> None:
+        self.restart_calls: list[tuple[bool, bool]] = []
+        self.last_restart_diagnostics: list[dict] = []
+        self.screenshot_paths: list[str] = []
+
+    def restart_app(
+        self,
+        clear_state: bool = False,
+        preflight: bool = False,
+    ) -> AgentDeviceResult:
+        self.restart_calls.append((clear_state, preflight))
         return AgentDeviceResult(
             success=False,
             output="",
             error="development client launcher never reached authored app",
         )
+
+    def capture_screenshot(self, path: str | None = None) -> AgentDeviceResult:
+        self.screenshot_paths.append(path or "")
+        return AgentDeviceResult(success=True, output=path or "")
 
 
 class RecordingTracer:
@@ -98,12 +112,18 @@ class CompletionStreamClient:
 
 
 class SuccessfulRestartBridge(FailedRestartBridge):
-    def restart_app(self, clear_state: bool = False) -> AgentDeviceResult:
+    def restart_app(
+        self,
+        clear_state: bool = False,
+        preflight: bool = False,
+    ) -> AgentDeviceResult:
+        self.restart_calls.append((clear_state, preflight))
         return AgentDeviceResult(success=True, output="ready")
 
 
 class RecordingScreenshotBridge(SuccessfulRestartBridge):
     def __init__(self, screenshot_result: AgentDeviceResult) -> None:
+        super().__init__()
         self.screenshot_result = screenshot_result
         self.screenshot_paths: list[str] = []
 
@@ -412,7 +432,8 @@ class AgentDeviceEvaluatorOutcomeTests(unittest.TestCase):
         evaluator = AgentDeviceEvaluator.__new__(AgentDeviceEvaluator)
         evaluator.platform = "ios"
         evaluator.hybrid_restart = False
-        evaluator.bridge = FailedRestartBridge()
+        bridge = FailedRestartBridge()
+        evaluator.bridge = bridge
 
         with (
             patch(
@@ -434,6 +455,71 @@ class AgentDeviceEvaluatorOutcomeTests(unittest.TestCase):
         )
         self.assertEqual(result.score, 0)
         self.assertEqual(result.steps, [])
+        self.assertEqual(result.abort_scope, "suite")
+        self.assertEqual(bridge.restart_calls, [(True, True)])
+        self.assertEqual(len(result.terminal_evidence), 1)
+        self.assertEqual(
+            result.terminal_evidence[0].screenshot_path,
+            "screenshots/preflight-final.png",
+        )
+        self.assertEqual(
+            bridge.screenshot_paths,
+            ["/tmp/test-ios-evaluator-trace/screenshots/preflight-final.png"],
+        )
+        self.assertFalse(
+            any(event == "tool_call" and fields.get("tool") == "abort_step"
+                for event, fields in RecordingTracer.latest.events),
+        )
+        self.assertEqual(
+            RecordingTracer.latest.summary["error_reason"],
+            "development client launcher never reached authored app",
+        )
+
+    def test_spec_preflight_alert_diagnostics_are_recorded_before_sdk_session(self) -> None:
+        """Specification: neutral lifecycle choices are reviewable trace evidence.
+
+        Oracle: the bridge is invoked in preflight mode and its exact diagnostic
+        is emitted before Claude SDK options or tools are needed.
+        Catches: silent permission-state mutation or in-session auto-dismissal.
+        """
+        bridge = SuccessfulRestartBridge()
+        bridge.last_restart_diagnostics = [
+            {
+                "kind": "permission_alert",
+                "phase": "preflight",
+                "alert": "“Pool” Would Like to Use Your Current Location",
+                "action": "dismissed",
+                "button": "Don’t Allow",
+            }
+        ]
+        evaluator = self._formal_step_evaluator(bridge)
+
+        with (
+            patch(
+                "eval_harness.evaluator.ios_agentic.agent_device.evaluator.parse_test_plan",
+                return_value={"full_points": 0, "steps": [], "seeding": ""},
+            ),
+            patch(
+                "eval_harness.evaluator.ios_agentic.agent_device.evaluator.Tracer",
+                RecordingTracer,
+            ),
+            patch(
+                "eval_harness.evaluator.ios_agentic.agent_device.evaluator.ClaudeSDKClient",
+                PassiveSdkClient,
+            ),
+        ):
+            result = asyncio.run(
+                evaluator._evaluate_test_plan_async(Path("test_empty.txt"))
+            )
+
+        self.assertEqual(result.status, "completed")
+        self.assertEqual(bridge.restart_calls, [(True, True)])
+        diagnostic_event = next(
+            fields
+            for event, fields in RecordingTracer.latest.events
+            if event == "preflight_system_alert"
+        )
+        self.assertEqual(diagnostic_event, bridge.last_restart_diagnostics[0])
 
     def test_regression_unexpected_sdk_exception_closes_plan_tracer(self) -> None:
         """Regression: plan-local tracing releases console ownership on errors.

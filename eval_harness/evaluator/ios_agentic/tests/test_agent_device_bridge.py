@@ -59,6 +59,52 @@ class RecordingDevClientRestartBridge(AgentDeviceBridge):
         ]
 
 
+class SequencedAlertRestartBridge(AgentDeviceBridge):
+    """Keep restart/readiness real while replacing simulator and CLI I/O."""
+
+    def __init__(self, snapshots: list[list[dict]]) -> None:
+        super().__init__(app_id="com.example.authored", deep_link="example://ready")
+        self.snapshots = list(snapshots)
+        self.last_snapshot = snapshots[-1]
+        self.commands: list[list[str]] = []
+
+    def _simctl(self, args: list[str], timeout: int = 15) -> AgentDeviceResult:
+        return AgentDeviceResult(success=True, output="ok")
+
+    def _snapshot_raw(self) -> list[dict]:
+        if self.snapshots:
+            self.last_snapshot = self.snapshots.pop(0)
+        return self.last_snapshot
+
+    def _run_cmd(
+        self,
+        args: list[str],
+        timeout: int | None = None,
+    ) -> AgentDeviceResult:
+        self.commands.append(args)
+        return AgentDeviceResult(success=True, output="ok")
+
+
+def permission_alert(title: str, deny: str, allow: str) -> list[dict]:
+    return [
+        {"type": "Application", "label": "Authored App"},
+        {"type": "Alert", "label": title},
+        {"type": "Button", "label": deny, "ref": "e7"},
+        {"type": "Button", "label": allow, "ref": "e8"},
+    ]
+
+
+def authored_content() -> list[dict]:
+    return [
+        {"type": "Application", "label": "Authored App"},
+        {
+            "type": "Button",
+            "identifier": "authored-app-ready",
+            "label": "Ready",
+        },
+    ]
+
+
 class RecordingMaestroRestart:
     def __init__(self) -> None:
         self.clear_state_calls: list[bool] = []
@@ -151,6 +197,157 @@ class AgentDeviceBridgeFillTests(unittest.TestCase):
 
 
 class AgentDeviceBridgeRestartTests(unittest.TestCase):
+    @patch("eval_harness.evaluator.ios_agentic.agent_device.bridge.time.sleep")
+    def test_spec_preflight_neutrally_dismisses_known_permission_alerts(
+        self,
+        _sleep,
+    ) -> None:
+        """Specification: cold-launch permissions cannot hide authored UI.
+
+        Oracle: recognized permission dialogs choose the literal neutral button,
+        record that decision, then require app-owned readiness.
+        Catches: timing out on a valid app or accepting the alert as app content.
+        """
+        cases = [
+            (
+                "“Pool” Would Like to Use Your Current Location",
+                "Don’t Allow",
+                "Allow While Using App",
+            ),
+            (
+                "“Notes” Would Like to Send You Notifications",
+                "Don't Allow",
+                "Allow",
+            ),
+            (
+                "“Reader” Would Like Permission to Track You Across Apps and Websites",
+                "Ask App Not to Track",
+                "Allow",
+            ),
+        ]
+
+        for title, deny, allow in cases:
+            with self.subTest(title=title):
+                bridge = SequencedAlertRestartBridge(
+                    [permission_alert(title, deny, allow), authored_content()]
+                )
+
+                result = bridge.restart_app(clear_state=True, preflight=True)
+
+                self.assertTrue(result.success, result.error)
+                self.assertEqual(bridge.commands, [["press", "@e7"]])
+                self.assertEqual(
+                    bridge.last_restart_diagnostics,
+                    [
+                        {
+                            "kind": "permission_alert",
+                            "phase": "preflight",
+                            "alert": title,
+                            "action": "dismissed",
+                            "button": deny,
+                        }
+                    ],
+                )
+
+    @patch("eval_harness.evaluator.ios_agentic.agent_device.bridge.time.sleep")
+    def test_spec_unknown_preflight_alert_aborts_without_blind_dismissal(
+        self,
+        _sleep,
+    ) -> None:
+        """Specification: the harness never guesses on an unknown alert.
+
+        Oracle: an unrecognized blocking alert returns its title immediately and
+        issues no press command.
+        Catches: blind cancel/coordinate taps or a full readiness timeout.
+        """
+        title = "Sign in to your Apple Account"
+        bridge = SequencedAlertRestartBridge(
+            [
+                [
+                    {"type": "Application", "label": "Authored App"},
+                    {"type": "Alert", "label": "System Alert"},
+                    {"type": "StaticText", "label": title},
+                    {"type": "Button", "label": "Cancel", "ref": "e7"},
+                    {"type": "Button", "label": "Continue", "ref": "e8"},
+                ]
+            ]
+        )
+
+        result = bridge.restart_app(clear_state=True, preflight=True)
+
+        self.assertFalse(result.success)
+        self.assertEqual(
+            result.error,
+            'restart_app: blocked by unrecognized iOS system alert: "Sign in to your Apple Account"',
+        )
+        self.assertEqual(bridge.commands, [])
+
+    @patch("eval_harness.evaluator.ios_agentic.agent_device.bridge.time.sleep")
+    def test_regression_known_expo_continue_alert_keeps_existing_handler(
+        self,
+        _sleep,
+    ) -> None:
+        """Regression: system-alert detection does not intercept Expo shell UI.
+
+        Oracle: the established Continue affordance is pressed before unknown
+        alert classification, then authored app content becomes ready.
+        Catches: treating every UIAlert tree as an unknown iOS permission block.
+        """
+        bridge = SequencedAlertRestartBridge(
+            [
+                [
+                    {"type": "Application", "label": "Expo Go"},
+                    {"type": "Alert", "label": "Open this project?"},
+                    {"type": "Button", "label": "Continue", "ref": "e8"},
+                ],
+                authored_content(),
+            ]
+        )
+
+        result = bridge.restart_app(clear_state=True, preflight=True)
+
+        self.assertTrue(result.success, result.error)
+        self.assertEqual(bridge.commands, [["press", 'label="Continue"']])
+
+    @patch("eval_harness.evaluator.ios_agentic.agent_device.bridge.time.sleep")
+    def test_spec_in_session_restart_preserves_permission_alert_for_evaluator(
+        self,
+        _sleep,
+    ) -> None:
+        """Specification: permission assertions remain under model/tool control.
+
+        Oracle: outside preflight, a recognized permission dialog is a ready UI
+        state and no neutral response is pressed.
+        Catches: silently deciding permission after a formal plan has begun.
+        """
+        title = "“Notes” Would Like to Send You Notifications"
+        bridge = SequencedAlertRestartBridge(
+            [permission_alert(title, "Don't Allow", "Allow")]
+        )
+
+        result = bridge.restart_app(clear_state=False)
+
+        self.assertTrue(result.success, result.error)
+        self.assertEqual(result.output, "ready (system alert preserved for evaluator)")
+        self.assertEqual(bridge.commands, [])
+        self.assertEqual(bridge.last_restart_diagnostics, [])
+
+    @patch("eval_harness.evaluator.ios_agentic.agent_device.bridge.time.sleep")
+    def test_spec_no_alert_still_requires_authored_app_content(self, _sleep) -> None:
+        """Specification: ordinary preflight readiness keeps the app-owned gate.
+
+        Oracle: an authored testID node returns ready without alert diagnostics.
+        Catches: weakening readiness to arbitrary shell text while adding alerts.
+        """
+        bridge = SequencedAlertRestartBridge([authored_content()])
+
+        result = bridge.restart_app(clear_state=True, preflight=True)
+
+        self.assertTrue(result.success, result.error)
+        self.assertEqual(result.output, "ready")
+        self.assertEqual(bridge.commands, [])
+        self.assertEqual(bridge.last_restart_diagnostics, [])
+
     @patch.dict("os.environ", {}, clear=False)
     @patch("eval_harness.evaluator.ios_agentic.agent_device.bridge.time.sleep")
     def test_characterization_dev_client_preserves_shared_launcher_state_by_default(

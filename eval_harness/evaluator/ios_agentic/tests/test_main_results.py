@@ -262,7 +262,76 @@ class CompleteThenRaiseEvaluator:
         raise RuntimeError("SDK stream disconnected")
 
 
+class SuiteBlockingRestartEvaluator:
+    def __init__(self) -> None:
+        self.calls = 0
+        self.bridge = RecordingBridge()
+
+    def evaluate_test_plan(self, plan_path: Path, run_index: int = 1) -> TestPlanResult:
+        self.calls += 1
+        return TestPlanResult(
+            score=0,
+            full_points=6,
+            status="evaluator_error",
+            error_stage="restart",
+            error_reason=(
+                'restart_app: blocked by unrecognized iOS system alert: '
+                '"Sign in to your Apple Account"'
+            ),
+            abort_scope="suite",
+        )
+
+
 class SuiteCheckpointTests(unittest.TestCase):
+    def test_spec_pre_session_restart_block_aborts_suite_after_one_plan(self) -> None:
+        """Specification: one systematic readiness block cannot consume every plan.
+
+        Oracle: a suite-scoped pre-session abort records the first affected plan,
+        leaves remaining plans absent/unscored, and stops invoking the evaluator.
+        Catches: eleven identical readiness waits and fabricated score zeros.
+        """
+        evaluator = SuiteBlockingRestartEvaluator()
+
+        with tempfile.TemporaryDirectory() as td:
+            output_path = Path(td) / "result.json"
+            output, exit_code = _run_suite(
+                evaluator=evaluator,
+                test_plans=[
+                    Path("test_select.txt"),
+                    Path("test_search.txt"),
+                    Path("test_permission.txt"),
+                ],
+                repeat=1,
+                output_path=output_path,
+            )
+            on_disk = json.loads(output_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(exit_code, 1)
+        self.assertEqual(evaluator.calls, 1)
+        self.assertEqual(on_disk, output)
+        self.assertEqual(output["expected_plan_count"], 3)
+        self.assertEqual(output["terminal_plan_count"], 1)
+        self.assertEqual(len(output["test_plans"]), 1)
+        self.assertEqual(output["test_plans"][0]["abort_scope"], "suite")
+        self.assertEqual(output["score"], 0)
+        self.assertEqual(output["full_points"], 0)
+        self.assertEqual(
+            output["evaluator_errors"],
+            [
+                {
+                    "test_plan": "test_select.txt",
+                    "run_index": 1,
+                    "stage": "restart",
+                    "reason": (
+                        'restart_app: blocked by unrecognized iOS system alert: '
+                        '"Sign in to your Apple Account"'
+                    ),
+                    "scope": "suite",
+                }
+            ],
+        )
+        self.assertEqual(evaluator.bridge.cleanup_calls, 1)
+
     def test_regression_checkpoint_survives_later_plan_exception_and_cleanup_runs(self) -> None:
         """Regression: later infrastructure failure preserves earlier evidence.
 
