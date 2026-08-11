@@ -1,26 +1,31 @@
-eval::run_authored() { # command [args...]
-  local scrubbed_env=(
-    CLAUDE_CODE_OAUTH_TOKEN
-    ANTHROPIC_API_KEY
-    ANTHROPIC_AUTH_TOKEN
-    OPENAI_API_KEY
-    META_API_KEY
-    MUSE_API_KEY
-    EXPO_TOKEN
-    EXPO_MCP_BEARER_TOKEN
-    EXPO_MCP_REFRESH_TOKEN
-    MUSE_MCP_TOKEN
-    BRAINTRUST_API_KEY
-    GCP_SA_KEY
-    GOOGLE_APPLICATION_CREDENTIALS
-    GCS_BUCKET
-  )
+eval::authored_env_name_is_sensitive() ( # exported environment variable name
+  local name="$1"
+  shopt -s nocasematch
+  case "$name" in
+    # Expo documents these values as embedded in the public app bundle. Keeping
+    # them is intentional even when the suffix contains TOKEN or KEY.
+    EXPO_PUBLIC_*) return 1 ;;
+    # GCS_BUCKET is evaluator storage metadata rather than a credential, but an
+    # authored process has no need to know the private artifact destination.
+    GCS_BUCKET|*token*|*key*|*secret*|*credential*|*password*|*passwd*|*auth*|*private*)
+      return 0
+      ;;
+  esac
+  return 1
+)
+
+# This creates an environment-variable boundary only. Authored commands still
+# run as the evaluator OS user with its normal filesystem and network access;
+# this helper is not a process sandbox.
+eval::run_authored() ( # command [args...]
   local env_args=() name
-  for name in "${scrubbed_env[@]}"; do
-    env_args+=( -u "$name" )
-  done
+  while IFS= read -r name; do
+    if eval::authored_env_name_is_sensitive "$name"; then
+      env_args+=( -u "$name" )
+    fi
+  done < <(compgen -e)
   /usr/bin/env "${env_args[@]}" "$@"
-}
+)
 
 eval::configure_ios_app_mode() {
   EVAL_IOS_APP_MODE="${EVAL_IOS_APP_MODE:-release}"

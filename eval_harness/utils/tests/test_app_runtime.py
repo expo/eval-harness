@@ -11,22 +11,24 @@ ROOT = Path(__file__).resolve().parents[3]
 APP_RUNTIME = ROOT / "eval_harness" / "utils" / "shell" / "app_runtime.sh"
 IOS_RUNTIME = ROOT / "eval_harness" / "utils" / "shell" / "ios.sh"
 
-AUTHORED_SECRET_ENV = (
-    "CLAUDE_CODE_OAUTH_TOKEN",
-    "ANTHROPIC_API_KEY",
-    "ANTHROPIC_AUTH_TOKEN",
-    "OPENAI_API_KEY",
-    "META_API_KEY",
-    "MUSE_API_KEY",
-    "EXPO_TOKEN",
-    "EXPO_MCP_BEARER_TOKEN",
-    "EXPO_MCP_REFRESH_TOKEN",
-    "MUSE_MCP_TOKEN",
-    "BRAINTRUST_API_KEY",
-    "GCP_SA_KEY",
-    "GOOGLE_APPLICATION_CREDENTIALS",
-    "GCS_BUCKET",
-)
+SENSITIVE_ENV_EXAMPLES = {
+    "CLAUDE_CODE_OAUTH_TOKEN": "secret-known-token",
+    "NPM_TOKEN": "secret-package-token",
+    "SENTRY_AUTH_TOKEN": "secret-vendor-auth",
+    "GITHUB_TOKEN": "secret-source-token",
+    "FUTURE_VENDOR_SECRET": "secret-future-vendor",
+    "EXPECTED_EVALUATOR_SECRET": "secret-evaluator-sentinel",
+    "DATABASE_PASSWORD": "secret-database-password",
+    "SIGNING_PRIVATE_MATERIAL": "secret-private-material",
+    "GOOGLE_APPLICATION_CREDENTIALS": "secret-credential-path",
+    "GCS_BUCKET": "secret-storage-metadata",
+    "future_mixed_CrEdEnTiAl": "secret-mixed-case-name",
+}
+
+PUBLIC_ENV_EXAMPLES = {
+    "EXPO_PUBLIC_API_KEY": "public-api-key",
+    "EXPO_PUBLIC_AUTH_TOKEN": "public-auth-token",
+}
 
 
 def executable(path: Path, contents: str) -> None:
@@ -61,12 +63,8 @@ class AuthoredSubprocessEnvironmentTests(unittest.TestCase):
                 """
             )
             env = os.environ.copy()
-            env.update(
-                {
-                    name: f"secret-{index}"
-                    for index, name in enumerate(AUTHORED_SECRET_ENV)
-                }
-            )
+            env.update(SENSITIVE_ENV_EXAMPLES)
+            env.update(PUBLIC_ENV_EXAMPLES)
             env["PATH"] = f"{bin_dir}:{env['PATH']}"
             env["TEST_POISONED_ENV"] = str(poisoned_env_capture)
             env["EVAL_APP_BUNDLE_ID"] = "com.example.preserved"
@@ -86,8 +84,10 @@ class AuthoredSubprocessEnvironmentTests(unittest.TestCase):
                 "the credential boundary must invoke the system env utility",
             )
             captured = capture.read_text(encoding="utf-8")
-            for name in AUTHORED_SECRET_ENV:
+            for name in SENSITIVE_ENV_EXAMPLES:
                 self.assertNotIn(f"{name}=", captured)
+            for name, value in PUBLIC_ENV_EXAMPLES.items():
+                self.assertIn(f"{name}={value}", captured)
             self.assertIn("EVAL_APP_BUNDLE_ID=com.example.preserved", captured)
 
     def test_metro_launchers_scrub_credentials_and_preserve_build_context(self) -> None:
@@ -137,12 +137,8 @@ class AuthoredSubprocessEnvironmentTests(unittest.TestCase):
                     """
                 )
                 env = os.environ.copy()
-                env.update(
-                    {
-                        name: f"secret-{index}"
-                        for index, name in enumerate(AUTHORED_SECRET_ENV)
-                    }
-                )
+                env.update(SENSITIVE_ENV_EXAMPLES)
+                env.update(PUBLIC_ENV_EXAMPLES)
                 env.update(
                     {
                         "PATH": f"{bin_dir}:{env['PATH']}",
@@ -162,8 +158,10 @@ class AuthoredSubprocessEnvironmentTests(unittest.TestCase):
 
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 captured = capture.read_text(encoding="utf-8")
-                for secret_name in AUTHORED_SECRET_ENV:
+                for secret_name in SENSITIVE_ENV_EXAMPLES:
                     self.assertNotIn(f"{secret_name}=", captured)
+                for public_name, public_value in PUBLIC_ENV_EXAMPLES.items():
+                    self.assertIn(f"{public_name}={public_value}", captured)
                 self.assertIn("EVAL_APP_BUNDLE_ID=com.example.preserved", captured)
 
 

@@ -321,6 +321,14 @@ trace, and each result, report, telemetry stream, and log has one location.
 Start with `macro_avg_pct`, then inspect plan scores and assertion details; an
 agent-driven evaluation can reveal driver limitations as well as app defects.
 
+Authored dependency hooks, Expo config/build commands, and Metro run behind an
+environment-only credential boundary. Exported names that look sensitive are
+removed case-insensitively, while deliberate `EXPO_PUBLIC_*` values and normal
+build context remain available. This prevents ambient evaluator credentials
+from reaching app-controlled subprocesses, but it is not a filesystem, network,
+or operating-system sandbox; those subprocesses still run as the evaluator
+worker user.
+
 The evaluator receives an optional `capture_screenshot` tool, but that tool
 returns only a filesystem path. Claude's file-reading tools are blocked and no
 pixels are returned, so it cannot visually inspect the image. It reasons and

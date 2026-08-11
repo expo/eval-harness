@@ -550,6 +550,7 @@ SCENARIO=skills_available_unmentioned
             stages.parent.mkdir(parents=True, exist_ok=True)
             identity.parent.mkdir(parents=True, exist_ok=True)
             fake_bin.mkdir()
+            secret = "EVALUATOR_SECRET_SENTINEL_73f1"
             shutil.copy2(SCRIPT, script)
             copy_ios_collector(collector)
             shutil.copy2(
@@ -574,7 +575,10 @@ eval::stop_proxies() {{ :; }}
 eval::install_agent_device() {{ :; }}
 eval::install_maestro() {{ :; }}
 eval::install_uv_and_evaluator() {{ :; }}
-eval::launch_proxy() {{ :; }}
+eval::launch_proxy() {{
+  [ "$ANTHROPIC_API_KEY" = {secret!r} ] || exit 90
+  [ "$EXPECTED_EVALUATOR_SECRET" = {secret!r} ] || exit 91
+}}
 eval::wait_for_port() {{ return 0; }}
 eval::launch_otlp_receiver() {{ :; }}
 eval::boot_sim_and_runner() {{
@@ -584,8 +588,9 @@ eval::boot_sim_and_runner() {{
 }}
 eval::probe_snapshot() {{ return 0; }}
 eval::run_evaluator() {{
-  [ "$CLAUDE_CODE_OAUTH_TOKEN" = "$EXPECTED_EVALUATOR_SECRET" ] || return 91
-  [ "$BRAINTRUST_API_KEY" = "$EXPECTED_EVALUATOR_SECRET" ] || return 92
+  [ "$CLAUDE_CODE_OAUTH_TOKEN" = {secret!r} ] || return 92
+  [ "$BRAINTRUST_API_KEY" = {secret!r} ] || return 93
+  [ "$EXPECTED_EVALUATOR_SECRET" = {secret!r} ] || return 94
   printf '%s\n' '{{"status":"completed","expected_plan_count":1,"terminal_plan_count":1,"evaluator_errors":[],"score":1,"full_points":1,"macro_avg_pct":100,"micro_pct":100,"test_plans":[]}}' >"$4"
   printf '%s\n' '<html></html>' >"${{4%.json}}.html"
 }}
@@ -610,39 +615,21 @@ SCENARIO=skills_available_unmentioned
             workspace.mkdir(parents=True, exist_ok=True)
             (workspace / "package.json").write_text("{}", encoding="utf-8")
 
-            credential_dump = " ".join(
-                f'"${{{name}:-}}"' for name in (
-                    "CLAUDE_CODE_OAUTH_TOKEN",
-                    "ANTHROPIC_API_KEY",
-                    "ANTHROPIC_AUTH_TOKEN",
-                    "OPENAI_API_KEY",
-                    "META_API_KEY",
-                    "MUSE_API_KEY",
-                    "EXPO_TOKEN",
-                    "EXPO_MCP_BEARER_TOKEN",
-                    "EXPO_MCP_REFRESH_TOKEN",
-                    "MUSE_MCP_TOKEN",
-                    "BRAINTRUST_API_KEY",
-                    "GCP_SA_KEY",
-                    "GOOGLE_APPLICATION_CREDENTIALS",
-                    "GCS_BUCKET",
-                )
-            )
             (fake_bin / "npm").write_text(
-                f"""#!/usr/bin/env bash
-printf '%s\\n' {credential_dump} "$PRESERVED_BUILD_CONTEXT"
+                """#!/usr/bin/env bash
+env | sort
 mkdir -p "$OUT/telemetry"
-printf '%s\\n' {credential_dump} >"$OUT/telemetry/authored-npm.txt"
+env | sort >"$OUT/telemetry/authored-npm.txt"
 """,
                 encoding="utf-8",
             )
             (fake_bin / "npx").write_text(
-                f"""#!/usr/bin/env bash
-printf '%s\\n' {credential_dump} "$PRESERVED_BUILD_CONTEXT" >&2
+                """#!/usr/bin/env bash
+env | sort >&2
 mkdir -p "$OUT/telemetry"
-printf '%s\\n' {credential_dump} >"$OUT/telemetry/authored-expo.txt"
+env | sort >"$OUT/telemetry/authored-expo.txt"
 if [[ "$*" = *"expo config --json" ]]; then
-  printf '%s\\n' '{{"scheme":"fixture","ios":{{"bundleIdentifier":"com.example.fixture"}}}}'
+  printf '%s\\n' '{"scheme":"fixture","ios":{"bundleIdentifier":"com.example.fixture"}}'
 elif [ "$*" = "expo run:ios --help" ]; then
   printf '%s\\n' 'Usage: expo run:ios [options]' '  --output <dir>'
 fi
@@ -650,7 +637,7 @@ fi
                 encoding="utf-8",
             )
             (fake_bin / "bun").write_text(
-                f"""#!/usr/bin/env bash
+                """#!/usr/bin/env bash
 set -eu
 trace_out=''; build_out=''; previous=''
 for argument in "$@"; do
@@ -660,12 +647,12 @@ for argument in "$@"; do
 done
 if [ -n "$trace_out" ]; then
   mkdir -p "$(dirname "$trace_out")"
-  printf '%s\\n' '{{"n_sessions":0,"sessions":[]}}' >"$trace_out"
+  printf '%s\\n' '{"n_sessions":0,"sessions":[]}' >"$trace_out"
 fi
 if [ -n "$build_out" ]; then
-  printf '%s\\n' {credential_dump} "$PRESERVED_BUILD_CONTEXT"
+  env | sort
   mkdir -p "$OUT/telemetry"
-  printf '%s\\n' {credential_dump} >"$OUT/telemetry/authored-native.txt"
+  env | sort >"$OUT/telemetry/authored-native.txt"
   mkdir -p "$build_out/Fixture.app"
   printf '%s\\n' '<?xml version="1.0"?><plist version="1.0"><dict><key>MinimumOSVersion</key><string>26.0</string></dict></plist>' >"$build_out/Fixture.app/Info.plist"
 fi
@@ -679,7 +666,6 @@ fi
             for executable_path in fake_bin.iterdir():
                 executable_path.chmod(0o755)
 
-            secret = "EVALUATOR_SECRET_SENTINEL_73f1"
             env = os.environ.copy()
             env.update(
                 {
@@ -687,18 +673,16 @@ fi
                     "AUTHOR_ENV": str(author_env),
                     "EXPECTED_EVALUATOR_SECRET": secret,
                     "PRESERVED_BUILD_CONTEXT": "preserved-build-context",
+                    "EXPO_PUBLIC_API_KEY": "public-build-marker",
                     "CLAUDE_CODE_OAUTH_TOKEN": secret,
                     "ANTHROPIC_API_KEY": secret,
-                    "ANTHROPIC_AUTH_TOKEN": secret,
-                    "OPENAI_API_KEY": secret,
-                    "META_API_KEY": secret,
-                    "MUSE_API_KEY": secret,
-                    "EXPO_TOKEN": secret,
-                    "EXPO_MCP_BEARER_TOKEN": secret,
-                    "EXPO_MCP_REFRESH_TOKEN": secret,
-                    "MUSE_MCP_TOKEN": secret,
                     "BRAINTRUST_API_KEY": secret,
-                    "GCP_SA_KEY": secret,
+                    "NPM_TOKEN": secret,
+                    "SENTRY_AUTH_TOKEN": secret,
+                    "GITHUB_TOKEN": secret,
+                    "FUTURE_VENDOR_SECRET": secret,
+                    "DATABASE_PASSWORD": secret,
+                    "SIGNING_PRIVATE_MATERIAL": secret,
                     "GOOGLE_APPLICATION_CREDENTIALS": secret,
                     "GCS_BUCKET": secret,
                 }
@@ -719,7 +703,16 @@ fi
                 if path.is_file()
             )
             self.assertNotIn(secret, retained)
+            for sensitive_name in (
+                "NPM_TOKEN",
+                "SENTRY_AUTH_TOKEN",
+                "GITHUB_TOKEN",
+                "FUTURE_VENDOR_SECRET",
+                "EXPECTED_EVALUATOR_SECRET",
+            ):
+                self.assertNotIn(f"{sensitive_name}=", retained)
             self.assertIn("preserved-build-context", retained)
+            self.assertIn("public-build-marker", retained)
 
     def test_dev_client_dependency_install_uses_authored_credential_boundary(self) -> None:
         """Dev-client provisioning can execute package hooks and must be scrubbed."""
