@@ -158,6 +158,49 @@ class DiagnosticArtifactTests(unittest.TestCase):
         self.assertIn("iOS evaluation completed", report)
         self.assertNotIn("iOS evaluation failed", report)
 
+    def test_ios_unsupported_environment_is_a_no_score_not_evaluator_failure(self) -> None:
+        """A simulator-runtime gap must not be represented as a model or build failure."""
+        output = self.root / "ios-eval-report"
+        command = [
+            "python3",
+            str(SCRIPT),
+            "--kind",
+            "ios",
+            "--author-artifact-root",
+            str(self.author),
+            "--out-dir",
+            str(output),
+            "--stage",
+            "unsupported_environment",
+            "--reason",
+            "authored app requires iOS 27.0; available iOS simulator runtimes: 26.5",
+            "--classification",
+            "unsupported_environment",
+            "--required-ios-version",
+            "27.0",
+            "--available-ios-versions-json",
+            '["26.5", "18.6"]',
+        ]
+
+        result = subprocess.run(
+            command, cwd=ROOT, text=True, capture_output=True, check=False
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads((output / "result.json").read_text(encoding="utf-8"))
+        self.assertEqual(payload["status"], "unsupported_environment")
+        self.assertIsNone(payload["macro_avg_pct"])
+        self.assertEqual(payload["evaluator_errors"], [])
+        self.assertEqual(
+            payload["environment"],
+            {"required_ios": "27.0", "available_ios": ["26.5", "18.6"]},
+        )
+        manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
+        self.assertEqual(manifest["build_health"]["native_build"]["status"], "passed")
+        self.assertEqual(manifest["build_health"]["app_launch"]["status"], "warning")
+        self.assertEqual(manifest["build_health"]["evaluation"]["status"], "not_run")
+        self.assertIn("unsupported", (output / "report.html").read_text(encoding="utf-8").lower())
+
 
 if __name__ == "__main__":
     unittest.main()

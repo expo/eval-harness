@@ -29,6 +29,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--evaluator-model", default="")
     parser.add_argument("--evaluator-reasoning-effort", default="")
     parser.add_argument(
+        "--classification",
+        choices=("failed", "unsupported_environment"),
+        default="failed",
+    )
+    parser.add_argument("--required-ios-version", default="")
+    parser.add_argument("--available-ios-versions-json", default="[]")
+    parser.add_argument(
         "--preserve-existing",
         action="store_true",
         help="fill missing iOS result/report files without replacing producer diagnostics",
@@ -85,7 +92,31 @@ def report_html(
     )
 
 
-def ios_failure_result(stage_name: str, reason: str) -> dict[str, Any]:
+def available_ios_versions(args: argparse.Namespace) -> list[str]:
+    try:
+        values = json.loads(args.available_ios_versions_json)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return []
+    return [value for value in values if isinstance(value, str)] if isinstance(values, list) else []
+
+
+def ios_failure_result(
+    stage_name: str, reason: str, args: argparse.Namespace
+) -> dict[str, Any]:
+    if args.classification == "unsupported_environment":
+        return {
+            "status": "unsupported_environment",
+            "expected_plan_count": 0,
+            "terminal_plan_count": 0,
+            "macro_avg_pct": None,
+            "evaluator_errors": [],
+            "test_plans": [],
+            "environment": {
+                "required_ios": args.required_ios_version or None,
+                "available_ios": available_ios_versions(args),
+            },
+            "reason": reason,
+        }
     return {
         "status": "failed",
         "expected_plan_count": 0,
@@ -96,12 +127,14 @@ def ios_failure_result(stage_name: str, reason: str) -> dict[str, Any]:
     }
 
 
-def ensure_ios_result_and_report(out: Path, stage_name: str, reason: str) -> None:
+def ensure_ios_result_and_report(
+    out: Path, stage_name: str, reason: str, args: argparse.Namespace
+) -> None:
     result_path = out / "result.json"
     report_path = out / "report.html"
     result: dict[str, Any]
     if not result_path.exists():
-        result = ios_failure_result(stage_name, reason)
+        result = ios_failure_result(stage_name, reason, args)
         write_json(result_path, result)
     else:
         try:
@@ -114,6 +147,10 @@ def ensure_ios_result_and_report(out: Path, stage_name: str, reason: str) -> Non
             title = "iOS evaluation completed"
             detail = "The standalone evaluator report was unavailable; result.json is authoritative."
             note = "See result.json for scores and per-plan evidence."
+        elif result.get("status") == "unsupported_environment":
+            title = "iOS environment unsupported"
+            detail = reason
+            note = "No behavioral score was produced because no installed simulator runtime can host the authored app."
         else:
             title = "iOS evaluation failed"
             detail = f"{stage_name}: {reason}"
@@ -124,14 +161,22 @@ def ensure_ios_result_and_report(out: Path, stage_name: str, reason: str) -> Non
 def create_ios(out: Path, author: dict[str, Any], args: argparse.Namespace) -> None:
     run_id = author.get("run_id") if isinstance(author.get("run_id"), str) else args.run_id
     detail = f"{args.stage}: {args.reason}"
-    result = ios_failure_result(args.stage, args.reason)
+    result = ios_failure_result(args.stage, args.reason, args)
     author_health = author.get("build_health") if isinstance(author.get("build_health"), dict) else {}
-    build_health = {
-        "dependency_install": stage("not_run"),
-        "native_build": stage("not_run"),
-        "app_launch": stage("not_run"),
-        "evaluation": stage("failed", detail),
-    }
+    if args.classification == "unsupported_environment":
+        build_health = {
+            "dependency_install": stage("not_run"),
+            "native_build": stage("passed"),
+            "app_launch": stage("warning", args.reason),
+            "evaluation": stage("not_run"),
+        }
+    else:
+        build_health = {
+            "dependency_install": stage("not_run"),
+            "native_build": stage("not_run"),
+            "app_launch": stage("not_run"),
+            "evaluation": stage("failed", detail),
+        }
     for name in ("app_authored", "expo_export"):
         preserved = valid_stage(author_health.get(name))
         if preserved is not None:
@@ -164,7 +209,15 @@ def create_ios(out: Path, author: dict[str, Any], args: argparse.Namespace) -> N
     }
     write_json(out / "result.json", result)
     write_json(out / "manifest.json", manifest)
-    (out / "report.html").write_text(report_html("iOS evaluation failed", detail), encoding="utf-8")
+    if args.classification == "unsupported_environment":
+        title = "iOS environment unsupported"
+        note = "No behavioral score was produced because no installed simulator runtime can host the authored app."
+    else:
+        title = "iOS evaluation failed"
+        note = "This diagnostic contains no evaluator score."
+    (out / "report.html").write_text(
+        report_html(title, detail, note), encoding="utf-8"
+    )
 
 
 def create_skill(out: Path, author: dict[str, Any], args: argparse.Namespace) -> None:
@@ -219,7 +272,7 @@ def main() -> int:
             raise ValueError("--preserve-existing is only valid for iOS diagnostics")
         if not destination.is_dir():
             raise ValueError("preserved diagnostic output must already be a directory")
-        ensure_ios_result_and_report(destination, args.stage, args.reason)
+        ensure_ios_result_and_report(destination, args.stage, args.reason, args)
         return 0
     staging = Path(tempfile.mkdtemp(prefix=f".{destination.name}-diagnostic-", dir=parent))
     try:

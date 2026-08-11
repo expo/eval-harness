@@ -201,6 +201,48 @@ describe("normalizeRun", () => {
     expect(renderReport(summary)).toContain("ios.bundleIdentifier and scheme are required");
   });
 
+  test("keeps unsupported simulator environments unscored without calling the app broken", async () => {
+    // Catches a newer authored deployment target being collapsed into an
+    // invalid result or failed native-build/evaluation rung.
+    const root = tempRoot();
+    const args = inputs(root, { skill: false, ios: true });
+    args.iosJobStatus = "failure";
+    args.skillJobStatus = "skipped";
+    const reason = "authored app requires iOS 27.0; available iOS simulator runtimes: 26.5, 18.6";
+    writeJson(join(args.iosArtifact!, "result.json"), {
+      status: "unsupported_environment",
+      expected_plan_count: 0,
+      terminal_plan_count: 0,
+      macro_avg_pct: null,
+      evaluator_errors: [],
+      test_plans: [],
+      environment: { required_ios: "27.0", available_ios: ["26.5", "18.6"] },
+      reason,
+    });
+    const manifest = readJson(join(args.iosArtifact!, "manifest.json"));
+    const health = manifest.build_health as Record<string, unknown>;
+    health.native_build = { status: "passed", detail: null, log: "logs/s6-release.log" };
+    health.app_launch = { status: "warning", detail: reason, log: "logs/s6-release.log" };
+    health.evaluation = { status: "not_run", detail: null, log: null };
+    writeJson(join(args.iosArtifact!, "manifest.json"), manifest);
+
+    const summary = await normalizeRun(args);
+
+    expect(summary.status).toBe("partial");
+    expect(summary.scores.ios_macro_pct).toBeNull();
+    expect(summary.build_health.find((stage) => stage.id === "native_build"))
+      .toMatchObject({ status: "passed", detail: null });
+    expect(summary.build_health.find((stage) => stage.id === "app_launch"))
+      .toMatchObject({ status: "warning", detail: reason });
+    expect(summary.build_health.find((stage) => stage.id === "evaluation"))
+      .toMatchObject({ status: "not_run", detail: null });
+    expect(summary.warnings).toContain(`iOS environment unsupported: ${reason}`);
+    expect(summary.warnings.join(" ")).not.toContain("required fields are invalid");
+    expect(summary.warnings.join(" ")).not.toContain("result is non-terminal");
+    expect(summary.warnings.join(" ")).not.toContain("non-terminal build or evaluation stage");
+    expect(summary.warnings).not.toContain("iOS evaluator job failed");
+  });
+
   test("rejects authoritative JSON symlinks, hardlinks, and FIFOs", async () => {
     // Catches producer JSON reads retaining arbitrary host or special-file content.
     const symlinkRoot = tempRoot();

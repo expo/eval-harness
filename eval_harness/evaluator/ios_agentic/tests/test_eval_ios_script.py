@@ -361,6 +361,144 @@ SCENARIO=skills_available_unmentioned
         self.assertNotEqual(partial.returncode, 0)
         self.assertIn("incomplete", partial.stdout)
 
+    def test_runtime_gap_is_collected_as_unsupported_without_behavioral_score(self) -> None:
+        """A newer deployment target is evaluator capacity, not authored build quality.
+
+        Catches: collapsing a successful compile plus incompatible simulator
+        into native_build=failed or a fabricated zero behavioral score.
+        """
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            run_id = "runtime-gap"
+            script = root / "eval_harness/evaluator/ios_agentic/scripts/eval-ios-app.sh"
+            collector = root / "eval_harness/utils/artifacts/collect_ios_artifact.sh"
+            diagnostic = root / "eval_harness/utils/artifacts/create_diagnostic_artifact.py"
+            stages = root / "eval_harness/utils/shell/eval_stages.sh"
+            identity = root / "eval_harness/utils/ios/normalize_ios_identity.mjs"
+            author_env = root / "author-agent-metadata" / run_id / "author.env"
+            workspace = root / "author-agent-workspace" / run_id
+            artifact = root / "ios-eval-report"
+            script.parent.mkdir(parents=True, exist_ok=True)
+            collector.parent.mkdir(parents=True, exist_ok=True)
+            stages.parent.mkdir(parents=True, exist_ok=True)
+            identity.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(SCRIPT, script)
+            shutil.copy2(
+                ROOT / "eval_harness/utils/artifacts/collect_ios_artifact.sh",
+                collector,
+            )
+            shutil.copy2(
+                ROOT / "eval_harness/utils/artifacts/create_diagnostic_artifact.py",
+                diagnostic,
+            )
+            identity.write_text(
+                """import fs from 'node:fs';
+const [, , workspace, runId, configPath, adjustmentsPath] = process.argv;
+fs.writeFileSync(adjustmentsPath, JSON.stringify({source:'evaluator', adjustments:[]}));
+""",
+                encoding="utf-8",
+            )
+            stages.write_text(
+                """eval::resolve_reasoning_effort() { printf '%s' "${1:-high}"; }
+eval::fix_java_home() { :; }
+eval::env_banner() { :; }
+eval::stop_proxies() { :; }
+eval::install_agent_device() { :; }
+eval::install_maestro() { :; }
+eval::install_uv_and_evaluator() { :; }
+eval::launch_proxy() { :; }
+eval::wait_for_port() { return 0; }
+eval::launch_otlp_receiver() { :; }
+eval::npm_install() { return 0; }
+eval::configure_ios_app_mode() { EVAL_IOS_APP_MODE=release; export EVAL_IOS_APP_MODE; }
+eval::boot_sim_and_runner() {
+  EVAL_DEVNAME='iPhone 17 Pro'; EVAL_DEV_UDID='NEW-UDID'; EVAL_IOS_RUNTIME_VERSION=26.5
+  EVAL_IOS_AVAILABLE_RUNTIME_VERSIONS_JSON='["26.5", "18.6"]'
+  export EVAL_DEVNAME EVAL_DEV_UDID EVAL_IOS_RUNTIME_VERSION EVAL_IOS_AVAILABLE_RUNTIME_VERSIONS_JSON
+}
+eval::build_release_ios_app() {
+  EVAL_IOS_NATIVE_BUILD_OUTCOME=passed
+  EVAL_IOS_INSTALL_OUTCOME=warning
+  EVAL_IOS_RESULT_STATUS=unsupported_environment
+  EVAL_IOS_REQUIRED_VERSION=27.0
+  EVAL_IOS_FAILURE_REASON='authored app requires iOS 27.0; available iOS simulator runtimes: 26.5, 18.6'
+  export EVAL_IOS_NATIVE_BUILD_OUTCOME EVAL_IOS_INSTALL_OUTCOME EVAL_IOS_RESULT_STATUS EVAL_IOS_REQUIRED_VERSION EVAL_IOS_FAILURE_REASON
+  return 42
+}
+""",
+                encoding="utf-8",
+            )
+            author_env.parent.mkdir(parents=True, exist_ok=True)
+            author_env.write_text(
+                f"""RUN_ID={run_id}
+RUN_START_MTIME=0
+AGENT=codex
+AGENT_MODEL=gpt-5.6-sol
+AGENT_REASONING_EFFORT=high
+PRD=dataset/prds/pool/prd/mvp.txt
+METRO_MODE=release
+SCENARIO=skills_available_unmentioned
+""",
+                encoding="utf-8",
+            )
+            workspace.mkdir(parents=True, exist_ok=True)
+            (workspace / "package.json").write_text("{}", encoding="utf-8")
+            fake_bin = root / "bin"
+            fake_bin.mkdir()
+            fake_bun = fake_bin / "bun"
+            fake_bun.write_text(
+                """#!/usr/bin/env bash
+set -eu
+out=''
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = '--out' ]; then out="$2"; break; fi
+  shift
+done
+[ -z "$out" ] || { mkdir -p "$(dirname "$out")"; printf '{}\n' > "$out"; }
+""",
+                encoding="utf-8",
+            )
+            fake_npx = fake_bin / "npx"
+            fake_npx.write_text(
+                "#!/usr/bin/env bash\nprintf '%s\\n' '{\"scheme\":\"fixture\",\"ios\":{\"bundleIdentifier\":\"com.example.fixture\"}}'\n",
+                encoding="utf-8",
+            )
+            fake_bun.chmod(0o755)
+            fake_npx.chmod(0o755)
+            env = os.environ.copy()
+            env.update(
+                {"PATH": f"{fake_bin}:{env['PATH']}", "AUTHOR_ENV": str(author_env)}
+            )
+
+            result = subprocess.run(
+                ["bash", str(script)],
+                cwd=root,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 42, result.stdout + result.stderr)
+            payload = json.loads((artifact / "result.json").read_text(encoding="utf-8"))
+            self.assertEqual(payload["status"], "unsupported_environment")
+            self.assertIsNone(payload["macro_avg_pct"])
+            self.assertEqual(payload["evaluator_errors"], [])
+            self.assertEqual(
+                payload["environment"],
+                {"required_ios": "27.0", "available_ios": ["26.5", "18.6"]},
+            )
+            manifest = json.loads(
+                (artifact / "manifest.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(manifest["build_health"]["native_build"]["status"], "passed")
+            self.assertEqual(manifest["build_health"]["app_launch"]["status"], "warning")
+            self.assertEqual(
+                manifest["build_health"]["app_launch"]["log"],
+                "logs/s6-release.log",
+            )
+            self.assertEqual(manifest["build_health"]["evaluation"]["status"], "not_run")
+
 
 if __name__ == "__main__":
     unittest.main()

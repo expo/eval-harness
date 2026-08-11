@@ -330,8 +330,11 @@ function validateSkillMetricsFields(value: JsonRecord | null): string | null {
 
 function validateIosResultFields(value: JsonRecord | null): string | null {
   const plans = value?.test_plans;
+  const unsupported = value?.status === "unsupported_environment";
+  const environment = record(value?.environment);
   if (
-    (value?.status !== "completed" && value?.status !== "incomplete" && value?.status !== "failed") ||
+    (value?.status !== "completed" && value?.status !== "incomplete" &&
+      value?.status !== "failed" && !unsupported) ||
     !nonNegativeInteger(value.expected_plan_count) ||
     !nonNegativeInteger(value.terminal_plan_count) ||
     value.terminal_plan_count > value.expected_plan_count ||
@@ -339,6 +342,14 @@ function validateIosResultFields(value: JsonRecord | null): string | null {
     !Array.isArray(value.evaluator_errors) ||
     !value.evaluator_errors.every(validEvaluatorError) ||
     (value.status === "completed" && value.evaluator_errors.length > 0) ||
+    (unsupported && (
+      value.expected_plan_count !== 0 || value.terminal_plan_count !== 0 ||
+      value.macro_avg_pct !== null || value.evaluator_errors.length !== 0 ||
+      environment === null || !nullableString(environment.required_ios) ||
+      !Array.isArray(environment.available_ios) ||
+      !environment.available_ios.every((version) => typeof version === "string") ||
+      !nonEmptyString(value.reason)
+    )) ||
     !Array.isArray(plans)
   ) {
     return "iOS result is missing required fields";
@@ -837,12 +848,18 @@ async function normalizeInto(inputs: ReportInputs): Promise<ConsolidatedSummary>
     artifactRoot: string | null,
   ): void => {
     if (jobStatus === "failure") {
-      status = "failed";
-      warnings.push(
-        artifactRoot === null
-          ? `${label} job failed and produced no usable artifact`
-          : `${label} job failed`,
-      );
+      // A failed EAS shell job can still carry an authoritative
+      // unsupported-environment result. Defer the iOS artifact decision until
+      // result.json is parsed; genuine evaluator/app failures remain failed.
+      const deferIosArtifact = label === "iOS evaluator" && artifactRoot !== null;
+      if (!deferIosArtifact) {
+        status = "failed";
+        warnings.push(
+          artifactRoot === null
+            ? `${label} job failed and produced no usable artifact`
+            : `${label} job failed`,
+        );
+      }
     } else if (jobStatus === "success" && artifactRoot === null) {
       status = "failed";
       warnings.push(`successful ${label} job artifact is unavailable`);
@@ -961,6 +978,14 @@ async function normalizeInto(inputs: ReportInputs): Promise<ConsolidatedSummary>
 
   const metrics = skillMetrics?.value ?? null;
   const result = iosResult?.value ?? null;
+  const iosEnvironmentUnsupported = result?.status === "unsupported_environment";
+  if (
+    inputs.iosJobStatus === "failure" && iosRoot !== null &&
+    !iosEnvironmentUnsupported
+  ) {
+    status = "failed";
+    warnings.push("iOS evaluator job failed");
+  }
   const iosHealth = record(iosManifest?.value?.build_health);
   let evaluatorStage = evaluationStage(
     iosHealth,
@@ -992,12 +1017,17 @@ async function normalizeInto(inputs: ReportInputs): Promise<ConsolidatedSummary>
     if (!warnings.some((warning) => warning.includes(resultFailure))) {
       warnings.push(`iOS evaluator failed: ${resultFailure}`);
     }
+  } else if (iosEnvironmentUnsupported) {
+    status = worseStatus(status, "partial");
+    const reason = stringOrNull(result?.reason) ??
+      "no installed iOS simulator runtime can host the authored app";
+    warnings.push(`iOS environment unsupported: ${reason}`);
   } else if (result !== null && result.status !== "completed") {
     status = worseStatus(status, "partial");
     warnings.push(`iOS evaluator result is non-terminal: ${String(result.status ?? "missing status")}`);
   }
   if (
-    iosRoot !== null && status !== "failed" &&
+    iosRoot !== null && status !== "failed" && !iosEnvironmentUnsupported &&
     buildHealth
       .filter((item) => ["dependency_install", "native_build", "app_launch", "evaluation"].includes(item.id))
       .some((item) => item.status === "not_run")

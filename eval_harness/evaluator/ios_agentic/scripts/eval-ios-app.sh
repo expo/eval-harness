@@ -70,13 +70,17 @@ IOS_DEPENDENCY_INSTALL_STATUS=not_run
 IOS_NATIVE_BUILD_STATUS=not_run
 IOS_NATIVE_BUILD_LOG=""
 IOS_APP_LAUNCH_STATUS=not_run
+IOS_APP_LAUNCH_LOG=""
 IOS_EVALUATION_STATUS=not_run
 IOS_FAILURE_STAGE=""
 IOS_FAILURE_REASON=""
 IOS_IDENTITY_ADJUSTMENTS_LOG=""
+IOS_RESULT_STATUS=""
+IOS_REQUIRED_VERSION=""
 export RUN_ID RUN_START_MTIME OUT WORKSPACE TELEMETRY_DIR EVAL_PHASE_START_MTIME METRO_MODE AGENT AGENT_MODEL AGENT_REASONING_EFFORT PRD TEST_PLAN SCENARIO EVALUATOR_MODEL EVALUATOR_REASONING_EFFORT \
   AUTHOR_MANIFEST AUTHORED_ARTIFACT_ROOT IOS_DEPENDENCY_INSTALL_STATUS IOS_NATIVE_BUILD_STATUS IOS_NATIVE_BUILD_LOG IOS_APP_LAUNCH_STATUS IOS_EVALUATION_STATUS \
-  IOS_FAILURE_STAGE IOS_FAILURE_REASON IOS_IDENTITY_ADJUSTMENTS_LOG
+  IOS_FAILURE_STAGE IOS_FAILURE_REASON IOS_IDENTITY_ADJUSTMENTS_LOG IOS_APP_LAUNCH_LOG
+export IOS_RESULT_STATUS IOS_REQUIRED_VERSION
 
 eval_fail() { # stage reason [exit_status]
   IOS_FAILURE_STAGE="$1"
@@ -219,13 +223,31 @@ if [ "$EVAL_IOS_APP_MODE" = "release" ]; then
   IOS_NATIVE_BUILD_LOG="logs/s6-release.log"
   export EVAL_APP_USE_SIMCTL_LAUNCH=1
   unset EVAL_APP_DEEP_LINK
-  eval::build_release_ios_app "$WORKSPACE" "$OUT" "$EVAL_DEVNAME" || {
-    eval_fail native_build "release app build/install failed; skipping evaluation"
-  }
+  eval::build_release_ios_app "$WORKSPACE" "$OUT" "${EVAL_DEV_UDID:-$EVAL_DEVNAME}"
+  RELEASE_BUILD_RC=$?
+  IOS_NATIVE_BUILD_STATUS="${EVAL_IOS_NATIVE_BUILD_OUTCOME:-failed}"
+  if [ "${EVAL_IOS_RESULT_STATUS:-}" = "unsupported_environment" ]; then
+    IOS_APP_LAUNCH_STATUS=warning
+    IOS_APP_LAUNCH_LOG="logs/s6-release.log"
+    IOS_RESULT_STATUS=unsupported_environment
+    IOS_REQUIRED_VERSION="${EVAL_IOS_REQUIRED_VERSION:-}"
+    export IOS_NATIVE_BUILD_STATUS IOS_APP_LAUNCH_STATUS IOS_APP_LAUNCH_LOG IOS_RESULT_STATUS IOS_REQUIRED_VERSION
+    eval_fail app_launch "$EVAL_IOS_FAILURE_REASON" 42
+  fi
+  if [ "$RELEASE_BUILD_RC" != 0 ]; then
+    if [ "$IOS_NATIVE_BUILD_STATUS" = "passed" ]; then
+      IOS_APP_LAUNCH_STATUS=failed
+      IOS_APP_LAUNCH_LOG="logs/s6-release.log"
+      export IOS_NATIVE_BUILD_STATUS IOS_APP_LAUNCH_STATUS IOS_APP_LAUNCH_LOG
+      eval_fail app_launch "release app install failed; skipping evaluation" "$RELEASE_BUILD_RC"
+    fi
+    export IOS_NATIVE_BUILD_STATUS
+    eval_fail native_build "release app native build failed; skipping evaluation" "$RELEASE_BUILD_RC"
+  fi
 else
   IOS_NATIVE_BUILD_STATUS=failed
   IOS_NATIVE_BUILD_LOG="logs/s6-devbuild.log"
-  if ! eval::start_metro_dev_build "$WORKSPACE" "$OUT" "$EVAL_DEVNAME"; then
+  if ! eval::start_metro_dev_build "$WORKSPACE" "$OUT" "${EVAL_DEV_UDID:-$EVAL_DEVNAME}"; then
     eval_fail native_build "dev-client app build/install failed; skipping evaluation"
   fi
   eval::capture_dev_client_deep_link "$OUT" || {
@@ -236,6 +258,8 @@ else
 fi
 IOS_NATIVE_BUILD_STATUS=passed
 IOS_APP_LAUNCH_STATUS=failed
+IOS_APP_LAUNCH_LOG="logs/s6b-open.log"
+export IOS_NATIVE_BUILD_STATUS IOS_APP_LAUNCH_STATUS IOS_APP_LAUNCH_LOG
 if ! eval::probe_snapshot "$OUT" "${EVAL_APP_BUNDLE_ID:-host.exp.Exponent}"; then
   eval_fail app_launch "authored app failed launch readiness probe; skipping evaluator"
 fi

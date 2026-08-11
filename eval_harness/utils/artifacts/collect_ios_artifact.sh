@@ -96,7 +96,8 @@ if [ ! -f "$OUT/result.json" ] || [ ! -f "$OUT/report.html" ]; then
       FAILURE_REASON="iOS evaluator exited before producing result.json"
     fi
   fi
-  "$PY" "$ROOT/eval_harness/utils/artifacts/create_diagnostic_artifact.py" \
+  diagnostic_args=(
+    "$ROOT/eval_harness/utils/artifacts/create_diagnostic_artifact.py"
     --kind ios \
     --author-artifact-root "${AUTHORED_ARTIFACT_ROOT:-$ROOT}" \
     --out-dir "$OUT" \
@@ -106,6 +107,15 @@ if [ ! -f "$OUT/result.json" ] || [ ! -f "$OUT/report.html" ]; then
     --evaluator-model "${EVALUATOR_MODEL:-}" \
     --evaluator-reasoning-effort "${EVALUATOR_REASONING_EFFORT:-}" \
     --preserve-existing
+  )
+  if [ "${IOS_RESULT_STATUS:-}" = "unsupported_environment" ]; then
+    diagnostic_args+=(
+      --classification unsupported_environment
+      --required-ios-version "${IOS_REQUIRED_VERSION:-}"
+      --available-ios-versions-json "${EVAL_IOS_AVAILABLE_RUNTIME_VERSIONS_JSON:-[]}"
+    )
+  fi
+  "$PY" "${diagnostic_args[@]}"
 fi
 
 GIT_SHA="$(cd "$ROOT" && git rev-parse --short HEAD 2>/dev/null || echo unknown)"
@@ -120,9 +130,13 @@ IOS_DEPENDENCY_INSTALL_STATUS="${IOS_DEPENDENCY_INSTALL_STATUS:-not_run}" \
 IOS_NATIVE_BUILD_STATUS="${IOS_NATIVE_BUILD_STATUS:-not_run}" \
 IOS_NATIVE_BUILD_LOG="${IOS_NATIVE_BUILD_LOG:-}" \
 IOS_APP_LAUNCH_STATUS="${IOS_APP_LAUNCH_STATUS:-not_run}" \
+IOS_APP_LAUNCH_LOG="${IOS_APP_LAUNCH_LOG:-}" \
 IOS_EVALUATION_STATUS="${IOS_EVALUATION_STATUS:-not_run}" \
 IOS_FAILURE_STAGE="${IOS_FAILURE_STAGE:-}" IOS_FAILURE_REASON="${IOS_FAILURE_REASON:-}" \
 IOS_IDENTITY_ADJUSTMENTS_ARTIFACT="$IOS_IDENTITY_ADJUSTMENTS_ARTIFACT" \
+IOS_RESULT_STATUS="${IOS_RESULT_STATUS:-}" IOS_REQUIRED_VERSION="${IOS_REQUIRED_VERSION:-}" \
+IOS_RUNTIME_VERSION="${EVAL_IOS_RUNTIME_VERSION:-}" \
+IOS_AVAILABLE_RUNTIME_VERSIONS_JSON="${EVAL_IOS_AVAILABLE_RUNTIME_VERSIONS_JSON:-[]}" \
 "$PY" - "$OUT/manifest.json" <<'PYEOF'
 import json
 import os
@@ -156,7 +170,7 @@ def stage(name, status, log):
     return {
         "status": normalized_status,
         "detail": failure_reason
-        if normalized_status == "failed" and name == failure_stage
+        if normalized_status in {"failed", "warning"} and name == failure_stage
         else None,
         "log": log if normalized_status != "not_run" else None,
     }
@@ -192,7 +206,8 @@ build_health = {
         os.environ.get("IOS_NATIVE_BUILD_LOG") or None,
     ),
     "app_launch": stage(
-        "app_launch", os.environ.get("IOS_APP_LAUNCH_STATUS"), "logs/s6b-open.log"
+        "app_launch", os.environ.get("IOS_APP_LAUNCH_STATUS"),
+        os.environ.get("IOS_APP_LAUNCH_LOG") or "logs/s6b-open.log"
     ),
     "evaluation": stage(
         "evaluation", os.environ.get("IOS_EVALUATION_STATUS"), "logs/s7-eval.log"
@@ -222,6 +237,12 @@ manifest = {
     "full_points": full_points,
     "macro_avg_pct": macro,
     "micro_pct": micro,
+    "environment": {
+        "selected_ios": os.environ.get("IOS_RUNTIME_VERSION") or None,
+        "required_ios": os.environ.get("IOS_REQUIRED_VERSION") or None,
+        "available_ios": json.loads(os.environ.get("IOS_AVAILABLE_RUNTIME_VERSIONS_JSON") or "[]"),
+        "classification": os.environ.get("IOS_RESULT_STATUS") or None,
+    },
     "build_health": build_health,
     "artifacts": {
         "result": "result.json",

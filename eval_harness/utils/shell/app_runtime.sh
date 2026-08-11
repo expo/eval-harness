@@ -72,31 +72,209 @@ eval::start_metro_dev_build() { # app_dir out_dir device
   return $up
 }
 
-eval::build_release_ios_app() { # app_dir out_dir device
+eval::expo_run_ios_supports_output() { # app_dir help_log
+  local app_dir="$1" help_log="$2"
+  if ! ( cd "$app_dir" && npx expo run:ios --help ) >"$help_log" 2>&1; then
+    return 2
+  fi
+  grep -Eq -- '(^|[[:space:]])--output([=,[:space:]<]|$)' "$help_log"
+}
+
+eval::ios_app_minimum_version() { # app_bundle
+  python3 - "$1/Info.plist" <<'PY'
+import plistlib
+import sys
+
+try:
+    with open(sys.argv[1], "rb") as handle:
+        value = plistlib.load(handle).get("MinimumOSVersion")
+except (OSError, plistlib.InvalidFileException, AttributeError):
+    value = None
+if isinstance(value, str) and value.strip():
+    print(value.strip())
+PY
+}
+
+eval::ios_version_is_newer() { # required available
+  python3 - "$1" "$2" <<'PY'
+import re
+import sys
+
+def parse(value):
+    match = re.fullmatch(r"[0-9]+(?:\.[0-9]+)*", value.strip())
+    if not match:
+        raise ValueError(value)
+    parts = tuple(int(part) for part in value.split("."))
+    return parts + (0,) * (4 - len(parts))
+
+try:
+    raise SystemExit(0 if parse(sys.argv[1]) > parse(sys.argv[2]) else 1)
+except ValueError:
+    raise SystemExit(2)
+PY
+}
+
+eval::ios_available_runtime_detail() {
+  python3 - "${EVAL_IOS_AVAILABLE_RUNTIME_VERSIONS_JSON:-[]}" <<'PY'
+import json
+import sys
+
+try:
+    values = json.loads(sys.argv[1])
+except (TypeError, ValueError):
+    values = []
+print(", ".join(str(value) for value in values))
+PY
+}
+
+eval::ios_runtime_mismatch_in_log() { # log
+  grep -Eiq -- 'requires a newer version of iOS|Requires a Newer Version of iOS|MinimumOSVersion.{0,80}(newer|higher|unsupported)|deployment target.{0,160}(newer|higher|unsupported|range of supported deployment target)' "$1"
+}
+
+eval::ios_required_version_from_log() { # log
+  python3 - "$1" <<'PY'
+import re
+import sys
+
+try:
+    with open(sys.argv[1], encoding="utf-8", errors="ignore") as handle:
+        contents = handle.read()
+except OSError:
+    contents = ""
+for pattern in (
+    r"requires\s+iOS\s+([0-9]+(?:\.[0-9]+)*)",
+    r"MinimumOSVersion[^0-9]{0,40}([0-9]+(?:\.[0-9]+)*)",
+    r"deployment target.{0,120}?(?:is set to|=)\s*([0-9]+(?:\.[0-9]+)*)",
+    r"deployment target[^0-9]{0,40}([0-9]+(?:\.[0-9]+)*)",
+):
+    match = re.search(pattern, contents, re.IGNORECASE)
+    if match:
+        print(match.group(1))
+        break
+PY
+}
+
+eval::mark_ios_runtime_unsupported() { # required
+  local required="$1" available_detail
+  available_detail="$(eval::ios_available_runtime_detail)"
+  EVAL_IOS_NATIVE_BUILD_OUTCOME=passed
+  EVAL_IOS_INSTALL_OUTCOME=warning
+  EVAL_IOS_RESULT_STATUS=unsupported_environment
+  EVAL_IOS_REQUIRED_VERSION="$required"
+  EVAL_IOS_FAILURE_REASON="authored app requires iOS ${required:-newer than the evaluator runtime}; available iOS simulator runtimes: ${available_detail:-none}"
+  export EVAL_IOS_NATIVE_BUILD_OUTCOME EVAL_IOS_INSTALL_OUTCOME EVAL_IOS_RESULT_STATUS \
+    EVAL_IOS_REQUIRED_VERSION EVAL_IOS_FAILURE_REASON
+  echo "  ⚠️  $EVAL_IOS_FAILURE_REASON"
+  return 42
+}
+
+eval::build_release_ios_app() { # app_dir out_dir device_udid
   local app_dir="$1" out="$2" device="$3"
-  echo "================= STAGE 6 (release app): generic simulator build + install ================="
+  echo "================= STAGE 6 (release app): capability-adaptive simulator build + install ================="
   mkdir -p "$HOME/.expo"
-  local build_scratch build_output release_app rc
+  local build_scratch build_output release_app rc required_version="" help_rc
   build_scratch="$(mktemp -d "${TMPDIR:-/tmp}/eval-ios-release.XXXXXX")" || return 1
   build_output="$build_scratch/build"
-  ( cd "$app_dir" && bun "$_EVAL_STAGES_DIR/timeout_exec.ts" 1800 npx expo run:ios \
-      --configuration Release --device generic --output "$build_output" ) >"$out/s6-release.log" 2>&1
-  rc=$?
-  if [ "$rc" = 0 ]; then
-    release_app="$(find "$build_output" -maxdepth 2 -type d -name '*.app' -print -quit 2>/dev/null)"
-    if [ -z "$release_app" ]; then
-      echo "expo run:ios completed without producing a simulator .app" >>"$out/s6-release.log"
+  EVAL_IOS_NATIVE_BUILD_OUTCOME=not_run
+  EVAL_IOS_INSTALL_OUTCOME=not_run
+  EVAL_IOS_RESULT_STATUS=""
+  EVAL_IOS_REQUIRED_VERSION=""
+  EVAL_IOS_FAILURE_REASON=""
+  export EVAL_IOS_NATIVE_BUILD_OUTCOME EVAL_IOS_INSTALL_OUTCOME EVAL_IOS_RESULT_STATUS \
+    EVAL_IOS_REQUIRED_VERSION EVAL_IOS_FAILURE_REASON
+
+  if eval::expo_run_ios_supports_output "$app_dir" "$out/d-expo-run-ios-help.log"; then
+    EVAL_IOS_RELEASE_MODE=generic_output
+    export EVAL_IOS_RELEASE_MODE
+    ( cd "$app_dir" && bun "$_EVAL_STAGES_DIR/timeout_exec.ts" 1800 npx expo run:ios \
+        --configuration Release --device generic --output "$build_output" ) >"$out/s6-release.log" 2>&1
+    rc=$?
+    if [ "$rc" != 0 ]; then
+      if eval::ios_runtime_mismatch_in_log "$out/s6-release.log"; then
+        required_version="$(eval::ios_required_version_from_log "$out/s6-release.log")"
+        eval::mark_ios_runtime_unsupported "$required_version"
+        rc=$?
+      else
+        EVAL_IOS_NATIVE_BUILD_OUTCOME=failed
+        export EVAL_IOS_NATIVE_BUILD_OUTCOME
+      fi
+    else
+      release_app="$(find "$build_output" -maxdepth 3 -type d -name '*.app' -print -quit 2>/dev/null)"
+      if [ -z "$release_app" ]; then
+        echo "expo run:ios completed without producing a simulator .app" >>"$out/s6-release.log"
+        EVAL_IOS_NATIVE_BUILD_OUTCOME=failed
+        export EVAL_IOS_NATIVE_BUILD_OUTCOME
+        rc=1
+      else
+        EVAL_IOS_NATIVE_BUILD_OUTCOME=passed
+        export EVAL_IOS_NATIVE_BUILD_OUTCOME
+        required_version="$(eval::ios_app_minimum_version "$release_app")"
+        if [ -n "$required_version" ] && [ -n "${EVAL_IOS_RUNTIME_VERSION:-}" ] && \
+            eval::ios_version_is_newer "$required_version" "$EVAL_IOS_RUNTIME_VERSION"; then
+          eval::mark_ios_runtime_unsupported "$required_version"
+          rc=$?
+        else
+          agent-device install "$EVAL_APP_BUNDLE_ID" "$release_app" \
+            --platform ios --device "$device" >>"$out/s6-release.log" 2>&1
+          rc=$?
+          if [ "$rc" = 0 ]; then
+            EVAL_IOS_INSTALL_OUTCOME=passed
+            export EVAL_IOS_INSTALL_OUTCOME
+          elif eval::ios_runtime_mismatch_in_log "$out/s6-release.log"; then
+            [ -n "$required_version" ] || required_version="$(eval::ios_required_version_from_log "$out/s6-release.log")"
+            eval::mark_ios_runtime_unsupported "$required_version"
+            rc=$?
+          else
+            EVAL_IOS_INSTALL_OUTCOME=failed
+            export EVAL_IOS_INSTALL_OUTCOME
+          fi
+        fi
+      fi
+    fi
+  else
+    help_rc=$?
+    if [ "$help_rc" = 2 ]; then
+      EVAL_IOS_NATIVE_BUILD_OUTCOME=failed
+      EVAL_IOS_RELEASE_MODE=unknown
+      export EVAL_IOS_NATIVE_BUILD_OUTCOME EVAL_IOS_RELEASE_MODE
+      echo "could not inspect project-local expo run:ios capabilities" >"$out/s6-release.log"
       rc=1
     else
-      agent-device install "$EVAL_APP_BUNDLE_ID" "$release_app" \
-        --platform ios --device "$device" >>"$out/s6-release.log" 2>&1
+      EVAL_IOS_RELEASE_MODE=direct_install
+      export EVAL_IOS_RELEASE_MODE
+      ( cd "$app_dir" && bun "$_EVAL_STAGES_DIR/timeout_exec.ts" 1800 npx expo run:ios \
+          --configuration Release --device "$device" ) >"$out/s6-release.log" 2>&1
       rc=$?
+      release_app="$(find "$app_dir/ios/build" -maxdepth 8 -type d -name '*.app' -print -quit 2>/dev/null)"
+      [ -n "$release_app" ] && required_version="$(eval::ios_app_minimum_version "$release_app")"
+      if [ -n "$required_version" ] && [ -n "${EVAL_IOS_RUNTIME_VERSION:-}" ] && \
+          eval::ios_version_is_newer "$required_version" "$EVAL_IOS_RUNTIME_VERSION"; then
+        eval::mark_ios_runtime_unsupported "$required_version"
+        rc=$?
+      elif [ "$rc" = 0 ]; then
+        EVAL_IOS_NATIVE_BUILD_OUTCOME=passed
+        EVAL_IOS_INSTALL_OUTCOME=passed
+        export EVAL_IOS_NATIVE_BUILD_OUTCOME EVAL_IOS_INSTALL_OUTCOME
+      elif eval::ios_runtime_mismatch_in_log "$out/s6-release.log"; then
+        [ -n "$required_version" ] || required_version="$(eval::ios_required_version_from_log "$out/s6-release.log")"
+        eval::mark_ios_runtime_unsupported "$required_version"
+        rc=$?
+      else
+        EVAL_IOS_NATIVE_BUILD_OUTCOME=failed
+        export EVAL_IOS_NATIVE_BUILD_OUTCOME
+      fi
     fi
   fi
   rm -rf -- "$build_scratch"
-  eval::gate $rc "release app build + install"
+  if [ "$rc" = 42 ]; then
+    echo "  ⚠️  STAGE UNSUPPORTED: release app cannot run on installed simulator runtimes"
+  else
+    eval::gate $rc "release app build + install ($EVAL_IOS_RELEASE_MODE)"
+  fi
   [ "$rc" != 0 ] && { echo "  --- s6-release.log tail ---"; tail -80 "$out/s6-release.log" | sed 's/^/    /'; }
-  echo "  (giving the release app ~10s to settle)"; sleep 10
+  if [ "$rc" = 0 ]; then
+    echo "  (giving the release app ~10s to settle)"; sleep 10
+  fi
   return $rc
 }
 
