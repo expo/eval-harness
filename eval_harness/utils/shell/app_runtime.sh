@@ -74,17 +74,26 @@ eval::start_metro_dev_build() { # app_dir out_dir device
 
 eval::build_release_ios_app() { # app_dir out_dir device
   local app_dir="$1" out="$2" device="$3"
-  echo "================= STAGE 6 (release app): expo run:ios --configuration Release ================="
+  echo "================= STAGE 6 (release app): generic simulator build + install ================="
   mkdir -p "$HOME/.expo"
-  ( cd "$app_dir" && bun "$_EVAL_STAGES_DIR/timeout_exec.ts" 1800 npx expo run:ios --configuration Release --device "$device" ) >"$out/s6-release.log" 2>&1
-  local rc=$?
-  if [ "$rc" != 0 ] \
-    && grep -q "Build Succeeded" "$out/s6-release.log" \
-    && grep -q "Installing on" "$out/s6-release.log" \
-    && grep -q "osascript .*System Events" "$out/s6-release.log"; then
-    echo "  expo run:ios hit a post-install Simulator AppleScript activation error; continuing"
-    rc=0
+  local build_scratch build_output release_app rc
+  build_scratch="$(mktemp -d "${TMPDIR:-/tmp}/eval-ios-release.XXXXXX")" || return 1
+  build_output="$build_scratch/build"
+  ( cd "$app_dir" && bun "$_EVAL_STAGES_DIR/timeout_exec.ts" 1800 npx expo run:ios \
+      --configuration Release --device generic --output "$build_output" ) >"$out/s6-release.log" 2>&1
+  rc=$?
+  if [ "$rc" = 0 ]; then
+    release_app="$(find "$build_output" -maxdepth 2 -type d -name '*.app' -print -quit 2>/dev/null)"
+    if [ -z "$release_app" ]; then
+      echo "expo run:ios completed without producing a simulator .app" >>"$out/s6-release.log"
+      rc=1
+    else
+      agent-device install "$EVAL_APP_BUNDLE_ID" "$release_app" \
+        --platform ios --device "$device" >>"$out/s6-release.log" 2>&1
+      rc=$?
+    fi
   fi
+  rm -rf -- "$build_scratch"
   eval::gate $rc "release app build + install"
   [ "$rc" != 0 ] && { echo "  --- s6-release.log tail ---"; tail -80 "$out/s6-release.log" | sed 's/^/    /'; }
   echo "  (giving the release app ~10s to settle)"; sleep 10
