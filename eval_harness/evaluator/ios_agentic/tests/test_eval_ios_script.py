@@ -616,20 +616,20 @@ SCENARIO=skills_available_unmentioned
             (workspace / "package.json").write_text("{}", encoding="utf-8")
 
             (fake_bin / "npm").write_text(
-                """#!/usr/bin/env bash
+                f"""#!/usr/bin/env bash
 env | sort
-mkdir -p "$OUT/telemetry"
-env | sort >"$OUT/telemetry/authored-npm.txt"
+mkdir -p "{artifact!s}/telemetry"
+env | sort >"{artifact!s}/telemetry/authored-npm.txt"
 """,
                 encoding="utf-8",
             )
             (fake_bin / "npx").write_text(
-                """#!/usr/bin/env bash
+                f"""#!/usr/bin/env bash
 env | sort >&2
-mkdir -p "$OUT/telemetry"
-env | sort >"$OUT/telemetry/authored-expo.txt"
+mkdir -p "{artifact!s}/telemetry"
+env | sort >"{artifact!s}/telemetry/authored-expo.txt"
 if [[ "$*" = *"expo config --json" ]]; then
-  printf '%s\\n' '{"scheme":"fixture","ios":{"bundleIdentifier":"com.example.fixture"}}'
+  printf '%s\\n' '{{"scheme":"fixture","ios":{{"bundleIdentifier":"com.example.fixture"}}}}'
 elif [ "$*" = "expo run:ios --help" ]; then
   printf '%s\\n' 'Usage: expo run:ios [options]' '  --output <dir>'
 fi
@@ -637,7 +637,7 @@ fi
                 encoding="utf-8",
             )
             (fake_bin / "bun").write_text(
-                """#!/usr/bin/env bash
+                f"""#!/usr/bin/env bash
 set -eu
 trace_out=''; build_out=''; previous=''
 for argument in "$@"; do
@@ -647,12 +647,12 @@ for argument in "$@"; do
 done
 if [ -n "$trace_out" ]; then
   mkdir -p "$(dirname "$trace_out")"
-  printf '%s\\n' '{"n_sessions":0,"sessions":[]}' >"$trace_out"
+  printf '%s\\n' '{{"n_sessions":0,"sessions":[]}}' >"$trace_out"
 fi
 if [ -n "$build_out" ]; then
   env | sort
-  mkdir -p "$OUT/telemetry"
-  env | sort >"$OUT/telemetry/authored-native.txt"
+  mkdir -p "{artifact!s}/telemetry"
+  env | sort >"{artifact!s}/telemetry/authored-native.txt"
   mkdir -p "$build_out/Fixture.app"
   printf '%s\\n' '<?xml version="1.0"?><plist version="1.0"><dict><key>MinimumOSVersion</key><string>26.0</string></dict></plist>' >"$build_out/Fixture.app/Info.plist"
 fi
@@ -672,7 +672,6 @@ fi
                     "PATH": f"{fake_bin}:{env['PATH']}",
                     "AUTHOR_ENV": str(author_env),
                     "EXPECTED_EVALUATOR_SECRET": secret,
-                    "PRESERVED_BUILD_CONTEXT": "preserved-build-context",
                     "EXPO_PUBLIC_API_KEY": "public-build-marker",
                     "CLAUDE_CODE_OAUTH_TOKEN": secret,
                     "ANTHROPIC_API_KEY": secret,
@@ -681,6 +680,12 @@ fi
                     "SENTRY_AUTH_TOKEN": secret,
                     "GITHUB_TOKEN": secret,
                     "FUTURE_VENDOR_SECRET": secret,
+                    "DATABASE_URL": secret,
+                    "REDIS_URL": secret,
+                    "MONGODB_URI": secret,
+                    "AZURE_STORAGE_CONNECTION_STRING": secret,
+                    "SENTRY_DSN": secret,
+                    "OPAQUE_VENDOR_VALUE": secret,
                     "DATABASE_PASSWORD": secret,
                     "SIGNING_PRIVATE_MATERIAL": secret,
                     "GOOGLE_APPLICATION_CREDENTIALS": secret,
@@ -709,9 +714,15 @@ fi
                 "GITHUB_TOKEN",
                 "FUTURE_VENDOR_SECRET",
                 "EXPECTED_EVALUATOR_SECRET",
+                "DATABASE_URL",
+                "REDIS_URL",
+                "MONGODB_URI",
+                "AZURE_STORAGE_CONNECTION_STRING",
+                "SENTRY_DSN",
+                "OPAQUE_VENDOR_VALUE",
             ):
                 self.assertNotIn(f"{sensitive_name}=", retained)
-            self.assertIn("preserved-build-context", retained)
+            self.assertIn("CI=1", retained)
             self.assertIn("public-build-marker", retained)
 
     def test_dev_client_dependency_install_uses_authored_credential_boundary(self) -> None:

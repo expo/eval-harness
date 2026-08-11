@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[3]
 APP_RUNTIME = ROOT / "eval_harness" / "utils" / "shell" / "app_runtime.sh"
 IOS_RUNTIME = ROOT / "eval_harness" / "utils" / "shell" / "ios.sh"
 
-SENSITIVE_ENV_EXAMPLES = {
+DENIED_ENV_EXAMPLES = {
     "CLAUDE_CODE_OAUTH_TOKEN": "secret-known-token",
     "NPM_TOKEN": "secret-package-token",
     "SENTRY_AUTH_TOKEN": "secret-vendor-auth",
@@ -23,11 +23,29 @@ SENSITIVE_ENV_EXAMPLES = {
     "GOOGLE_APPLICATION_CREDENTIALS": "secret-credential-path",
     "GCS_BUCKET": "secret-storage-metadata",
     "future_mixed_CrEdEnTiAl": "secret-mixed-case-name",
+    "DATABASE_URL": "postgres://opaque-database",
+    "REDIS_URL": "redis://opaque-cache",
+    "MONGODB_URI": "mongodb://opaque-document-store",
+    "AZURE_STORAGE_CONNECTION_STRING": "opaque-azure-connection",
+    "SENTRY_DSN": "https://opaque-sentry-dsn",
+    "OPAQUE_VENDOR_VALUE": "opaque-vendor-value",
 }
 
 PUBLIC_ENV_EXAMPLES = {
     "EXPO_PUBLIC_API_KEY": "public-api-key",
     "EXPO_PUBLIC_AUTH_TOKEN": "public-auth-token",
+}
+
+SAFE_BUILD_ENV_EXAMPLES = {
+    "CI": "1",
+    "EXPO_NO_TELEMETRY": "1",
+    "DEVELOPER_DIR": "/Applications/Xcode.app/Contents/Developer",
+    "SDKROOT": "iphonesimulator",
+    "JAVA_HOME": "/fixture/jdk",
+    "BUN_INSTALL": "/fixture/bun",
+    "NVM_DIR": "/fixture/nvm",
+    "NODE_OPTIONS": "--no-deprecation",
+    "LC_TIME": "C",
 }
 
 
@@ -37,8 +55,8 @@ def executable(path: Path, contents: str) -> None:
 
 
 class AuthoredSubprocessEnvironmentTests(unittest.TestCase):
-    def test_authored_subprocess_scrubs_credentials_and_preserves_build_context(self) -> None:
-        """App-controlled commands get build metadata but no evaluator credentials."""
+    def test_authored_subprocess_allows_only_explicit_build_context(self) -> None:
+        """App-controlled commands get allowlisted build context and nothing ambient."""
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             capture = root / "environment.txt"
@@ -47,11 +65,9 @@ class AuthoredSubprocessEnvironmentTests(unittest.TestCase):
             bin_dir.mkdir()
             executable(
                 bin_dir / "env",
-                """\
+                f"""\
                 #!/usr/bin/env bash
-                if [ "${1:-}" = -u ]; then
-                  printf '%s' "${CLAUDE_CODE_OAUTH_TOKEN:-}" > "$TEST_POISONED_ENV"
-                fi
+                printf '%s' "${{CLAUDE_CODE_OAUTH_TOKEN:-}}" > {poisoned_env_capture!s}
                 /usr/bin/env "$@"
                 """,
             )
@@ -59,14 +75,14 @@ class AuthoredSubprocessEnvironmentTests(unittest.TestCase):
                 f"""\
                 set -uo pipefail
                 source {APP_RUNTIME!s}
-                eval::run_authored bash -c 'env | sort >"$1"' bash {capture!s}
+                eval::run_authored bash -c '/usr/bin/env | sort >"$1"' bash {capture!s}
                 """
             )
             env = os.environ.copy()
-            env.update(SENSITIVE_ENV_EXAMPLES)
+            env.update(DENIED_ENV_EXAMPLES)
             env.update(PUBLIC_ENV_EXAMPLES)
+            env.update(SAFE_BUILD_ENV_EXAMPLES)
             env["PATH"] = f"{bin_dir}:{env['PATH']}"
-            env["TEST_POISONED_ENV"] = str(poisoned_env_capture)
             env["EVAL_APP_BUNDLE_ID"] = "com.example.preserved"
 
             result = subprocess.run(
@@ -84,14 +100,30 @@ class AuthoredSubprocessEnvironmentTests(unittest.TestCase):
                 "the credential boundary must invoke the system env utility",
             )
             captured = capture.read_text(encoding="utf-8")
-            for name in SENSITIVE_ENV_EXAMPLES:
+            for name in DENIED_ENV_EXAMPLES:
                 self.assertNotIn(f"{name}=", captured)
             for name, value in PUBLIC_ENV_EXAMPLES.items():
                 self.assertIn(f"{name}={value}", captured)
-            self.assertIn("EVAL_APP_BUNDLE_ID=com.example.preserved", captured)
+            for name, value in SAFE_BUILD_ENV_EXAMPLES.items():
+                self.assertIn(f"{name}={value}", captured)
+            self.assertNotIn("EVAL_APP_BUNDLE_ID=", captured)
 
-    def test_metro_launchers_scrub_credentials_and_preserve_build_context(self) -> None:
-        """Both long-lived Metro launch paths keep evaluator credentials private."""
+            exit_result = subprocess.run(
+                [
+                    "bash",
+                    "-c",
+                    f"source {APP_RUNTIME!s}; eval::run_authored bash -c 'exit 37'",
+                ],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(exit_result.returncode, 37)
+
+    def test_metro_launchers_allow_only_explicit_build_context(self) -> None:
+        """Both long-lived Metro launch paths get the same deny-by-default environment."""
         cases = (
             ("expo-go", "eval::start_metro_expo_go \"$APP\" \"$OUT\""),
             (
@@ -111,17 +143,17 @@ class AuthoredSubprocessEnvironmentTests(unittest.TestCase):
                 bin_dir.mkdir()
                 executable(
                     bin_dir / "npx",
-                    """\
+                    f"""\
                     #!/usr/bin/env bash
-                    env | sort > "$TEST_METRO_ENV.tmp"
-                    mv "$TEST_METRO_ENV.tmp" "$TEST_METRO_ENV"
+                    env | sort > {capture!s}.tmp
+                    mv {capture!s}.tmp {capture!s}
                     """,
                 )
                 executable(
                     bin_dir / "curl",
-                    """\
+                    f"""\
                     #!/usr/bin/env bash
-                    while [ ! -s "$TEST_METRO_ENV" ]; do /bin/sleep 0.01; done
+                    while [ ! -s {capture!s} ]; do /bin/sleep 0.01; done
                     exit 0
                     """,
                 )
@@ -137,12 +169,12 @@ class AuthoredSubprocessEnvironmentTests(unittest.TestCase):
                     """
                 )
                 env = os.environ.copy()
-                env.update(SENSITIVE_ENV_EXAMPLES)
+                env.update(DENIED_ENV_EXAMPLES)
                 env.update(PUBLIC_ENV_EXAMPLES)
+                env.update(SAFE_BUILD_ENV_EXAMPLES)
                 env.update(
                     {
                         "PATH": f"{bin_dir}:{env['PATH']}",
-                        "TEST_METRO_ENV": str(capture),
                         "EVAL_APP_BUNDLE_ID": "com.example.preserved",
                     }
                 )
@@ -158,11 +190,13 @@ class AuthoredSubprocessEnvironmentTests(unittest.TestCase):
 
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 captured = capture.read_text(encoding="utf-8")
-                for secret_name in SENSITIVE_ENV_EXAMPLES:
+                for secret_name in DENIED_ENV_EXAMPLES:
                     self.assertNotIn(f"{secret_name}=", captured)
                 for public_name, public_value in PUBLIC_ENV_EXAMPLES.items():
                     self.assertIn(f"{public_name}={public_value}", captured)
-                self.assertIn("EVAL_APP_BUNDLE_ID=com.example.preserved", captured)
+                for safe_name, safe_value in SAFE_BUILD_ENV_EXAMPLES.items():
+                    self.assertIn(f"{safe_name}={safe_value}", captured)
+                self.assertNotIn("EVAL_APP_BUNDLE_ID=", captured)
 
 
 class ReleaseIosBuildTests(unittest.TestCase):
@@ -214,7 +248,7 @@ class ReleaseIosBuildTests(unittest.TestCase):
             f"""\
             #!/usr/bin/env bash
             set -eu
-            printf '%s\n' "$@" > "$TEST_BUN_ARGS"
+            printf '%s\n' "$@" > {bun_args!s}
             output=""
             previous=""
             for argument in "$@"; do
@@ -264,7 +298,6 @@ class ReleaseIosBuildTests(unittest.TestCase):
         )
         env = os.environ.copy()
         env["PATH"] = f"{bin_dir}:{env['PATH']}"
-        env["TEST_BUN_ARGS"] = str(bun_args)
         env["TEST_INSTALL_ARGS"] = str(install_args)
         result = subprocess.run(
             ["bash", "-c", script],

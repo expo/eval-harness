@@ -1,30 +1,50 @@
-eval::authored_env_name_is_sensitive() ( # exported environment variable name
-  local name="$1"
-  shopt -s nocasematch
-  case "$name" in
-    # Expo documents these values as embedded in the public app bundle. Keeping
-    # them is intentional even when the suffix contains TOKEN or KEY.
-    EXPO_PUBLIC_*) return 1 ;;
-    # GCS_BUCKET is evaluator storage metadata rather than a credential, but an
-    # authored process has no need to know the private artifact destination.
-    GCS_BUCKET|*token*|*key*|*secret*|*credential*|*password*|*passwd*|*auth*|*private*)
+eval::authored_env_name_is_safe() { # exported environment variable name
+  case "$1" in
+    # Expo documents these values as embedded in the public app bundle.
+    EXPO_PUBLIC_*) return 0 ;;
+    # Minimal process, locale, and terminal context.
+    PATH|HOME|TMPDIR|TMP|TEMP|USER|LOGNAME|SHELL|COMMAND_MODE|MallocNanoZone|\
+    LANG|LANGUAGE|LC_ALL|LC_CTYPE|LC_COLLATE|LC_MESSAGES|LC_MONETARY|LC_NUMERIC|LC_TIME|LC_PAPER|LC_NAME|LC_ADDRESS|LC_TELEPHONE|LC_MEASUREMENT|LC_IDENTIFICATION|\
+    TERM|COLORTERM|NO_COLOR|FORCE_COLOR|CLICOLOR|CLICOLOR_FORCE|CI)
+      return 0
+      ;;
+    # Node/package-manager executable discovery and non-credential settings.
+    BUN_INSTALL|NVM_BIN|NVM_DIR|NVM_INC|VOLTA_HOME|PNPM_HOME|COREPACK_HOME|\
+    NODE_BINARY|NODE_ENV|NODE_OPTIONS|NODE_PATH|NODE_NO_WARNINGS|NODE_EXTRA_CA_CERTS|\
+    NPM_CONFIG_CACHE|NPM_CONFIG_PREFIX|npm_config_cache|npm_config_prefix)
+      return 0
+      ;;
+    # Native toolchains and build flags used by Expo, CocoaPods, and Xcode.
+    DEVELOPER_DIR|SDKROOT|TOOLCHAINS|XCODE_XCCONFIG_FILE|\
+    CC|CXX|CPP|AR|AS|LD|NM|RANLIB|STRIP|CFLAGS|CXXFLAGS|CPPFLAGS|LDFLAGS|CPATH|LIBRARY_PATH|PKG_CONFIG_PATH|MAKEFLAGS|\
+    ARCHS|ONLY_ACTIVE_ARCH|MACOSX_DEPLOYMENT_TARGET|IPHONEOS_DEPLOYMENT_TARGET|\
+    JAVA_HOME|ANDROID_HOME|ANDROID_SDK_ROOT|ANDROID_NDK_HOME|ANDROID_NDK_ROOT|GRADLE_USER_HOME|\
+    GEM_HOME|GEM_PATH|RUBYLIB|RUBYOPT|BUNDLE_GEMFILE|BUNDLE_PATH|\
+    HOMEBREW_PREFIX|HOMEBREW_CELLAR|HOMEBREW_REPOSITORY)
+      return 0
+      ;;
+    # Stable, non-secret Expo/React Native build controls.
+    EXPO_NO_TELEMETRY|EXPO_DEBUG|EXPO_USE_FAST_RESOLVER|EXPO_USE_COMMUNITY_AUTOLINKING|\
+    REACT_NATIVE_PACKAGER_HOSTNAME|RCT_NO_LAUNCH_PACKAGER|RCT_METRO_PORT|METRO_PORT|\
+    COCOAPODS_DISABLE_STATS|COCOAPODS_PARALLEL_CODE_SIGN|USE_HERMES)
       return 0
       ;;
   esac
   return 1
-)
+}
 
-# This creates an environment-variable boundary only. Authored commands still
-# run as the evaluator OS user with its normal filesystem and network access;
-# this helper is not a process sandbox.
+# Start from an empty environment and copy only the centralized build allowlist
+# above. This creates an environment-variable boundary only: authored commands
+# still run as the evaluator OS user with its normal filesystem and network
+# access, so this helper is not a process sandbox.
 eval::run_authored() ( # command [args...]
   local env_args=() name
   while IFS= read -r name; do
-    if eval::authored_env_name_is_sensitive "$name"; then
-      env_args+=( -u "$name" )
+    if eval::authored_env_name_is_safe "$name"; then
+      env_args+=( "$name=${!name}" )
     fi
   done < <(compgen -e)
-  /usr/bin/env "${env_args[@]}" "$@"
+  /usr/bin/env -i "${env_args[@]}" "$@"
 )
 
 eval::configure_ios_app_mode() {
