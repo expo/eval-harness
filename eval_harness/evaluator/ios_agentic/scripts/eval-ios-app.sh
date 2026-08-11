@@ -134,9 +134,18 @@ if [ -n "$AUTHOR_MANIFEST" ]; then
 fi
 
 echo "================= STAGE D0: macOS eval toolchain ================="
-eval::install_agent_device "$OUT"
-eval::install_maestro "$OUT"
-eval::install_uv_and_evaluator "$EVAL" "$OUT"
+eval::install_agent_device "$OUT" || {
+  status=$?
+  eval_fail preflight "evaluator toolchain setup failed: agent-device; see logs/s1-agent-device.log" "$status"
+}
+eval::install_maestro "$OUT" || {
+  status=$?
+  eval_fail preflight "evaluator toolchain setup failed: Maestro; see logs/s2-maestro.log" "$status"
+}
+eval::install_uv_and_evaluator "$EVAL" "$OUT" || {
+  status=$?
+  eval_fail preflight "evaluator toolchain setup failed: evaluator dependencies; see logs/s3-uv.log" "$status"
+}
 
 echo "================= STAGE D1: evaluator telemetry sidecars ================="
 eval::launch_proxy "$ROOT" anthropic https://api.anthropic.com "$ANTHROPIC_PROXY_PORT" "$TELEMETRY_DIR/anthropic.jsonl"
@@ -217,7 +226,12 @@ if [ -n "$BUNDLE_ID" ]; then
   export EVAL_APP_READY_TIMEOUT_SEC="${EVAL_APP_READY_TIMEOUT_SEC:-120}"
 fi
 
-eval::boot_sim_and_runner "$OUT"
+eval::boot_sim_and_runner "$OUT" || {
+  status=$?
+  prerequisite_reason="${EVAL_IOS_PREREQUISITE_REASON:-evaluator simulator selection/boot/runner setup failed}"
+  prerequisite_log="${EVAL_IOS_PREREQUISITE_LOG:-logs/s4-boot.log}"
+  eval_fail preflight "$prerequisite_reason; see $prerequisite_log" "$status"
+}
 if [ "$EVAL_IOS_APP_MODE" = "release" ]; then
   IOS_NATIVE_BUILD_STATUS=failed
   IOS_NATIVE_BUILD_LOG="logs/s6-release.log"

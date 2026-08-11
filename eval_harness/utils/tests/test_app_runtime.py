@@ -421,6 +421,113 @@ class ProbeSnapshotSimulatorRoutingTests(unittest.TestCase):
 
 
 class SimulatorSelectionTests(unittest.TestCase):
+    def run_simulator_setup_failure(
+        self,
+        failure: str,
+        exit_code: int,
+    ) -> subprocess.CompletedProcess[str]:
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        root = Path(temp.name)
+        out = root / "out"
+        bin_dir = root / "bin"
+        out.mkdir()
+        bin_dir.mkdir()
+        devices = {
+            "devices": {}
+            if failure == "selection"
+            else {
+                "com.apple.CoreSimulator.SimRuntime.iOS-26-5": [
+                    {
+                        "name": "iPhone 17 Pro",
+                        "udid": "SELECTED-UDID",
+                        "isAvailable": True,
+                        "state": "Shutdown",
+                    }
+                ]
+            }
+        }
+        executable(
+            bin_dir / "xcrun",
+            f"""\
+            #!/usr/bin/env bash
+            if [ "$*" = "simctl list devices available --json" ]; then
+              printf '%s\n' {json.dumps(json.dumps(devices))}
+            fi
+            exit 0
+            """,
+        )
+        executable(
+            bin_dir / "bun",
+            f"""\
+            #!/usr/bin/env bash
+            count=0
+            [ ! -f "$TEST_BUN_COUNT" ] || count="$(cat "$TEST_BUN_COUNT")"
+            count=$((count + 1))
+            printf '%s' "$count" >"$TEST_BUN_COUNT"
+            if [ {json.dumps(failure)} = boot ]; then exit {exit_code}; fi
+            if [ {json.dumps(failure)} = runner ] && [ "$count" -gt 1 ]; then exit {exit_code}; fi
+            exit 0
+            """,
+        )
+        script = textwrap.dedent(
+            f"""\
+            set -uo pipefail
+            source {IOS_RUNTIME!s}
+            eval::gate() {{ return 0; }}
+            sleep() {{ :; }}
+            export _EVAL_STAGES_DIR=/unused
+            export EVAL_IOS_BOOT_ATTEMPTS=1
+            eval::boot_sim_and_runner {out!s}
+            status=$?
+            printf 'OUTCOME=%s|%s|%s|%s\n' "$status" \
+              "${{EVAL_IOS_PREREQUISITE_REASON:-}}" \
+              "${{EVAL_IOS_PREREQUISITE_LOG:-}}" \
+              "${{EVAL_DEV_UDID:-unset}}"
+            """
+        )
+        env = os.environ.copy()
+        env["PATH"] = f"{bin_dir}:{env['PATH']}"
+        env["TEST_BUN_COUNT"] = str(root / "bun-count")
+        return subprocess.run(
+            ["bash", "-c", script],
+            cwd=ROOT,
+            env=env,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+    def test_missing_simulator_records_exact_preflight_reason_without_device_vars(self) -> None:
+        """No-device selection must preserve its own diagnostic instead of falling through."""
+        result = self.run_simulator_setup_failure("selection", 1)
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(
+            "OUTCOME=1|evaluator simulator selection failed|logs/s4-simctl-devices.err|unset",
+            result.stdout,
+        )
+
+    def test_agent_device_boot_failure_records_exact_preflight_log(self) -> None:
+        """A selected simulator whose driver cannot boot remains evaluator infrastructure."""
+        result = self.run_simulator_setup_failure("boot", 45)
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(
+            "OUTCOME=45|evaluator simulator boot failed|logs/s4-boot.log|SELECTED-UDID",
+            result.stdout,
+        )
+
+    def test_ios_runner_prepare_failure_records_exact_preflight_log(self) -> None:
+        """A prepared simulator with a failed XCTest runner must retain the runner stage."""
+        result = self.run_simulator_setup_failure("runner", 46)
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(
+            "OUTCOME=46|evaluator ios-runner preparation failed|logs/s4-runner.log|SELECTED-UDID",
+            result.stdout,
+        )
+
     def test_highest_available_ios_runtime_is_selected_by_udid_from_json(self) -> None:
         """Text-order changes or duplicate simulator names must not choose an older runtime."""
         with tempfile.TemporaryDirectory() as temp:

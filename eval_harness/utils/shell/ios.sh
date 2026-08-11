@@ -2,12 +2,16 @@ eval::boot_sim_and_runner() { # out_dir
   local out="$1"
   echo "================= STAGE 4: device select + agent-device boot + prepare ios-runner ================="
   local devices_json selection devname dev_udid runtime_version available_versions
+  unset EVAL_IOS_PREREQUISITE_REASON EVAL_IOS_PREREQUISITE_LOG
   devices_json="$out/s4-simctl-devices.json"
   if ! xcrun simctl list devices available --json >"$devices_json" 2>"$out/s4-simctl-devices.err"; then
+    EVAL_IOS_PREREQUISITE_REASON="evaluator simulator selection failed"
+    EVAL_IOS_PREREQUISITE_LOG="logs/s4-simctl-devices.err"
+    export EVAL_IOS_PREREQUISITE_REASON EVAL_IOS_PREREQUISITE_LOG
     echo "  ❌ could not list available iOS simulators as JSON"
     return 1
   fi
-  selection="$(python3 - "$devices_json" <<'PY'
+  selection="$(python3 - "$devices_json" 2>>"$out/s4-simctl-devices.err" <<'PY'
 import json
 import re
 import sys
@@ -45,11 +49,17 @@ available = [version for _, version in sorted(versions, reverse=True)]
 print("\t".join((selected[3], selected[4], selected[5], json.dumps(available))))
 PY
 )" || {
+    EVAL_IOS_PREREQUISITE_REASON="evaluator simulator selection failed"
+    EVAL_IOS_PREREQUISITE_LOG="logs/s4-simctl-devices.err"
+    export EVAL_IOS_PREREQUISITE_REASON EVAL_IOS_PREREQUISITE_LOG
     echo "  ❌ no available iPhone simulator could be selected"
     return 1
   }
   IFS=$'\t' read -r devname dev_udid runtime_version available_versions <<<"$selection"
   if [ -z "$devname" ] || [ -z "$dev_udid" ] || [ -z "$runtime_version" ]; then
+    EVAL_IOS_PREREQUISITE_REASON="evaluator simulator selection failed"
+    EVAL_IOS_PREREQUISITE_LOG="logs/s4-simctl-devices.err"
+    export EVAL_IOS_PREREQUISITE_REASON EVAL_IOS_PREREQUISITE_LOG
     echo "  ❌ simulator selection returned incomplete device metadata"
     return 1
   fi
@@ -79,6 +89,9 @@ PY
   done
   eval::gate $rc "agent-device boot ($devname, $dev_udid, iOS $runtime_version)"
   if [ "$rc" != 0 ]; then
+    EVAL_IOS_PREREQUISITE_REASON="evaluator simulator boot failed"
+    EVAL_IOS_PREREQUISITE_LOG="logs/s4-boot.log"
+    export EVAL_IOS_PREREQUISITE_REASON EVAL_IOS_PREREQUISITE_LOG
     tail -30 "$out/s4-boot.log" | sed 's/^/    /'
     return "$rc"
   fi
@@ -89,5 +102,10 @@ PY
     >"$out/s4-runner.log" 2>&1
   rc=$?; eval::gate $rc "agent-device prepare ios-runner"
   [ "$rc" != 0 ] && tail -25 "$out/s4-runner.log" | sed 's/^/    /'
+  if [ "$rc" != 0 ]; then
+    EVAL_IOS_PREREQUISITE_REASON="evaluator ios-runner preparation failed"
+    EVAL_IOS_PREREQUISITE_LOG="logs/s4-runner.log"
+    export EVAL_IOS_PREREQUISITE_REASON EVAL_IOS_PREREQUISITE_LOG
+  fi
   return $rc
 }

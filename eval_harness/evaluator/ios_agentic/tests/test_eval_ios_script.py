@@ -58,6 +58,151 @@ def resolve_ios_app_mode(mode: str | None = None) -> subprocess.CompletedProcess
 
 
 class EvalIosScriptTests(unittest.TestCase):
+    def run_prerequisite_failure(
+        self,
+        prerequisite: str,
+        exit_code: int,
+    ) -> tuple[subprocess.CompletedProcess[str], dict, Path, Path]:
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        root = Path(temp.name)
+        run_id = f"failed-{prerequisite}"
+        script = root / "eval_harness/evaluator/ios_agentic/scripts/eval-ios-app.sh"
+        collector = root / "eval_harness/utils/artifacts/collect_ios_artifact.sh"
+        diagnostic = root / "eval_harness/utils/artifacts/create_diagnostic_artifact.py"
+        stages = root / "eval_harness/utils/shell/eval_stages.sh"
+        identity = root / "eval_harness/utils/ios/normalize_ios_identity.mjs"
+        author_env = root / "author-agent-metadata" / run_id / "author.env"
+        workspace = root / "author-agent-workspace" / run_id
+        artifact = root / "ios-eval-report"
+        dependency_marker = root / "dependency-install-ran"
+        native_marker = root / "native-build-ran"
+
+        script.parent.mkdir(parents=True, exist_ok=True)
+        collector.parent.mkdir(parents=True, exist_ok=True)
+        stages.parent.mkdir(parents=True, exist_ok=True)
+        identity.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(SCRIPT, script)
+        shutil.copy2(
+            ROOT / "eval_harness/utils/artifacts/collect_ios_artifact.sh",
+            collector,
+        )
+        shutil.copy2(
+            ROOT / "eval_harness/utils/artifacts/create_diagnostic_artifact.py",
+            diagnostic,
+        )
+        identity.write_text(
+            """import fs from 'node:fs';
+const [, , workspace, runId, configPath, adjustmentsPath] = process.argv;
+fs.writeFileSync(adjustmentsPath, JSON.stringify({source:'evaluator', adjustments:[]}));
+""",
+            encoding="utf-8",
+        )
+        stages.write_text(
+            """eval::resolve_reasoning_effort() { printf '%s' "${1:-high}"; }
+eval::fix_java_home() { :; }
+eval::env_banner() { :; }
+eval::stop_proxies() { :; }
+eval::fail_prerequisite() {
+  [ "$FAIL_PREREQUISITE" = "$1" ] || return 0
+  out="$2"; log="$3"
+  mkdir -p "$out"
+  printf '%s\n' "$1 failed with $FAIL_RC" >"$out/$log"
+  return "$FAIL_RC"
+}
+eval::install_agent_device() { eval::fail_prerequisite agent-device "$1" s1-agent-device.log; }
+eval::install_maestro() { eval::fail_prerequisite maestro "$1" s2-maestro.log; }
+eval::install_uv_and_evaluator() { eval::fail_prerequisite evaluator-dependencies "$2" s3-uv.log; }
+eval::launch_proxy() { :; }
+eval::wait_for_port() { return 0; }
+eval::launch_otlp_receiver() { :; }
+eval::npm_install() { touch "$DEPENDENCY_MARKER"; return 0; }
+eval::configure_ios_app_mode() { EVAL_IOS_APP_MODE=release; export EVAL_IOS_APP_MODE; }
+eval::boot_sim_and_runner() {
+  if [ "$FAIL_PREREQUISITE" = simulator-runner ]; then
+    printf '%s\n' 'ios-runner preparation failed' >"$1/s4-runner.log"
+    unset EVAL_DEVNAME EVAL_DEV_UDID EVAL_IOS_RUNTIME_VERSION EVAL_IOS_AVAILABLE_RUNTIME_VERSIONS_JSON
+    EVAL_IOS_PREREQUISITE_REASON='evaluator ios-runner preparation failed'
+    EVAL_IOS_PREREQUISITE_LOG='logs/s4-runner.log'
+    export EVAL_IOS_PREREQUISITE_REASON EVAL_IOS_PREREQUISITE_LOG
+    return "$FAIL_RC"
+  fi
+  EVAL_DEVNAME='iPhone 17 Pro'; EVAL_DEV_UDID='NEW-UDID'; EVAL_IOS_RUNTIME_VERSION=26.5
+  EVAL_IOS_AVAILABLE_RUNTIME_VERSIONS_JSON='["26.5"]'
+  export EVAL_DEVNAME EVAL_DEV_UDID EVAL_IOS_RUNTIME_VERSION EVAL_IOS_AVAILABLE_RUNTIME_VERSIONS_JSON
+}
+eval::build_release_ios_app() {
+  touch "$NATIVE_MARKER"
+  EVAL_IOS_NATIVE_BUILD_OUTCOME=passed; EVAL_IOS_INSTALL_OUTCOME=passed
+  export EVAL_IOS_NATIVE_BUILD_OUTCOME EVAL_IOS_INSTALL_OUTCOME
+  return 0
+}
+eval::probe_snapshot() { return 0; }
+eval::run_evaluator() {
+  printf '%s\n' '{"status":"completed","expected_plan_count":1,"terminal_plan_count":1,"evaluator_errors":[],"score":1,"full_points":1,"macro_avg_pct":100,"micro_pct":100,"test_plans":[]}' >"$4"
+  printf '%s\n' '<html></html>' >"${4%.json}.html"
+}
+eval::require_evaluator_result() { return 0; }
+""",
+            encoding="utf-8",
+        )
+        author_env.parent.mkdir(parents=True, exist_ok=True)
+        author_env.write_text(
+            f"""RUN_ID={run_id}
+RUN_START_MTIME=0
+AGENT=claude-code
+AGENT_MODEL=sonnet
+AGENT_REASONING_EFFORT=high
+PRD=dataset/prds/notes/prd/mvp.txt
+METRO_MODE=release
+SCENARIO=skills_available_unmentioned
+""",
+            encoding="utf-8",
+        )
+        workspace.mkdir(parents=True, exist_ok=True)
+        (workspace / "package.json").write_text("{}", encoding="utf-8")
+        fake_bin = root / "bin"
+        fake_bin.mkdir()
+        (fake_bin / "npx").write_text(
+            "#!/usr/bin/env bash\nprintf '%s\\n' '{\"scheme\":\"fixture\",\"ios\":{\"bundleIdentifier\":\"com.example.fixture\"}}'\n",
+            encoding="utf-8",
+        )
+        (fake_bin / "bun").write_text(
+            """#!/usr/bin/env bash
+set -eu
+out=''
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = '--out' ]; then out="$2"; break; fi
+  shift
+done
+[ -z "$out" ] || { mkdir -p "$(dirname "$out")"; printf '{}\n' > "$out"; }
+""",
+            encoding="utf-8",
+        )
+        (fake_bin / "npx").chmod(0o755)
+        (fake_bin / "bun").chmod(0o755)
+        env = os.environ.copy()
+        env.update(
+            {
+                "PATH": f"{fake_bin}:{env['PATH']}",
+                "AUTHOR_ENV": str(author_env),
+                "FAIL_PREREQUISITE": prerequisite,
+                "FAIL_RC": str(exit_code),
+                "DEPENDENCY_MARKER": str(dependency_marker),
+                "NATIVE_MARKER": str(native_marker),
+            }
+        )
+        result = subprocess.run(
+            ["bash", str(script)],
+            cwd=root,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        manifest = json.loads((artifact / "manifest.json").read_text(encoding="utf-8"))
+        return result, manifest, dependency_marker, native_marker
+
     def test_spec_release_is_default_and_dev_client_remains_available(self) -> None:
         """Specification: evaluation supports both builds with a stable default.
 
@@ -326,6 +471,65 @@ SCENARIO=skills_available_unmentioned
         breaking the replay layout explicitly supported by the entrypoint.
         """
         self.assert_legacy_author_reaches_evaluator_setup(root_manifest=False)
+
+    def assert_toolchain_failure_stops_as_preflight(
+        self,
+        prerequisite: str,
+        exit_code: int,
+        expected_reason: str,
+        expected_log: str,
+    ) -> None:
+        result, manifest, dependency_marker, native_marker = self.run_prerequisite_failure(
+            prerequisite,
+            exit_code,
+        )
+
+        self.assertEqual(result.returncode, exit_code, result.stdout + result.stderr)
+        self.assertIn(expected_reason, result.stdout)
+        self.assertFalse(dependency_marker.exists())
+        self.assertFalse(native_marker.exists())
+        for stage in ("dependency_install", "native_build", "app_launch", "evaluation"):
+            self.assertEqual(manifest["build_health"][stage]["status"], "not_run")
+        artifact = Path(result.args[1]).parents[4] / "ios-eval-report"
+        self.assertTrue((artifact / expected_log).is_file())
+
+    def test_agent_device_install_failure_stops_as_preflight_infrastructure(self) -> None:
+        self.assert_toolchain_failure_stops_as_preflight(
+            "agent-device",
+            71,
+            "evaluator toolchain setup failed: agent-device",
+            "logs/s1-agent-device.log",
+        )
+
+    def test_maestro_install_failure_stops_as_preflight_infrastructure(self) -> None:
+        self.assert_toolchain_failure_stops_as_preflight(
+            "maestro",
+            72,
+            "evaluator toolchain setup failed: Maestro",
+            "logs/s2-maestro.log",
+        )
+
+    def test_evaluator_dependency_failure_stops_as_preflight_infrastructure(self) -> None:
+        self.assert_toolchain_failure_stops_as_preflight(
+            "evaluator-dependencies",
+            73,
+            "evaluator toolchain setup failed: evaluator dependencies",
+            "logs/s3-uv.log",
+        )
+
+    def test_runner_failure_with_no_selected_device_stops_before_native_build(self) -> None:
+        result, manifest, dependency_marker, native_marker = self.run_prerequisite_failure(
+            "simulator-runner",
+            74,
+        )
+
+        self.assertEqual(result.returncode, 74, result.stdout + result.stderr)
+        self.assertIn("evaluator ios-runner preparation failed; see logs/s4-runner.log", result.stdout)
+        self.assertTrue(dependency_marker.exists())
+        self.assertFalse(native_marker.exists())
+        self.assertEqual(manifest["build_health"]["dependency_install"]["status"], "passed")
+        for stage in ("native_build", "app_launch", "evaluation"):
+            self.assertEqual(manifest["build_health"][stage]["status"], "not_run")
 
     def test_spec_completed_result_requires_numeric_score_fields(self) -> None:
         """Specification: a green evaluation contains a usable score artifact.
