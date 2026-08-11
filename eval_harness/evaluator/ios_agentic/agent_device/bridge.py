@@ -1270,13 +1270,11 @@ class AgentDeviceBridge:
                 error=f"maestro restart_app failed: {m.error or m.output[:200]}",
             )
 
-        # No explicit re-bind: Maestro's restart left the simulator in a
-        # known good state with the app foregrounded. An explicit
-        # `agent-device open <bundle>` here triggers an XCTest session
-        # rebuild that wipes focused-field state mid-flight, breaking the
-        # first fill→tap sequence after restart. The `capture_hierarchy`
-        # path already detects and recovers from runner-takeover if it
-        # actually happens later.
+        # Formal restarts do not re-bind here: `agent-device open <bundle>`
+        # can rebuild the XCTest session and wipe focused-field state between
+        # evaluator actions. Preflight readiness binds the exact configured
+        # app below, before the model begins; later runner takeover remains a
+        # detect-and-recover case in `capture_hierarchy`.
 
         if preflight:
             return self._wait_for_target_app_content(
@@ -1369,12 +1367,11 @@ class AgentDeviceBridge:
         # bundle load and trigger an unnecessary session rebuild.
         time.sleep(3)
 
-        # NOTE: do NOT call `agent-device open host.exp.Exponent` here to
-        # "re-bind" the session. That call appears to trigger an agent-device
-        # session rebuild that clears focused-field state (so a password
-        # filled into the gate gets wiped before tap_element button-unlock
-        # delivers). The detect-and-recover path inside `capture_hierarchy`
-        # handles runner takeover if it occurs.
+        # Formal restarts do not re-bind here because rebuilding the XCTest
+        # session can clear focused-field state between evaluator actions.
+        # Preflight readiness intentionally binds the exact configured app in
+        # `_wait_for_target_app_content` before the model begins; later runner
+        # takeover remains a detect-and-recover case in `capture_hierarchy`.
 
         return self._wait_for_target_app_content(
             is_dev_client=is_dev_client,
@@ -1394,6 +1391,20 @@ class AgentDeviceBridge:
         # rendered content" from "agent-device's helper runner has text on
         # screen" — the runner has its own [StaticText] nodes that would
         # falsely trigger a text-based readiness heuristic.
+        if preflight:
+            bound = self._rebind_session()
+            if not bound.success:
+                detail = bound.error or bound.output or "no error detail"
+                return AgentDeviceResult(
+                    success=False,
+                    output="",
+                    error=(
+                        "restart_app: failed to bind agent-device session to "
+                        f'"{self.config["app_id"]}" before preflight readiness: '
+                        f"{detail}"
+                    ),
+                )
+
         ready_timeout = float(os.environ.get("EVAL_APP_READY_TIMEOUT_SEC", "30"))
         deadline = time.time() + ready_timeout
         dismiss_attempts = 0

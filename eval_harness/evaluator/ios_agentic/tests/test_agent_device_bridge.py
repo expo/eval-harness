@@ -82,6 +82,44 @@ class SequencedAlertRestartBridge(AgentDeviceBridge):
         return AgentDeviceResult(success=True, output="ok")
 
 
+class BindingAwareRestartBridge(SequencedAlertRestartBridge):
+    """Model a reusable agent-device session initially bound to another app."""
+
+    def __init__(self, *, bind_success: bool = True) -> None:
+        super().__init__([authored_content()])
+        self.bound_app_id = "com.example.other"
+        self.bind_success = bind_success
+        self.events: list[tuple[str, object]] = []
+        self.snapshot_count = 0
+
+    def _run_cmd(
+        self,
+        args: list[str],
+        timeout: int | None = None,
+    ) -> AgentDeviceResult:
+        self.commands.append(args)
+        self.events.append(("command", args))
+        if args == ["open", self.config["app_id"]]:
+            if not self.bind_success:
+                return AgentDeviceResult(
+                    success=False,
+                    output="",
+                    error="fixture bind rejected",
+                )
+            self.bound_app_id = args[1]
+        return AgentDeviceResult(success=True, output="ok")
+
+    def _snapshot_raw(self) -> list[dict]:
+        self.snapshot_count += 1
+        self.events.append(("snapshot", self.bound_app_id))
+        nodes = authored_content()
+        if self.bound_app_id != self.config["app_id"]:
+            nodes[0]["label"] = "Other App"
+            nodes[2]["label"] = "Other account"
+            nodes[3]["label"] = "Continue"
+        return nodes
+
+
 def permission_alert(title: str, deny: str, allow: str) -> list[dict]:
     nodes = raw_snapshot_with_content("Alert", title, positive_rect=True)
     nodes.append(
@@ -302,6 +340,73 @@ class AgentDeviceBridgeFillTests(unittest.TestCase):
 
 
 class AgentDeviceBridgeRestartTests(unittest.TestCase):
+    @patch("eval_harness.evaluator.ios_agentic.agent_device.bridge.time.sleep")
+    def test_preflight_binds_exact_app_before_first_snapshot_in_both_paths(
+        self,
+        _sleep,
+    ) -> None:
+        """A stale reusable session cannot make another app look ready."""
+        for mode in ("native", "hybrid"):
+            with self.subTest(mode=mode):
+                bridge = BindingAwareRestartBridge()
+                if mode == "hybrid":
+                    bridge._maestro = RecordingMaestroRestart()
+                    result = bridge.restart_app_hybrid(preflight=True)
+                else:
+                    result = bridge.restart_app(preflight=True)
+
+                self.assertTrue(result.success, result.error)
+                self.assertEqual(bridge.bound_app_id, "com.example.authored")
+                self.assertEqual(
+                    bridge.events[:2],
+                    [
+                        ("command", ["open", "com.example.authored"]),
+                        ("snapshot", "com.example.authored"),
+                    ],
+                )
+
+    @patch("eval_harness.evaluator.ios_agentic.agent_device.bridge.time.sleep")
+    def test_preflight_bind_failure_aborts_before_snapshot_in_both_paths(
+        self,
+        _sleep,
+    ) -> None:
+        """A failed exact-app bind is one immediate infrastructure diagnostic."""
+        for mode in ("native", "hybrid"):
+            with self.subTest(mode=mode):
+                bridge = BindingAwareRestartBridge(bind_success=False)
+                if mode == "hybrid":
+                    bridge._maestro = RecordingMaestroRestart()
+                    result = bridge.restart_app_hybrid(preflight=True)
+                else:
+                    result = bridge.restart_app(preflight=True)
+
+                self.assertFalse(result.success)
+                self.assertEqual(
+                    result.error,
+                    "restart_app: failed to bind agent-device session to "
+                    '"com.example.authored" before preflight readiness: '
+                    "fixture bind rejected",
+                )
+                self.assertEqual(bridge.snapshot_count, 0)
+                self.assertEqual(
+                    bridge.commands,
+                    [["open", "com.example.authored"]],
+                )
+
+    @patch("eval_harness.evaluator.ios_agentic.agent_device.bridge.time.sleep")
+    def test_formal_restarts_do_not_add_an_automatic_session_bind(self, _sleep) -> None:
+        """Once the model is active, lifecycle keeps existing focus semantics."""
+        native = SequencedAlertRestartBridge([authored_content()])
+        native_result = native.restart_app(preflight=False)
+        hybrid = SequencedAlertRestartBridge([authored_content()])
+        hybrid._maestro = RecordingMaestroRestart()
+        hybrid_result = hybrid.restart_app_hybrid(preflight=False)
+
+        self.assertTrue(native_result.success, native_result.error)
+        self.assertTrue(hybrid_result.success, hybrid_result.error)
+        self.assertEqual(native.commands, [])
+        self.assertEqual(hybrid.commands, [])
+
     @patch.dict(
         os.environ,
         {"EVAL_DEV_UDID": "SELECTED-UDID", "EVAL_DEV_CLIENT_CLEAR_STATE": "1"},
@@ -404,7 +509,10 @@ class AgentDeviceBridgeRestartTests(unittest.TestCase):
                 safe_deny = deny.replace('"', '\\"')
                 self.assertEqual(
                     bridge.commands,
-                    [["press", f'label="{safe_deny}"']],
+                    [
+                        ["open", "com.example.authored"],
+                        ["press", f'label="{safe_deny}"'],
+                    ],
                 )
                 self.assertEqual(
                     bridge.last_restart_diagnostics,
@@ -450,7 +558,7 @@ class AgentDeviceBridgeRestartTests(unittest.TestCase):
             result.error,
             'restart_app: blocked by unrecognized iOS system alert: "Sign in to your Apple Account"',
         )
-        self.assertEqual(bridge.commands, [])
+        self.assertEqual(bridge.commands, [["open", "com.example.authored"]])
 
     @patch("eval_harness.evaluator.ios_agentic.agent_device.bridge.time.sleep")
     def test_regression_known_expo_continue_alert_keeps_existing_handler(
@@ -477,7 +585,13 @@ class AgentDeviceBridgeRestartTests(unittest.TestCase):
         result = bridge.restart_app(clear_state=True, preflight=True)
 
         self.assertTrue(result.success, result.error)
-        self.assertEqual(bridge.commands, [["press", 'label="Continue"']])
+        self.assertEqual(
+            bridge.commands,
+            [
+                ["open", "com.example.authored"],
+                ["press", 'label="Continue"'],
+            ],
+        )
 
     @patch("eval_harness.evaluator.ios_agentic.agent_device.bridge.time.sleep")
     def test_spec_in_session_restart_preserves_permission_alert_for_evaluator(
@@ -515,7 +629,7 @@ class AgentDeviceBridgeRestartTests(unittest.TestCase):
 
         self.assertTrue(result.success, result.error)
         self.assertEqual(result.output, "ready")
-        self.assertEqual(bridge.commands, [])
+        self.assertEqual(bridge.commands, [["open", "com.example.authored"]])
         self.assertEqual(bridge.last_restart_diagnostics, [])
 
     @patch.dict(os.environ, {"EVAL_APP_READY_TIMEOUT_SEC": "0.02"})
@@ -537,7 +651,7 @@ class AgentDeviceBridgeRestartTests(unittest.TestCase):
 
         self.assertTrue(result.success, result.error)
         self.assertEqual(result.output, "ready")
-        self.assertEqual(bridge.commands, [])
+        self.assertEqual(bridge.commands, [["open", "com.example.authored"]])
 
     def test_readiness_rejects_non_authored_and_generic_shell_trees(self) -> None:
         """Arbitrary shell accessibility text is not app-owned readiness.
