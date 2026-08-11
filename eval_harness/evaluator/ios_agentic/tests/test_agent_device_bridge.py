@@ -1,5 +1,6 @@
 import copy
 import os
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -271,6 +272,68 @@ class RecordingScreenshotBridge(AgentDeviceBridge):
     ) -> AgentDeviceResult:
         self.commands.append(args)
         return AgentDeviceResult(success=True, output=args[1])
+
+
+class AgentDeviceBridgeSimulatorRoutingTests(unittest.TestCase):
+    @patch.dict(os.environ, {"EVAL_DEV_UDID": "SELECTED-UDID"})
+    def test_agent_device_commands_target_selected_simulator_udid(self) -> None:
+        """UI commands cannot attach to a lower runtime that is also booted."""
+        commands: list[list[str]] = []
+
+        def run(command, **kwargs):
+            commands.append(command)
+            return subprocess.CompletedProcess(command, 0, stdout="ready", stderr="")
+
+        with patch(
+            "eval_harness.evaluator.ios_agentic.agent_device.bridge.subprocess.run",
+            side_effect=run,
+        ):
+            result = AgentDeviceBridge()._run_cmd(["open", "com.example.authored"])
+
+        self.assertTrue(result.success, result.error)
+        self.assertEqual(
+            commands,
+            [[
+                "agent-device",
+                "open",
+                "com.example.authored",
+                "--session",
+                "adaptive",
+                "--platform",
+                "ios",
+                "--udid",
+                "SELECTED-UDID",
+            ]],
+        )
+
+    @patch.dict(os.environ, {"EVAL_DEV_UDID": ""})
+    def test_agent_device_commands_preserve_legacy_device_autodiscovery(self) -> None:
+        """Standalone bridge use keeps its historical no-UDID fallback."""
+        commands: list[list[str]] = []
+
+        def run(command, **kwargs):
+            commands.append(command)
+            return subprocess.CompletedProcess(command, 0, stdout="ready", stderr="")
+
+        with patch(
+            "eval_harness.evaluator.ios_agentic.agent_device.bridge.subprocess.run",
+            side_effect=run,
+        ):
+            result = AgentDeviceBridge()._run_cmd(["snapshot", "-i"])
+
+        self.assertTrue(result.success, result.error)
+        self.assertEqual(
+            commands,
+            [[
+                "agent-device",
+                "snapshot",
+                "-i",
+                "--session",
+                "adaptive",
+                "--platform",
+                "ios",
+            ]],
+        )
 
 
 class AgentDeviceBridgeScreenshotTests(unittest.TestCase):

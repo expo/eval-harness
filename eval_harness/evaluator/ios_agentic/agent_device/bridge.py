@@ -130,11 +130,14 @@ class AgentDeviceBridge:
         if deep_link:
             cfg["deep_link"] = deep_link
         self.config = cfg
-        self.simulator = os.environ.get("EVAL_DEV_UDID") or "booted"
+        selected_simulator = os.environ.get("EVAL_DEV_UDID")
+        self.simulator = selected_simulator or "booted"
         if verbose:
             print(f"  [bridge] app_id={cfg['app_id']} deep_link={cfg['deep_link']}")
         # Common flags appended to every agent-device call.
         self._common_args = ["--session", session, "--platform", platform]
+        if selected_simulator:
+            self._common_args.extend(["--udid", selected_simulator])
         # A restart may make a neutral evaluator-owned choice before the model
         # exists. Keep those choices reviewable without coupling this bridge to
         # the plan tracer. The evaluator copies each entry into its trace.

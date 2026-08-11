@@ -79,8 +79,9 @@ PY
       echo "--- boot attempt $attempt/$max_attempts ---"
       xcrun simctl boot "$dev_udid" || true
       xcrun simctl bootstatus "$dev_udid" -b || true
+      # Pinned agent-device 0.17.6 resolves --device as a simulator name.
       bun "$_EVAL_STAGES_DIR/timeout_exec.ts" "${EVAL_IOS_BOOT_TIMEOUT_SEC:-240}" \
-        agent-device boot --platform ios --device "$dev_udid"
+        agent-device boot --platform ios --device "$devname"
     } >>"$out/s4-boot.log" 2>&1
     rc=$?
     [ "$rc" = 0 ] && break
@@ -98,7 +99,7 @@ PY
   local runner_timeout="${EVAL_IOS_RUNNER_TIMEOUT_SEC:-420}"
   echo "  preparing ios-runner (timeout ${runner_timeout}s)"
   bun "$_EVAL_STAGES_DIR/timeout_exec.ts" "$runner_timeout" \
-    agent-device prepare ios-runner --platform ios --device "$dev_udid" --timeout "$AGENT_DEVICE_DAEMON_TIMEOUT_MS" \
+    agent-device prepare ios-runner --platform ios --udid "$dev_udid" --timeout "$AGENT_DEVICE_DAEMON_TIMEOUT_MS" \
     >"$out/s4-runner.log" 2>&1
   rc=$?; eval::gate $rc "agent-device prepare ios-runner"
   [ "$rc" != 0 ] && tail -25 "$out/s4-runner.log" | sed 's/^/    /'

@@ -272,6 +272,13 @@ class ReleaseIosBuildTests(unittest.TestCase):
             #!/usr/bin/env bash
             set -eu
             printf '%s\n' "$@" > "$TEST_INSTALL_ARGS"
+            case " $* " in
+              *" --udid ABCD-1234 "*) ;;
+              *) echo "install was not routed to selected simulator UDID" >&2; exit 68 ;;
+            esac
+            case " $* " in
+              *" --device "*) echo "install UDID passed as a device name" >&2; exit 69 ;;
+            esac
             """,
         )
 
@@ -329,7 +336,7 @@ class ReleaseIosBuildTests(unittest.TestCase):
         self.assertEqual(Path(install_arguments[2]).name, "Fixture.app")
         self.assertEqual(
             install_arguments[3:],
-            ["--platform", "ios", "--device", "ABCD-1234"],
+            ["--platform", "ios", "--udid", "ABCD-1234"],
         )
 
     def test_release_build_falls_back_to_booted_udid_when_output_is_unsupported(self) -> None:
@@ -511,7 +518,9 @@ class ReleaseIosBuildTests(unittest.TestCase):
 
 
 class ProbeSnapshotSimulatorRoutingTests(unittest.TestCase):
-    def run_probe(self, *, release_launch: bool) -> tuple[subprocess.CompletedProcess[str], list[str]]:
+    def run_probe(
+        self, *, release_launch: bool
+    ) -> tuple[subprocess.CompletedProcess[str], list[str], list[str]]:
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         root = Path(temp.name)
@@ -520,6 +529,7 @@ class ProbeSnapshotSimulatorRoutingTests(unittest.TestCase):
         out.mkdir()
         bin_dir.mkdir()
         simctl_args = root / "simctl-args.txt"
+        agent_device_args = root / "agent-device-args.txt"
         snapshot_count = root / "snapshot-count.txt"
         executable(
             bin_dir / "xcrun",
@@ -532,6 +542,11 @@ class ProbeSnapshotSimulatorRoutingTests(unittest.TestCase):
             bin_dir / "agent-device",
             """\
             #!/usr/bin/env bash
+            printf '%s\n' "$*" >> "$TEST_AGENT_DEVICE_ARGS"
+            case " $* " in
+              *" --udid SELECTED-UDID "*) ;;
+              *) echo "agent-device command was not routed to selected UDID" >&2; exit 70 ;;
+            esac
             if [ "$1" = "alert" ]; then exit 1; fi
             if [ "$1" = "snapshot" ]; then
               count=0
@@ -566,6 +581,7 @@ class ProbeSnapshotSimulatorRoutingTests(unittest.TestCase):
         env = os.environ.copy()
         env["PATH"] = f"{bin_dir}:{env['PATH']}"
         env["TEST_SIMCTL_ARGS"] = str(simctl_args)
+        env["TEST_AGENT_DEVICE_ARGS"] = str(agent_device_args)
         env["TEST_SNAPSHOT_COUNT"] = str(snapshot_count)
         env["TEST_LAUNCHER_FIRST"] = "0" if release_launch else "1"
         result = subprocess.run(
@@ -577,19 +593,27 @@ class ProbeSnapshotSimulatorRoutingTests(unittest.TestCase):
             check=False,
         )
         commands = simctl_args.read_text(encoding="utf-8").splitlines()
-        return result, commands
+        agent_commands = agent_device_args.read_text(encoding="utf-8").splitlines()
+        return result, commands, agent_commands
 
     def test_release_launch_targets_selected_simulator_udid(self) -> None:
-        result, commands = self.run_probe(release_launch=True)
+        result, commands, agent_commands = self.run_probe(release_launch=True)
 
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(
             commands,
             ["simctl launch SELECTED-UDID com.example.authored"],
         )
+        self.assertEqual(
+            agent_commands,
+            [
+                "open com.example.authored --platform ios --session adaptive --udid SELECTED-UDID",
+                "snapshot -i --platform ios --session adaptive --udid SELECTED-UDID",
+            ],
+        )
 
     def test_dev_client_initial_and_retry_openurl_target_selected_udid(self) -> None:
-        result, commands = self.run_probe(release_launch=False)
+        result, commands, agent_commands = self.run_probe(release_launch=False)
 
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(
@@ -597,6 +621,15 @@ class ProbeSnapshotSimulatorRoutingTests(unittest.TestCase):
             [
                 "simctl openurl SELECTED-UDID example://ready",
                 "simctl openurl SELECTED-UDID example://ready",
+            ],
+        )
+        self.assertEqual(
+            agent_commands,
+            [
+                "open com.example.authored --platform ios --session adaptive --udid SELECTED-UDID",
+                "alert get --platform ios --session adaptive --udid SELECTED-UDID",
+                "snapshot -i --platform ios --session adaptive --udid SELECTED-UDID",
+                "snapshot -i --platform ios --session adaptive --udid SELECTED-UDID",
             ],
         )
 
@@ -718,6 +751,7 @@ class SimulatorSelectionTests(unittest.TestCase):
             out.mkdir()
             bin_dir.mkdir()
             simctl_args = root / "simctl-args.txt"
+            agent_device_args = root / "agent-device-args.txt"
             devices = {
                 "devices": {
                     "com.apple.CoreSimulator.SimRuntime.iOS-18-6": [
@@ -750,7 +784,32 @@ class SimulatorSelectionTests(unittest.TestCase):
                 fi
                 """,
             )
-            executable(bin_dir / "bun", "#!/usr/bin/env bash\nexit 0\n")
+            executable(
+                bin_dir / "bun",
+                """\
+                #!/usr/bin/env bash
+                set -eu
+                shift 2
+                printf '%s\n' "$*" >> "$TEST_AGENT_DEVICE_ARGS"
+                if [ "$1 $2" = "agent-device boot" ]; then
+                  if [ "$*" != "agent-device boot --platform ios --device iPhone 17 Pro" ]; then
+                    echo "DEVICE_NOT_FOUND: boot expects the selected simulator name" >&2
+                    exit 64
+                  fi
+                elif [ "$1 $2 $3" = "agent-device prepare ios-runner" ]; then
+                  case " $* " in
+                    *" --udid NEW-UDID "*) ;;
+                    *) echo "runner was not bound to selected UDID" >&2; exit 65 ;;
+                  esac
+                  case " $* " in
+                    *" --device "*) echo "runner UDID passed as a device name" >&2; exit 66 ;;
+                  esac
+                else
+                  echo "unexpected timeout-wrapped command: $*" >&2
+                  exit 67
+                fi
+                """,
+            )
 
             script = textwrap.dedent(
                 f"""\
@@ -759,6 +818,7 @@ class SimulatorSelectionTests(unittest.TestCase):
                 eval::gate() {{ return "$1"; }}
                 sleep() {{ :; }}
                 export _EVAL_STAGES_DIR=/unused
+                export EVAL_IOS_BOOT_ATTEMPTS=1
                 eval::boot_sim_and_runner {out!s}
                 printf 'DEVICE=%s|%s|%s|%s|%s\n' "$EVAL_DEVNAME" "$EVAL_DEV_UDID" \
                   "$EVAL_IOS_RUNTIME_VERSION" "$AGENT_DEVICE_IOS_DEVICE" \
@@ -768,6 +828,7 @@ class SimulatorSelectionTests(unittest.TestCase):
             env = os.environ.copy()
             env["PATH"] = f"{bin_dir}:{env['PATH']}"
             env["TEST_SIMCTL_ARGS"] = str(simctl_args)
+            env["TEST_AGENT_DEVICE_ARGS"] = str(agent_device_args)
             result = subprocess.run(
                 ["bash", "-c", script],
                 cwd=ROOT,
@@ -785,6 +846,13 @@ class SimulatorSelectionTests(unittest.TestCase):
             simctl_commands = simctl_args.read_text(encoding="utf-8").splitlines()
             self.assertIn("simctl boot NEW-UDID", simctl_commands)
             self.assertIn("simctl bootstatus NEW-UDID -b", simctl_commands)
+            self.assertEqual(
+                agent_device_args.read_text(encoding="utf-8").splitlines(),
+                [
+                    "agent-device boot --platform ios --device iPhone 17 Pro",
+                    "agent-device prepare ios-runner --platform ios --udid NEW-UDID --timeout 180000",
+                ],
+            )
 
 
 if __name__ == "__main__":

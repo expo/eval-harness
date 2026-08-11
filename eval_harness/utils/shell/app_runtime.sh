@@ -279,7 +279,7 @@ eval::build_release_ios_app() { # app_dir out_dir device_udid
           rc=$?
         else
           agent-device install "$EVAL_APP_BUNDLE_ID" "$release_app" \
-            --platform ios --device "$device" >>"$out/s6-release.log" 2>&1
+            --platform ios --udid "$device" >>"$out/s6-release.log" 2>&1
           rc=$?
           if [ "$rc" = 0 ]; then
             EVAL_IOS_INSTALL_OUTCOME=passed
@@ -413,6 +413,8 @@ eval::probe_blocking_app_shell_error() { # snapshot_file
 eval::probe_snapshot() { # out_dir app_id
   local out="$1" app_id="${2:-host.exp.Exponent}"
   local sim_device="${EVAL_DEV_UDID:-booted}"
+  local -a agent_device_args=(--platform ios --session adaptive)
+  [ -z "${EVAL_DEV_UDID:-}" ] || agent_device_args+=(--udid "$EVAL_DEV_UDID")
   echo "================= STAGE 6b: agent-device probe (open $app_id + snapshot) ================="
   local rc open_label
   if [ "${EVAL_APP_USE_SIMCTL_LAUNCH:-}" = "1" ]; then
@@ -420,7 +422,7 @@ eval::probe_snapshot() { # out_dir app_id
     rc=$?
     open_label="simctl launch $app_id + agent-device session bind"
     if [ "$rc" = 0 ]; then
-      agent-device open "$app_id" --platform ios --session adaptive >>"$out/s6b-open.log" 2>&1
+      agent-device open "$app_id" "${agent_device_args[@]}" >>"$out/s6b-open.log" 2>&1
       rc=$?
     fi
   elif [ -n "${EVAL_APP_DEEP_LINK:-}" ]; then
@@ -428,19 +430,19 @@ eval::probe_snapshot() { # out_dir app_id
     rc=$?
     open_label="simctl openurl dev-client deep link + agent-device session bind"
     if [ "$rc" = 0 ]; then
-      agent-device open "$app_id" --platform ios --session adaptive >>"$out/s6b-open.log" 2>&1
+      agent-device open "$app_id" "${agent_device_args[@]}" >>"$out/s6b-open.log" 2>&1
       rc=$?
     fi
     if [ "$rc" = 0 ]; then
-      if agent-device alert get --platform ios --session adaptive >"$out/s6b-alert.log" 2>&1; then
+      if agent-device alert get "${agent_device_args[@]}" >"$out/s6b-alert.log" 2>&1; then
         cat "$out/s6b-alert.log" >>"$out/s6b-open.log"
         if grep -q "Open in" "$out/s6b-alert.log"; then
-          agent-device press 'label="Open"' --platform ios --session adaptive >>"$out/s6b-open.log" 2>&1 || true
+          agent-device press 'label="Open"' "${agent_device_args[@]}" >>"$out/s6b-open.log" 2>&1 || true
         fi
       fi
     fi
   else
-    agent-device open "$app_id" --platform ios --session adaptive >"$out/s6b-open.log" 2>&1
+    agent-device open "$app_id" "${agent_device_args[@]}" >"$out/s6b-open.log" 2>&1
     rc=$?
     open_label="agent-device open $app_id"
   fi
@@ -449,7 +451,7 @@ eval::probe_snapshot() { # out_dir app_id
   sleep "${EVAL_APP_LAUNCH_SETTLE_SEC:-8}"
   local i
   for i in $(seq 1 30); do
-    agent-device snapshot -i --platform ios --session adaptive >"$out/s6b-snap.log" 2>&1
+    agent-device snapshot -i "${agent_device_args[@]}" >"$out/s6b-snap.log" 2>&1
     rc=$?
     [ "$rc" != 0 ] && break
     if grep -Eq 'Bundling [0-9]+%|Loading JavaScript bundle|Downloading JavaScript bundle' "$out/s6b-snap.log"; then
@@ -459,8 +461,8 @@ eval::probe_snapshot() { # out_dir app_id
     fi
     if grep -Eq 'Runtime version:|Source code explorer|Open DevTools|Toggle performance monitor|dev-tools|Go home|Reload' "$out/s6b-snap.log"; then
       echo "  Expo dev launcher/dev tools are visible; dismissing (attempt $i)" >>"$out/s6b-open.log"
-      agent-device press 'label="Close"' --platform ios --session adaptive >>"$out/s6b-open.log" 2>&1 \
-        || agent-device press "200" "80" --platform ios --session adaptive >>"$out/s6b-open.log" 2>&1 \
+      agent-device press 'label="Close"' "${agent_device_args[@]}" >>"$out/s6b-open.log" 2>&1 \
+        || agent-device press "200" "80" "${agent_device_args[@]}" >>"$out/s6b-open.log" 2>&1 \
         || true
       sleep 2
       continue
