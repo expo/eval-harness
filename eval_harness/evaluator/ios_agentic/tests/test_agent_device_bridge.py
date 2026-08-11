@@ -52,9 +52,17 @@ class RecordingDevClientRestartBridge(AgentDeviceBridge):
     def _snapshot_raw(self) -> list[dict]:
         return [
             {
+                "type": "Application",
+                "label": "Authored App",
+                "bundleId": "com.example.authored",
+                "pid": 42,
+            },
+            {
                 "type": "Button",
                 "identifier": "authored-app-ready",
                 "label": "Ready",
+                "bundleId": "com.example.authored",
+                "pid": 42,
             }
         ]
 
@@ -103,6 +111,41 @@ def authored_content() -> list[dict]:
             "type": "Button",
             "identifier": "authored-app-ready",
             "label": "Ready",
+        },
+    ]
+
+
+def authored_content_without_identifiers() -> list[dict]:
+    """Realistic raw iOS tree for an accessible app that defines no testIDs."""
+    return [
+        {
+            "type": "Application",
+            "label": "Notes",
+            "bundleId": "com.example.authored",
+            "appName": "Notes",
+            "pid": 42,
+            "visibleToUser": True,
+        },
+        {
+            "type": "Window",
+            "bundleId": "com.example.authored",
+            "pid": 42,
+            "visibleToUser": True,
+        },
+        {
+            "type": "StaticText",
+            "label": "Notes",
+            "bundleId": "com.example.authored",
+            "pid": 42,
+            "visibleToUser": True,
+        },
+        {
+            "type": "Button",
+            "label": "New note",
+            "bundleId": "com.example.authored",
+            "pid": 42,
+            "visibleToUser": True,
+            "hittable": True,
         },
     ]
 
@@ -410,6 +453,144 @@ class AgentDeviceBridgeRestartTests(unittest.TestCase):
         self.assertEqual(result.output, "ready")
         self.assertEqual(bridge.commands, [])
         self.assertEqual(bridge.last_restart_diagnostics, [])
+
+    @patch.dict(os.environ, {"EVAL_APP_READY_TIMEOUT_SEC": "0.02"})
+    @patch("eval_harness.evaluator.ios_agentic.agent_device.bridge.time.sleep")
+    def test_preflight_accepts_labelled_authored_ui_without_identifiers(
+        self,
+        _sleep,
+    ) -> None:
+        """Accessible authored content must not depend on optional React Native testIDs.
+
+        Catches: requiring a nonempty accessibilityIdentifier even when the raw
+        tree identifies the expected app process and exposes useful labelled UI.
+        """
+        bridge = SequencedAlertRestartBridge(
+            [authored_content_without_identifiers()]
+        )
+
+        result = bridge.restart_app(clear_state=True, preflight=True)
+
+        self.assertTrue(result.success, result.error)
+        self.assertEqual(result.output, "ready")
+        self.assertEqual(bridge.commands, [])
+
+    def test_readiness_rejects_non_authored_and_generic_shell_trees(self) -> None:
+        """Arbitrary shell accessibility text is not app-owned readiness.
+
+        Catches: replacing the testID gate with any-labelled-node and thereby
+        accepting the runner, Expo launcher, alert, error, or a bare root view.
+        """
+        bridge = AgentDeviceBridge(app_id="com.example.authored")
+        cases = {
+            "agent-device runner": [
+                {
+                    "type": "Application",
+                    "label": "AgentDeviceRunner",
+                    "bundleId": "com.facebook.WebDriverAgentRunner.xctrunner",
+                    "pid": 7,
+                },
+                {
+                    "type": "StaticText",
+                    "label": "Runner Ready",
+                    "identifier": "runner-ready",
+                    "bundleId": "com.facebook.WebDriverAgentRunner.xctrunner",
+                    "pid": 7,
+                },
+            ],
+            "Expo dev-client launcher": [
+                {
+                    "type": "Application",
+                    "label": "Authored App",
+                    "bundleId": "com.example.authored",
+                    "pid": 42,
+                },
+                {
+                    "type": "StaticText",
+                    "label": "Development servers",
+                    "identifier": "launcher-title",
+                    "bundleId": "com.example.authored",
+                    "pid": 42,
+                },
+                {
+                    "type": "Button",
+                    "label": "Enter URL manually",
+                    "identifier": "launcher-enter-url",
+                    "bundleId": "com.example.authored",
+                    "pid": 42,
+                },
+            ],
+            "system alert": [
+                {
+                    "type": "Application",
+                    "label": "Notes",
+                    "bundleId": "com.example.authored",
+                    "pid": 42,
+                },
+                {"type": "Alert", "label": "System Alert", "pid": 42},
+                {
+                    "type": "Button",
+                    "label": "Allow",
+                    "identifier": "permission-allow",
+                    "pid": 42,
+                },
+            ],
+            "known error shell": [
+                {
+                    "type": "Application",
+                    "label": "Notes",
+                    "bundleId": "com.example.authored",
+                    "pid": 42,
+                },
+                {
+                    "type": "StaticText",
+                    "label": "Unable to resolve module ./missing",
+                    "identifier": "error-message",
+                    "bundleId": "com.example.authored",
+                    "pid": 42,
+                },
+            ],
+            "bare generic root": [
+                {
+                    "type": "Application",
+                    "label": "Notes",
+                    "bundleId": "com.example.authored",
+                    "pid": 42,
+                },
+                {
+                    "type": "Other",
+                    "label": "Content View",
+                    "identifier": "root",
+                    "bundleId": "com.example.authored",
+                    "pid": 42,
+                },
+            ],
+        }
+
+        for name, nodes in cases.items():
+            with self.subTest(name=name):
+                self.assertFalse(bridge._has_target_app_content(nodes))
+
+    @patch.dict(os.environ, {"EVAL_APP_READY_TIMEOUT_SEC": "0.02"})
+    @patch("eval_harness.evaluator.ios_agentic.agent_device.bridge.time.sleep")
+    def test_readiness_does_not_reject_authored_copy_by_keyword_alone(
+        self,
+        _sleep,
+    ) -> None:
+        """A shell keyword is not a shell without its established structure.
+
+        Catches: rejecting an authored offline screen merely because its copy
+        overlaps one phrase used by Expo's reconnect dialog.
+        """
+        nodes = authored_content_without_identifiers()
+        nodes[2]["label"] = "Unable to connect to your notes"
+        nodes[3]["label"] = "Retry sync"
+        bridge = SequencedAlertRestartBridge([nodes])
+
+        result = bridge.restart_app(clear_state=True, preflight=True)
+
+        self.assertTrue(result.success, result.error)
+        self.assertEqual(result.output, "ready")
 
     @patch.dict("os.environ", {}, clear=False)
     @patch("eval_harness.evaluator.ios_agentic.agent_device.bridge.time.sleep")

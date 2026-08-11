@@ -23,7 +23,7 @@ simulator boot).
   4. simctl openurl exp://localhost:8081
   5. App-readiness polling: dismiss known Expo launcher surfaces; during the
      evaluator-owned preflight only, choose the neutral deny/not-now response
-     for recognized iOS permission prompts; then require app-owned testID UI.
+     for recognized iOS permission prompts; then require app-owned accessible UI.
      Unknown alerts abort with their title instead of being blindly dismissed.
 
 iOS-only. Android raises NotImplementedError for now.
@@ -310,11 +310,107 @@ class AgentDeviceBridge:
                 return n.get("label") == "AgentDeviceRunner"
         return False
 
-    @staticmethod
-    def _has_target_app_content(nodes: list[dict]) -> bool:
-        """True when React Native has rendered app-owned, testID-addressable UI."""
-        content_types = {"StaticText", "Button", "Image", "SecureTextField", "TextField", "Other"}
-        return any(n.get("type") in content_types and n.get("identifier") for n in nodes)
+    def _has_target_app_content(self, nodes: list[dict]) -> bool:
+        """True when the expected app owns useful, non-shell accessibility UI."""
+        app = next((node for node in nodes if node.get("type") == "Application"), None)
+        if app is None or app.get("label") == "AgentDeviceRunner":
+            return False
+        expected_bundle = self.config["app_id"]
+        app_bundle = app.get("bundleId")
+        if isinstance(app_bundle, str) and app_bundle and app_bundle != expected_bundle:
+            return False
+        if any(node.get("type") == "Alert" for node in nodes):
+            return False
+        if self._blocking_app_shell_error(nodes) is not None:
+            return False
+
+        tree_text = " ".join(
+            str(node.get(field) or "")
+            for node in nodes
+            for field in ("label", "value", "identifier")
+        )
+        dev_tools = (
+            "Runtime version:",
+            "Source code explorer",
+            "Open DevTools",
+            "Toggle performance monitor",
+            "dev-tools",
+        )
+        reconnect_errors = (
+            "Could not connect",
+            "Unable to connect",
+            "Something went wrong",
+            "No compatible apps",
+        )
+        launcher_markers = (
+            "Recently opened",
+            "Development servers",
+            "Enter URL manually",
+            "Scan QR code",
+        )
+        known_shell = (
+            "Bundling " in tree_text or
+            "Loading JavaScript bundle" in tree_text or
+            ("Continue" in tree_text and (
+                "Expo Go" in tree_text or "Open this project" in tree_text
+            )) or
+            any(marker in tree_text for marker in dev_tools) or
+            ("OK" in tree_text and any(
+                marker in tree_text for marker in reconnect_errors
+            )) or
+            any(marker in tree_text for marker in launcher_markers) or
+            "Bottom Sheet" in tree_text
+        )
+        if known_shell:
+            return False
+
+        app_pid = app.get("pid")
+        content_types = {
+            "StaticText",
+            "Button",
+            "Image",
+            "SecureTextField",
+            "TextField",
+            "TextView",
+            "SearchField",
+            "Switch",
+            "Cell",
+            "Link",
+            "Other",
+        }
+        generic_content = {
+            "app",
+            "application",
+            "window",
+            "root",
+            "root view",
+            "content",
+            "content view",
+            "main",
+            "main view",
+            "view",
+            "screen",
+            "container",
+        }
+        for node in nodes:
+            if node.get("type") not in content_types or node.get("visibleToUser") is False:
+                continue
+            node_bundle = node.get("bundleId")
+            if (
+                isinstance(node_bundle, str) and node_bundle and
+                node_bundle != expected_bundle
+            ):
+                continue
+            node_pid = node.get("pid")
+            if app_pid is not None and node_pid is not None and node_pid != app_pid:
+                continue
+            signals = [
+                str(node.get(field) or "").strip()
+                for field in ("label", "value", "identifier")
+            ]
+            if any(signal and signal.lower() not in generic_content for signal in signals):
+                return True
+        return False
 
     @staticmethod
     def _visible_alert_title(nodes: list[dict]) -> str | None:
@@ -1382,11 +1478,10 @@ class AgentDeviceBridge:
                     error=f"restart_app: app shell error visible: {blocking_error}; {self._debug_node_summary(nodes)}",
                 )
 
-            # Ready when the target app has rendered a node that BOTH has a
-            # content type AND a React Native testID (accessibilityIdentifier).
-            # The stricter "has identifier" requirement filters out Expo Go's
-            # chrome (welcome dialog, dev menu, splash) which has text nodes
-            # but no testIDs. Only the actual app's components have testIDs.
+            # Ready when the expected app process owns useful accessible UI.
+            # TestIDs are strong evidence when present but are optional; raw
+            # agent-device bundle/process metadata plus non-shell labels let
+            # unconstrained authored apps reach the evaluator too.
             if self._has_target_app_content(nodes):
                 if self.verbose:
                     print(f"  [bridge] target app content ready: {self._debug_node_summary(nodes)}")
