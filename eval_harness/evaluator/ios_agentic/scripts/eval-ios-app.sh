@@ -120,7 +120,7 @@ trap 'eval_status=$?; eval::stop_proxies; kill "${EVAL_METRO_PID:-}" 2>/dev/null
 
 if [ -n "$AUTHOR_MANIFEST" ]; then
   AUTHOR_APP_AUTHORED_STATUS="$(author_manifest_field status)"
-  if [ "$AUTHOR_APP_AUTHORED_STATUS" != "passed" ]; then
+  if [ -n "$AUTHOR_APP_AUTHORED_STATUS" ] && [ "$AUTHOR_APP_AUTHORED_STATUS" != "passed" ]; then
     AUTHOR_APP_AUTHORED_DETAIL="$(author_manifest_field detail)"
     if [ -n "$AUTHOR_APP_AUTHORED_DETAIL" ]; then
       eval_fail preflight "authoring did not complete: $AUTHOR_APP_AUTHORED_DETAIL"

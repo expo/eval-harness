@@ -15,6 +15,7 @@ const dynamicConfigNames = new Set([
   "app.config.cjs",
   "app.config.js",
 ]);
+const staticConfigNames = new Set(["app.config.json", "app.json"]);
 
 if (!workspace || !runId || !resolvedConfigPath || !adjustmentPath) {
   console.error(
@@ -70,6 +71,39 @@ function dynamicConfig(workspacePath, resolved) {
   for (const extension of ["ts", "mts", "cts", "mjs", "cjs", "js"]) {
     const candidate = path.join(workspacePath, `app.config.${extension}`);
     if (fs.existsSync(candidate)) return dynamicConfigFromProvenance(workspacePath, candidate);
+  }
+  return null;
+}
+
+function staticConfigFromProvenance(workspacePath, staticConfigPath) {
+  if (typeof staticConfigPath !== "string" || staticConfigPath.trim() === "") return null;
+  const workspaceRealPath = fs.realpathSync(workspacePath);
+  const candidate = path.resolve(workspaceRealPath, staticConfigPath);
+  let realPath;
+  try {
+    realPath = fs.realpathSync(candidate);
+  } catch {
+    throw new Error("resolved static config path is unavailable");
+  }
+  if (!staticConfigNames.has(path.basename(realPath))) {
+    throw new Error("resolved static config path is not a supported static config file");
+  }
+  if (!isWithin(workspaceRealPath, realPath)) {
+    throw new Error("resolved static config path is outside evaluator workspace");
+  }
+  if (!fs.statSync(realPath).isFile()) {
+    throw new Error("resolved static config path is not a regular file");
+  }
+  return { path: realPath };
+}
+
+function staticConfig(workspacePath, resolved) {
+  const provenance = resolved?._internal?.staticConfigPath;
+  const fromProvenance = staticConfigFromProvenance(workspacePath, provenance);
+  if (fromProvenance) return fromProvenance;
+  for (const name of ["app.config.json", "app.json"]) {
+    const candidate = path.join(workspacePath, name);
+    if (fs.existsSync(candidate)) return staticConfigFromProvenance(workspacePath, candidate);
   }
   return null;
 }
@@ -149,16 +183,21 @@ function replaceDynamicConfig(config, identity, packageType) {
 }
 
 function patchStaticConfig(workspacePath, resolved, identity) {
-  const appJsonPath = path.join(workspacePath, "app.json");
-  const document = fs.existsSync(appJsonPath) ? readJson(appJsonPath) : { expo: resolved };
-  const expo = document.expo && typeof document.expo === "object" ? document.expo : {};
+  const config = staticConfig(workspacePath, resolved);
+  const configPath = config?.path ?? path.join(workspacePath, "app.json");
+  const document = fs.existsSync(configPath) ? readJson(configPath) : { expo: resolved };
+  if (!document || typeof document !== "object" || Array.isArray(document)) {
+    throw new Error("resolved static config must be an object");
+  }
+  const hasExpoEnvelope = document.expo && typeof document.expo === "object" && !Array.isArray(document.expo);
+  const expo = hasExpoEnvelope ? document.expo : document;
   if (!hasValue(expo.scheme)) expo.scheme = identity.scheme;
-  const ios = expo.ios && typeof expo.ios === "object" ? expo.ios : {};
+  const ios = expo.ios && typeof expo.ios === "object" && !Array.isArray(expo.ios) ? expo.ios : {};
   if (!hasValue(ios.bundleIdentifier)) ios.bundleIdentifier = identity.bundleIdentifier;
   expo.ios = ios;
-  document.expo = expo;
-  writeJson(appJsonPath, document);
-  return "app.json";
+  if (hasExpoEnvelope) document.expo = expo;
+  writeJson(configPath, document);
+  return path.basename(configPath);
 }
 
 let resolved;

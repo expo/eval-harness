@@ -222,6 +222,111 @@ SCENARIO=skills_available_unmentioned
             "author agent exited 17 while generating the app"
         )
 
+    def assert_legacy_author_reaches_evaluator_setup(self, *, root_manifest: bool) -> None:
+        """A replay without an explicit author failure must retain its old behavior."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            run_id = "legacy-author"
+            script = root / "eval_harness/evaluator/ios_agentic/scripts/eval-ios-app.sh"
+            collector = root / "eval_harness/utils/artifacts/collect_ios_artifact.sh"
+            diagnostic = root / "eval_harness/utils/artifacts/create_diagnostic_artifact.py"
+            stages = root / "eval_harness/utils/shell/eval_stages.sh"
+            if root_manifest:
+                author_env = root / "author-agent-metadata" / run_id / "author.env"
+                workspace = root / "author-agent-workspace" / run_id
+            else:
+                author_env = root / "eval-out" / run_id / "author.env"
+                workspace = root / "agent-workspace" / run_id
+            script.parent.mkdir(parents=True, exist_ok=True)
+            collector.parent.mkdir(parents=True, exist_ok=True)
+            stages.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(SCRIPT, script)
+            shutil.copy2(
+                ROOT / "eval_harness/utils/artifacts/collect_ios_artifact.sh",
+                collector,
+            )
+            shutil.copy2(
+                ROOT / "eval_harness/utils/artifacts/create_diagnostic_artifact.py",
+                diagnostic,
+            )
+            stages.write_text(
+                """eval::resolve_reasoning_effort() { printf '%s' "${1:-high}"; }
+eval::fix_java_home() { :; }
+eval::env_banner() { :; }
+eval::stop_proxies() { :; }
+eval::install_agent_device() { touch "$EVAL_SETUP_MARKER"; exit 73; }
+""",
+                encoding="utf-8",
+            )
+            author_env.parent.mkdir(parents=True, exist_ok=True)
+            author_env.write_text(
+                f"""RUN_ID={run_id}
+RUN_START_MTIME=0
+AGENT=claude-code
+AGENT_MODEL=sonnet
+AGENT_REASONING_EFFORT=high
+PRD=dataset/prds/notes/prd/mvp.txt
+METRO_MODE=release
+SCENARIO=skills_available_unmentioned
+""",
+                encoding="utf-8",
+            )
+            workspace.mkdir(parents=True, exist_ok=True)
+            (workspace / "package.json").write_text("{}", encoding="utf-8")
+            if root_manifest:
+                (root / "manifest.json").write_text(
+                    json.dumps(
+                        {
+                            "schema_version": 2,
+                            "artifact_type": "authored-app",
+                            "run_id": run_id,
+                            "artifacts": {
+                                "workspace": f"author-agent-workspace/{run_id}/",
+                                "author_env": f"author-agent-metadata/{run_id}/author.env",
+                            },
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+            setup_marker = root / "evaluator-setup-ran"
+            env = os.environ.copy()
+            env.update(
+                {
+                    "AUTHOR_ENV": str(author_env),
+                    "AUTHORED_ARTIFACT_ROOT": str(root),
+                    "EVAL_SETUP_MARKER": str(setup_marker),
+                }
+            )
+
+            result = subprocess.run(
+                ["bash", str(script)],
+                cwd=root,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 73, result.stdout + result.stderr)
+            self.assertTrue(setup_marker.exists())
+            self.assertNotIn("authoring did not complete", result.stdout)
+
+    def test_legacy_root_manifest_without_build_health_remains_replayable(self) -> None:
+        """A pre-build-health canonical manifest is not evidence of author failure.
+
+        Catches: treating a missing app_authored status as an explicit failure
+        and rejecting previously produced canonical authored-app artifacts.
+        """
+        self.assert_legacy_author_reaches_evaluator_setup(root_manifest=True)
+
+    def test_v1_layout_without_root_manifest_remains_replayable(self) -> None:
+        """The historical agent-workspace/eval-out layout still reaches setup.
+
+        Catches: making the author gate require a canonical root manifest and
+        breaking the replay layout explicitly supported by the entrypoint.
+        """
+        self.assert_legacy_author_reaches_evaluator_setup(root_manifest=False)
+
     def test_spec_completed_result_requires_numeric_score_fields(self) -> None:
         """Specification: a green evaluation contains a usable score artifact.
 

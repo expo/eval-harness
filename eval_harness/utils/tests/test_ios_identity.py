@@ -63,9 +63,17 @@ class IosIdentityTests(unittest.TestCase):
             output = root / "ios-identity-adjustments.json"
             authored_config = {"expo": {"name": "Notes", "slug": "notes", "ios": {}}}
             write_json(source / "app.json", authored_config)
+            write_json(source / "package.json", {"name": "notes-fixture"})
             shutil.copytree(source, workspace)
+            initial = load_expo_config(workspace)
+            self.assertEqual(initial.returncode, 0, initial.stderr)
+            resolved_config = json.loads(initial.stdout)
+            self.assertEqual(
+                Path(resolved_config["_internal"]["staticConfigPath"]).resolve(),
+                (workspace / "app.json").resolve(),
+            )
 
-            result = normalize(workspace, {"name": "Notes", "slug": "notes", "ios": {}}, output)
+            result = normalize(workspace, resolved_config, output)
 
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(json.loads((source / "app.json").read_text(encoding="utf-8")), authored_config)
@@ -111,6 +119,117 @@ class IosIdentityTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(json.loads((workspace / "app.json").read_text(encoding="utf-8")), config)
             self.assertEqual(json.loads(output.read_text(encoding="utf-8"))["adjustments"], [])
+
+    def test_static_app_config_json_is_patched_at_expo_resolved_path(self) -> None:
+        """The higher-precedence static config receives evaluator identity.
+
+        Catches: always writing app.json even when Expo resolved
+        app.config.json, leaving the effective config unchanged.
+        """
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            workspace = root / "evaluator-materialization"
+            output = root / "ios-identity-adjustments.json"
+            write_json(workspace / "package.json", {"name": "static-fixture"})
+            app_json = {
+                "expo": {
+                    "name": "Lower Priority",
+                    "slug": "lower-priority",
+                    "scheme": "lower-priority",
+                    "ios": {"bundleIdentifier": "com.example.lower"},
+                }
+            }
+            app_config_json = {
+                "name": "Static Notes",
+                "slug": "static-notes",
+                "ios": {"buildNumber": "9"},
+                "extra": {"origin": "app.config.json"},
+            }
+            write_json(workspace / "app.json", app_json)
+            write_json(workspace / "app.config.json", app_config_json)
+            initial = load_expo_config(workspace)
+            self.assertEqual(initial.returncode, 0, initial.stderr)
+            resolved_config = json.loads(initial.stdout)
+            self.assertEqual(
+                Path(resolved_config["_internal"]["staticConfigPath"]).resolve(),
+                (workspace / "app.config.json").resolve(),
+            )
+
+            result = normalize(workspace, resolved_config, output)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            loaded = load_expo_config(workspace)
+            self.assertEqual(loaded.returncode, 0, loaded.stderr)
+            effective = json.loads(loaded.stdout)
+            self.assertEqual(effective["name"], "Static Notes")
+            self.assertEqual(effective["extra"]["origin"], "app.config.json")
+            self.assertEqual(effective["ios"]["buildNumber"], "9")
+            self.assertEqual(effective["ios"]["bundleIdentifier"], "com.evalharness.da74b6b1b847")
+            self.assertEqual(effective["scheme"], "eval-da74b6b1b847")
+            self.assertEqual(json.loads((workspace / "app.json").read_text(encoding="utf-8")), app_json)
+            patched = json.loads((workspace / "app.config.json").read_text(encoding="utf-8"))
+            self.assertNotIn("expo", patched)
+            self.assertEqual(
+                json.loads(output.read_text(encoding="utf-8"))["config_path"],
+                "app.config.json",
+            )
+
+    def test_static_config_rejects_escaping_expo_provenance_path(self) -> None:
+        """Artifact-controlled static provenance cannot modify outside files.
+
+        Catches: trusting `_internal.staticConfigPath` or silently patching a
+        different local config when Expo's claimed source escapes the workspace.
+        """
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            workspace = root / "evaluator-materialization"
+            output = root / "ios-identity-adjustments.json"
+            local_config = {"expo": {"name": "Local Notes", "slug": "local-notes"}}
+            escaped_config = {"expo": {"name": "Outside Notes", "slug": "outside-notes"}}
+            write_json(workspace / "package.json", {"name": "local-fixture"})
+            write_json(workspace / "app.json", local_config)
+            outside = root / "outside" / "app.config.json"
+            write_json(outside, escaped_config)
+            initial = load_expo_config(workspace)
+            self.assertEqual(initial.returncode, 0, initial.stderr)
+            resolved_config = json.loads(initial.stdout)
+            resolved_config["_internal"]["staticConfigPath"] = str(outside)
+
+            result = normalize(workspace, resolved_config, output)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("outside evaluator workspace", result.stderr)
+            self.assertEqual(
+                json.loads((workspace / "app.json").read_text(encoding="utf-8")),
+                local_config,
+            )
+            self.assertEqual(json.loads(outside.read_text(encoding="utf-8")), escaped_config)
+
+    def test_static_config_without_source_falls_back_to_new_app_json(self) -> None:
+        """An inferred Expo config gets evaluator identity through a new app.json.
+
+        Catches: requiring static provenance even when Expo legitimately inferred
+        config from package.json because no static config file exists.
+        """
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            workspace = root / "evaluator-materialization"
+            output = root / "ios-identity-adjustments.json"
+            write_json(workspace / "package.json", {"name": "inferred-notes"})
+            initial = load_expo_config(workspace)
+            self.assertEqual(initial.returncode, 0, initial.stderr)
+            resolved_config = json.loads(initial.stdout)
+            self.assertIsNone(resolved_config["_internal"]["staticConfigPath"])
+
+            result = normalize(workspace, resolved_config, output)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue((workspace / "app.json").is_file())
+            loaded = load_expo_config(workspace)
+            self.assertEqual(loaded.returncode, 0, loaded.stderr)
+            effective = json.loads(loaded.stdout)
+            self.assertEqual(effective["ios"]["bundleIdentifier"], "com.evalharness.da74b6b1b847")
+            self.assertEqual(effective["scheme"], "eval-da74b6b1b847")
 
     def test_dynamic_config_missing_identity_keeps_author_logic_and_plugins(self) -> None:
         """Dynamic config must add identity without flattening its computed behavior.
