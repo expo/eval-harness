@@ -73,15 +73,72 @@ fi
 # evaluator-owned evidence and must not survive this producer boundary.
 rm -rf -- "$OUT/telemetry/traces" "$OUT/telemetry/openai.jsonl" "$OUT/telemetry/meta.jsonl"
 
-for log_file in "$OUT"/*.log; do
-  [ -f "$log_file" ] || continue
+safe_log_names=(
+  collect-evaluator-trace.log
+  d-devclient.log
+  d-devclient-config.log
+  d-expo-run-ios-help.log
+  d-ios-identity-normalize.log
+  s1-agent-device.log
+  s2-maestro.log
+  s3-uv.log
+  s4-boot.log
+  s4-runner.log
+  s5-npm.log
+  s6-metro.log
+  s6-devbuild.log
+  s6-release.log
+  s6b-alert.log
+  s6b-open.log
+  s6b-snap.log
+  s7-eval.log
+)
+for log_name in "${safe_log_names[@]}"; do
+  log_file="$OUT/$log_name"
+  [ -f "$log_file" ] && [ ! -L "$log_file" ] || continue
   mv -f "$log_file" "$OUT/logs/"
 done
+# Expo config and simulator discovery stderr are useful diagnostics, but their
+# corresponding JSON files are runtime scratch: resolved Expo config can carry
+# env-derived secrets, and the simulator inventory is unnecessary once the
+# selected/available versions have been reduced into the manifest.
+for diagnostic_file in "$OUT/d-expo-config.err" "$OUT/s4-simctl-devices.err"; do
+  [ -f "$diagnostic_file" ] && [ ! -L "$diagnostic_file" ] || continue
+  mv -f "$diagnostic_file" "$OUT/logs/"
+done
 IOS_IDENTITY_ADJUSTMENTS_ARTIFACT=""
-if [ -f "$OUT/d-ios-identity-adjustments.json" ]; then
+if [ -f "$OUT/d-ios-identity-adjustments.json" ] && [ ! -L "$OUT/d-ios-identity-adjustments.json" ]; then
   mv -f "$OUT/d-ios-identity-adjustments.json" "$OUT/logs/d-ios-identity-adjustments.json"
   IOS_IDENTITY_ADJUSTMENTS_ARTIFACT="logs/d-ios-identity-adjustments.json"
 fi
+
+while IFS= read -r -d '' log_entry; do
+  log_name="${log_entry##*/}"
+  keep_log=0
+  for safe_log_name in "${safe_log_names[@]}" \
+    d-expo-config.err s4-simctl-devices.err d-ios-identity-adjustments.json; do
+    if [ "$log_name" = "$safe_log_name" ]; then
+      keep_log=1
+      break
+    fi
+  done
+  if [ "$keep_log" -ne 1 ] || [ ! -f "$log_entry" ] || [ -L "$log_entry" ]; then
+    rm -rf -- "$log_entry"
+  fi
+done < <(find "$OUT/logs" -mindepth 1 -maxdepth 1 -print0)
+
+# The transport packages the whole producer root, so canonicality must be
+# enforced here rather than relying on every evaluator stage to clean up its
+# own scratch. Keep only authoritative outputs and curated evidence roots.
+while IFS= read -r -d '' artifact_entry; do
+  case "${artifact_entry##*/}" in
+    result.json|report.html|traces|telemetry|logs)
+      ;;
+    *)
+      rm -rf -- "$artifact_entry"
+      ;;
+  esac
+done < <(find "$OUT" -mindepth 1 -maxdepth 1 -print0)
 
 # The EXIT trap reaches this collector even when evaluator setup/build fails
 # before main.py can write its normal result. A canonical producer artifact

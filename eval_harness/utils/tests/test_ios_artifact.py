@@ -18,6 +18,125 @@ def write(path: Path, contents: str = "fixture") -> None:
 
 
 class IosArtifactTests(unittest.TestCase):
+    def test_collector_enforces_canonical_inventory_without_config_or_device_secrets(self) -> None:
+        """Only safe, evaluator-owned evidence may cross the iOS artifact boundary."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            run_id = "canonical-inventory"
+            artifact = root / "ios-eval-report"
+            secret = "CONFIG_SECRET_SENTINEL_9d34c2"
+
+            write(artifact / "result.json", '{"status":"failed","macro_avg_pct":null}')
+            write(artifact / "result.html", "<html>report</html>")
+            write(artifact / "s7-eval.log", "evaluator log")
+            write(artifact / "d-expo-config.err", "Expo config diagnostic\n")
+            write(artifact / "s4-simctl-devices.err", "simctl diagnostic\n")
+            write(
+                artifact / "d-ios-identity-adjustments.json",
+                '{"source":"evaluator","adjustments":[]}',
+            )
+            write(artifact / "telemetry" / "anthropic.jsonl", "{}\n")
+            write(artifact / "telemetry" / "otel" / "index.jsonl", "{}\n")
+
+            # These files are necessary while evaluating, but are unsafe or
+            # unbounded scratch and must never enter the producer artifact.
+            write(
+                artifact / "d-expo-config.json",
+                json.dumps({"extra": {"apiKey": secret}}),
+            )
+            write(
+                artifact / "d-expo-config.normalized.json",
+                json.dumps({"extra": {"apiKey": secret}}),
+            )
+            write(
+                artifact / "s4-simctl-devices.json",
+                json.dumps({"devices": [{"name": secret}]}),
+            )
+            write(artifact / "unrecognized-secret.log", secret)
+            write(artifact / "logs" / "stale-secret.json", secret)
+            write(artifact / "scratch" / "resolved-environment.txt", secret)
+
+            fake_bin = root / "bin"
+            fake_bun = fake_bin / "bun"
+            write(
+                fake_bun,
+                """#!/usr/bin/env bash
+set -eu
+out=""
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "--out" ]; then out="$2"; break; fi
+  shift
+done
+mkdir -p "$(dirname "$out")"
+printf '%s\n' '{"n_sessions":0,"sessions":[]}' > "$out"
+""",
+            )
+            fake_bun.chmod(0o755)
+
+            env = os.environ.copy()
+            env.update(
+                {
+                    "PATH": f"{fake_bin}:{env['PATH']}",
+                    "RUN_START_MTIME": "0",
+                    "IOS_NATIVE_BUILD_STATUS": "failed",
+                    "IOS_NATIVE_BUILD_LOG": "logs/d-expo-config.err",
+                    "IOS_FAILURE_STAGE": "native_build",
+                    "IOS_FAILURE_REASON": "Expo config could not be resolved",
+                    "EVAL_IOS_RUNTIME_VERSION": "26.5",
+                    "IOS_REQUIRED_VERSION": "27.0",
+                    "EVAL_IOS_AVAILABLE_RUNTIME_VERSIONS_JSON": '["18.6","26.5"]',
+                }
+            )
+            result = subprocess.run(
+                ["bash", str(COLLECTOR), str(root), run_id, str(artifact)],
+                cwd=ROOT,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                sorted(path.name for path in artifact.iterdir()),
+                ["logs", "manifest.json", "report.html", "result.json", "telemetry", "traces"],
+            )
+            self.assertEqual(
+                sorted(
+                    str(path.relative_to(artifact))
+                    for path in artifact.rglob("*")
+                    if path.is_file()
+                ),
+                [
+                    "logs/collect-evaluator-trace.log",
+                    "logs/d-expo-config.err",
+                    "logs/d-ios-identity-adjustments.json",
+                    "logs/s4-simctl-devices.err",
+                    "logs/s7-eval.log",
+                    "manifest.json",
+                    "report.html",
+                    "result.json",
+                    "telemetry/anthropic.jsonl",
+                    "telemetry/otel/index.jsonl",
+                    "traces/agentic-evaluator.json",
+                ],
+            )
+            for path in artifact.rglob("*"):
+                if path.is_file():
+                    self.assertNotIn(secret, path.read_text(encoding="utf-8"), str(path))
+
+            manifest = json.loads((artifact / "manifest.json").read_text(encoding="utf-8"))
+            native_build = manifest["build_health"]["native_build"]
+            self.assertEqual(native_build["log"], "logs/d-expo-config.err")
+            self.assertTrue((artifact / native_build["log"]).is_file())
+            self.assertEqual(manifest["environment"]["selected_ios"], "26.5")
+            self.assertEqual(manifest["environment"]["required_ios"], "27.0")
+            self.assertEqual(manifest["environment"]["available_ios"], ["18.6", "26.5"])
+            self.assertEqual(
+                manifest["artifacts"]["identity_adjustments"],
+                "logs/d-ios-identity-adjustments.json",
+            )
+
     def test_canonical_report_has_one_copy_of_evaluator_owned_evidence(self) -> None:
         """The iOS producer must not retain author evidence or duplicate its own output."""
         with tempfile.TemporaryDirectory() as td:
