@@ -22,6 +22,7 @@ AGENT="${AGENT:-claude-code}"
 [ "$AGENT" = "claude" ] && AGENT="claude-code"
 RUN_START_MTIME="${RUN_START_MTIME:-0}"
 PY="$(command -v python3 || command -v python)"
+SANITIZER="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/sanitize_author_workspace.py"
 
 canonical_existing_dir() { (cd "$1" && pwd -P); }
 canonical_target() {
@@ -45,13 +46,32 @@ fi
 
 WORKSPACE="$WORKSPACE_ROOT/$RUN_ID"
 OUT="$METADATA_ROOT/$RUN_ID"
-if [ ! -d "$WORKSPACE" ] || [ ! -d "$OUT" ]; then
+case "$RUN_ID" in
+  ""|.|..|*/*)
+    echo "invalid author run id" >&2
+    exit 2
+    ;;
+esac
+if [ ! -d "$WORKSPACE" ] || [ -L "$WORKSPACE" ] \
+  || [ "$(canonical_existing_dir "$WORKSPACE")" != "$WORKSPACE" ] \
+  || [ ! -d "$OUT" ] || [ -L "$OUT" ] \
+  || [ "$(canonical_existing_dir "$OUT")" != "$OUT" ]; then
   echo "missing author runtime directories for run $RUN_ID" >&2
   exit 2
 fi
 
 echo "================= COLLECT: authored-app for run $RUN_ID ================="
-rm -rf -- "$OUT/telemetry/traces"
+# `telemetry` is a collector-owned directory. Replace an authored link or
+# non-directory at that exact path before touching descendants.
+if [ -L "$OUT/telemetry" ] || { [ -e "$OUT/telemetry" ] && [ ! -d "$OUT/telemetry" ]; }; then
+  rm -f -- "$OUT/telemetry"
+fi
+mkdir -p "$OUT/telemetry"
+if [ -L "$OUT/telemetry/traces" ]; then
+  rm -f -- "$OUT/telemetry/traces"
+else
+  rm -rf -- "$OUT/telemetry/traces"
+fi
 mkdir -p "$OUT/telemetry/traces"
 
 run_trace_ts() {
@@ -59,7 +79,7 @@ run_trace_ts() {
 }
 
 collect_author_trace() {
-  local trace_name trace_script source_name session_name tmp dest
+  local trace_name trace_script source_name session_name tmp dest trace_log_tmp
   case "$AGENT" in
     codex)
       trace_name="codex-authoring.json"
@@ -104,8 +124,11 @@ collect_author_trace() {
     set -- "$@" --braintrust
   fi
 
-  run_trace_ts "$@" >"$OUT/collect-author-trace.log" 2>&1 \
+  trace_log_tmp="$(mktemp "$OUT/.collect-author-trace.XXXXXX")"
+  run_trace_ts "$@" >"$trace_log_tmp" 2>&1 \
     || echo "  ⚠️  author trace reconstruction failed (see collect-author-trace.log)"
+  rm -f -- "$OUT/collect-author-trace.log"
+  mv -f -- "$trace_log_tmp" "$OUT/collect-author-trace.log"
   if [ -f "$tmp" ]; then
     mv -f "$tmp" "$dest"
   fi
@@ -113,38 +136,43 @@ collect_author_trace() {
 
 collect_author_trace
 
-# Keep the authored source, but remove reproducible build products and
-# credential-bearing harness configuration before it becomes transport data.
-# Installed skill trees are authoring context, not app source; their trigger
-# evidence is already retained in the normalized author trace.
-rm -rf -- \
-  "$WORKSPACE/node_modules" "$WORKSPACE/.expo" "$WORKSPACE/.git" \
-  "$WORKSPACE/.cache" "$WORKSPACE/.eval-bundle-export-tmp" \
-  "$WORKSPACE/.mcp.json" \
-  "$WORKSPACE/.agents/skills" "$WORKSPACE/.claude/skills" "$WORKSPACE/agent/skills" \
-  "$WORKSPACE/ios/Pods" "$WORKSPACE/ios/build" "$WORKSPACE/ios/DerivedData" \
-  "$WORKSPACE/android/.gradle" "$WORKSPACE/android/build" "$WORKSPACE/android/app/build" \
-  "$OUT/codex-home" "$OUT/muse-xdg-data" "$OUT/muse-data" \
-  "$OUT/muse-bin" "$OUT/muse-settings" "$OUT/muse-xdg-config" \
-  "$OUT/bundle" \
-  2>/dev/null
-rm -f -- "$WORKSPACE/skills-lock.json" 2>/dev/null
-rmdir "$WORKSPACE/.agents" "$WORKSPACE/.claude" "$WORKSPACE/agent" 2>/dev/null || true
-rm -f -- "$OUT/$RUN_ID.tgz" 2>/dev/null
-rm -f -- "$OUT/telemetry/meta.jsonl" 2>/dev/null
-
-# Logs have exactly one producer-owned location in the canonical tree.
-mkdir -p "$OUT/logs"
-for log_file in "$OUT"/*.log; do
-  [ -f "$log_file" ] || continue
-  mv -f "$log_file" "$OUT/logs/"
-done
-
 rm -rf -- "$ARTIFACT_ROOT"
 mkdir -p "$ARTIFACT_ROOT/author-agent-workspace" "$ARTIFACT_ROOT/author-agent-metadata"
-mv "$WORKSPACE" "$ARTIFACT_ROOT/author-agent-workspace/$RUN_ID"
-mv "$OUT" "$ARTIFACT_ROOT/author-agent-metadata/$RUN_ID"
-rmdir "$WORKSPACE_ROOT" "$METADATA_ROOT" 2>/dev/null || true
+COLLECTION_COMPLETE=0
+cleanup_partial_artifact() {
+  local status=$?
+  if [ "$status" -ne 0 ] && [ "$COLLECTION_COMPLETE" -ne 1 ]; then
+    rm -rf -- "$ARTIFACT_ROOT"
+  fi
+  return "$status"
+}
+trap cleanup_partial_artifact EXIT
+
+WORKSPACE_ACTIONS="$ARTIFACT_ROOT/.workspace-sanitize.jsonl"
+METADATA_ACTIONS="$ARTIFACT_ROOT/.metadata-sanitize.jsonl"
+"$PY" "$SANITIZER" \
+  "$WORKSPACE" "$ARTIFACT_ROOT/author-agent-workspace/$RUN_ID" \
+  "$WORKSPACE_ACTIONS" workspace
+"$PY" "$SANITIZER" \
+  "$OUT" "$ARTIFACT_ROOT/author-agent-metadata/$RUN_ID" \
+  "$METADATA_ACTIONS" metadata
+
+# Logs have exactly one producer-owned location in the canonical tree.
+PUBLISHED_OUT="$ARTIFACT_ROOT/author-agent-metadata/$RUN_ID"
+if [ -e "$PUBLISHED_OUT/logs" ] && [ ! -d "$PUBLISHED_OUT/logs" ]; then
+  rm -f -- "$PUBLISHED_OUT/logs"
+fi
+mkdir -p "$PUBLISHED_OUT/logs"
+chmod u+rwx "$PUBLISHED_OUT/logs"
+for log_file in "$PUBLISHED_OUT"/*.log; do
+  [ -f "$log_file" ] || continue
+  mv -f "$log_file" "$PUBLISHED_OUT/logs/"
+done
+SANITIZATION_LOG_TMP="$(mktemp "$PUBLISHED_OUT/logs/.e-author-artifact-sanitize.XXXXXX")"
+cat "$WORKSPACE_ACTIONS" "$METADATA_ACTIONS" >"$SANITIZATION_LOG_TMP"
+rm -f -- "$PUBLISHED_OUT/logs/e-author-artifact-sanitize.log"
+mv -f -- "$SANITIZATION_LOG_TMP" "$PUBLISHED_OUT/logs/e-author-artifact-sanitize.log"
+rm -f -- "$WORKSPACE_ACTIONS" "$METADATA_ACTIONS"
 
 GIT_SHA="$(cd "$ROOT" && git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 RUN_ID="$RUN_ID" GIT_SHA="$GIT_SHA" AGENT="$AGENT" \
@@ -212,6 +240,7 @@ manifest = {
         "proxy_openai": f"{metadata}/telemetry/openai.jsonl",
         "otel": f"{metadata}/telemetry/otel/",
         "author_trace": f"{metadata}/telemetry/traces/{trace_names.get(agent, trace_names['claude-code'])}",
+        "workspace_sanitization": f"{metadata}/logs/e-author-artifact-sanitize.log",
         "logs": f"{metadata}/logs/",
     },
 }
@@ -220,5 +249,11 @@ with open(sys.argv[1], "w", encoding="utf-8") as handle:
     handle.write("\n")
 PYEOF
 
+# Runtime trees are not transport data. Cleanup is best-effort because a
+# readonly authored directory must not invalidate the already-safe artifact.
+rm -rf -- "$WORKSPACE" "$OUT" 2>/dev/null || true
+rmdir "$WORKSPACE_ROOT" "$METADATA_ROOT" 2>/dev/null || true
+
 echo "  authored artifact: $ARTIFACT_ROOT"
+COLLECTION_COMPLETE=1
 exit 0

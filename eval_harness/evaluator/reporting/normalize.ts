@@ -318,7 +318,21 @@ function nonEmptyString(value: unknown): boolean {
 }
 
 function nonNegativeInteger(value: unknown): value is number {
-  return typeof value === "number" && Number.isInteger(value) && value >= 0;
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+function percentageInRange(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 100;
+}
+
+function producerPercentageMatches(actual: number, recorded: unknown): boolean {
+  if (!percentageInRange(recorded)) return false;
+  const hundredths = recorded * 100;
+  if (Math.abs(hundredths - Math.round(hundredths)) > 1e-7) return false;
+  // The producer uses Python's round(..., 2). Comparing within half of one
+  // hundredth preserves its ties-to-even behavior without reimplementing
+  // binary-float rounding in the report reader.
+  return Math.abs(actual - recorded) <= 0.005000001;
 }
 
 function validHardAssertion(value: unknown): boolean {
@@ -337,8 +351,8 @@ function validSoftAssertion(value: unknown): boolean {
 function validIosStep(value: unknown): boolean {
   const step = record(value);
   if (step === null || !nonEmptyString(step.description) ||
-    typeof step.points !== "number" || !Number.isFinite(step.points) ||
-    typeof step.max_points !== "number" || !Number.isFinite(step.max_points) ||
+    !nonNegativeInteger(step.points) ||
+    !nonNegativeInteger(step.max_points) || step.points > step.max_points ||
     !nonNegativeInteger(step.iterations) ||
     !Array.isArray(step.hard_assertions) || !step.hard_assertions.every(validHardAssertion) ||
     !Array.isArray(step.soft_assertions) || !step.soft_assertions.every(validSoftAssertion) ||
@@ -346,8 +360,53 @@ function validIosStep(value: unknown): boolean {
     !nonNegativeInteger(step.soft_assertion_count) ||
     !nullableString(step.screenshot) || !nullableString(step.screenshot_error)
   ) return false;
+  const assertions = [...step.hard_assertions, ...step.soft_assertions]
+    .map((assertion) => record(assertion)!);
+  const fatalFailure = assertions.some((assertion) =>
+    assertion.fatal === true && assertion.passed === false
+  );
+  const passingAssertions = assertions.filter((assertion) => assertion.passed === true).length;
+  let expectedPoints = step.max_points;
+  if (fatalFailure) {
+    expectedPoints = 0;
+  } else if (assertions.length > 0) {
+    // Mirror Python's round(max_points * passing / total): ties go to the
+    // nearest even integer. BigInt keeps the integer ratio exact.
+    const numerator = BigInt(step.max_points) * BigInt(passingAssertions);
+    const denominator = BigInt(assertions.length);
+    const quotient = numerator / denominator;
+    const remainder = numerator % denominator;
+    const twiceRemainder = remainder * 2n;
+    expectedPoints = Number(
+      twiceRemainder > denominator ||
+        (twiceRemainder === denominator && quotient % 2n !== 0n)
+        ? quotient + 1n
+        : quotient,
+    );
+  }
   return step.hard_assertion_count === step.hard_assertions.length &&
-    step.soft_assertion_count === step.soft_assertions.length;
+    step.soft_assertion_count === step.soft_assertions.length &&
+    step.points === expectedPoints;
+}
+
+function validCompletedPlanSemantics(plan: JsonRecord): boolean {
+  if (!nonNegativeInteger(plan.score) || !nonNegativeInteger(plan.full_points) ||
+    plan.score > plan.full_points || !percentageInRange(plan.macro_pct) ||
+    !Array.isArray(plan.steps)
+  ) return false;
+  const steps = plan.steps.map(record);
+  if (steps.some((step) => step === null)) return false;
+  const typedSteps = steps as JsonRecord[];
+  const score = typedSteps.reduce((sum, step) => sum + Number(step.points), 0);
+  const fullPoints = typedSteps.reduce((sum, step) => sum + Number(step.max_points), 0);
+  const macro = typedSteps.length === 0
+    ? 0
+    : typedSteps.reduce((sum, step) =>
+      sum + (Number(step.max_points) > 0
+        ? Number(step.points) / Number(step.max_points) * 100
+        : 100), 0) / typedSteps.length;
+  return plan.score === score && plan.full_points === fullPoints &&
+    producerPercentageMatches(macro, plan.macro_pct);
 }
 
 function validTerminalEvidence(value: unknown): boolean {
@@ -442,7 +501,8 @@ function validateIosResultFields(value: JsonRecord | null): string | null {
     if (plan.status === "completed" && (
       typeof plan.score !== "number" || !Number.isFinite(plan.score) ||
       typeof plan.full_points !== "number" || !Number.isFinite(plan.full_points) ||
-      typeof plan.macro_pct !== "number" || !Number.isFinite(plan.macro_pct)
+      typeof plan.macro_pct !== "number" || !Number.isFinite(plan.macro_pct) ||
+      !validCompletedPlanSemantics(plan)
     )) return "iOS result completed plans are missing required fields";
     if (plan.status === "not_applicable" && (
       typeof plan.na_reason !== "string" || plan.score !== 0 || plan.full_points !== 0 ||
@@ -455,6 +515,44 @@ function validateIosResultFields(value: JsonRecord | null): string | null {
       !nonEmptyString(plan.error_stage) || !nonEmptyString(plan.error_reason) ||
       plan.score !== null || plan.full_points !== null || plan.macro_pct !== null
     )) return "iOS result evaluator-error plans are missing required fields";
+  }
+  if (value.terminal_plan_count !== plans.length) {
+    return "iOS result is missing required fields";
+  }
+  if (value.status === "completed") {
+    if (
+      !nonNegativeInteger(value.score) ||
+      !nonNegativeInteger(value.full_points) ||
+      value.score > value.full_points ||
+      !percentageInRange(value.macro_avg_pct) ||
+      !percentageInRange(value.micro_pct) ||
+      !nonNegativeInteger(value.n_not_applicable)
+    ) return "iOS result is missing required fields";
+    const completedPlans = plans.map(record).filter((plan): plan is JsonRecord =>
+      plan?.status === "completed"
+    );
+    const notApplicableCount = plans.filter((plan) => record(plan)?.status === "not_applicable").length;
+    if (
+      value.expected_plan_count !== plans.length ||
+      completedPlans.length + notApplicableCount !== plans.length ||
+      value.n_not_applicable !== notApplicableCount
+    ) return "iOS result is missing required fields";
+
+    const score = completedPlans.reduce((sum, plan) => sum + Number(plan.score), 0);
+    const fullPoints = completedPlans.reduce((sum, plan) => sum + Number(plan.full_points), 0);
+    const macro = completedPlans.length === 0
+      ? 0
+      : completedPlans.reduce((sum, plan) => sum + Number(plan.macro_pct), 0) /
+        completedPlans.length;
+    if (
+      !producerPercentageMatches(macro, value.macro_avg_pct) ||
+      value.score !== score ||
+      value.full_points !== fullPoints ||
+      !producerPercentageMatches(
+        fullPoints > 0 ? score / fullPoints * 100 : 0,
+        value.micro_pct,
+      )
+    ) return "iOS result is missing required fields";
   }
   return null;
 }

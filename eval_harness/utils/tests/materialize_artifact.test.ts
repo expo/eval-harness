@@ -168,3 +168,23 @@ test("rejects an archive symlink selected from an EAS download directory", () =>
   expect(() => materializeArtifact(download, destination, "authored-app")).toThrow(/physical single-link/u);
   expect(existsSync(destination)).toBe(false);
 });
+
+test("rejects ambiguous EAS download directories without replacing prior output", () => {
+  const base = root();
+  const firstSource = fixture(join(base, "first-source"));
+  const secondSource = fixture(join(base, "second-source"));
+  writeFileSync(join(firstSource, "selected"), "first");
+  writeFileSync(join(secondSource, "selected"), "second");
+  const download = join(base, "download");
+  mkdirSync(download);
+  createArchive({ file: join(download, "a.tar.gz"), cwd: firstSource, gzip: true, sync: true }, ["."]);
+  createArchive({ file: join(download, "b.tar.gz"), cwd: secondSource, gzip: true, sync: true }, ["."]);
+  const destination = join(base, "destination");
+  mkdirSync(destination);
+  writeFileSync(join(destination, "sentinel"), "prior");
+
+  expect(() => materializeArtifact(download, destination, "authored-app")).toThrow(
+    /ambiguous artifact archives/u,
+  );
+  expect(readFileSync(join(destination, "sentinel"), "utf8")).toBe("prior");
+});

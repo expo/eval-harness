@@ -59,6 +59,7 @@ jobs:
     runs_on: macos-medium
     environment: production
     env:
+      AUTHORED_APP_URL: ${{ inputs.authored_app_url || '' }}
       PRD_OVERRIDE: ${{ inputs.prd || '' }}
       EVAL_IOS_APP_MODE: ${{ inputs.ios_app_mode || 'release' }}
       EVALUATOR_MODEL: ${{ inputs.evaluator_model || 'claude-opus-4-8' }}
@@ -79,7 +80,6 @@ jobs:
         id: download_author_from_url
         if: ${{ !inputs.authored_app_artifact_id && inputs.authored_app_url }}
         run: |
-          AUTHORED_APP_URL='${{ inputs.authored_app_url }}'
           mkdir -p authored-app-download
           curl --fail --location --show-error "$AUTHORED_APP_URL" --output authored-app-download/authored-app.tar.gz
           set-output artifact_path "$(pwd)/authored-app-download/authored-app.tar.gz"

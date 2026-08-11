@@ -58,7 +58,19 @@ write_author_env() {
 # dispatch input must remain a reportable failed author run.
 AUTHOR_APP_AUTHORED_STATUS=failed
 write_author_env
-trap 'eval::stop_proxies; eval::cleanup_muse_settings; bash "$ROOT/eval_harness/utils/artifacts/collect_author_artifact.sh" "$ROOT" "$RUN_ID" "$WORKSPACE_ROOT" "$METADATA_ROOT" "$ARTIFACT_ROOT"' EXIT
+author_app_cleanup() {
+  local author_status=$? collection_status=0
+  eval::stop_proxies || true
+  eval::cleanup_muse_settings || true
+  bash "$ROOT/eval_harness/utils/artifacts/collect_author_artifact.sh" \
+    "$ROOT" "$RUN_ID" "$WORKSPACE_ROOT" "$METADATA_ROOT" "$ARTIFACT_ROOT" \
+    || collection_status=$?
+  if [ "$author_status" -ne 0 ]; then
+    exit "$author_status"
+  fi
+  exit "$collection_status"
+}
+trap author_app_cleanup EXIT
 
 resolved_agent="$(eval::normalize_authoring_agent "$AGENT")" || exit $?
 AGENT="$resolved_agent"

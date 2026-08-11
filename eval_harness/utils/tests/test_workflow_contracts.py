@@ -1,5 +1,8 @@
 import json
+import os
 import re
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -49,7 +52,271 @@ def workflow_dispatch_input_names(name: str) -> tuple[str, ...]:
     )
 
 
+def workflow_run_step(name: str, step_name: str) -> str:
+    contents = workflow(name)
+    match = re.search(
+        rf"^      - name: {re.escape(step_name)}\n(?P<body>.*?)(?=^      - (?:name:|uses:)|\Z)",
+        contents,
+        re.MULTILINE | re.DOTALL,
+    )
+    if match is None:
+        raise AssertionError(f"workflow {name} has no step named {step_name}")
+
+    lines = match.group("body").splitlines()
+    try:
+        run_index = lines.index("        run: |")
+    except ValueError as exc:
+        raise AssertionError(f"workflow step {step_name} has no multiline run script") from exc
+
+    script_lines: list[str] = []
+    for line in lines[run_index + 1 :]:
+        if line and not line.startswith("          "):
+            break
+        script_lines.append(line[10:] if line else "")
+    return "\n".join(script_lines) + "\n"
+
+
+def workflow_run_scripts(name: str) -> tuple[str, ...]:
+    lines = workflow(name).splitlines()
+    scripts: list[str] = []
+    index = 0
+    while index < len(lines):
+        match = re.match(r"^        run:\s*(.*)$", lines[index])
+        if match is None:
+            index += 1
+            continue
+        if match.group(1) != "|":
+            scripts.append(match.group(1))
+            index += 1
+            continue
+
+        script_lines: list[str] = []
+        index += 1
+        while index < len(lines) and (not lines[index] or lines[index].startswith("          ")):
+            script_lines.append(lines[index][10:] if lines[index] else "")
+            index += 1
+        scripts.append("\n".join(script_lines))
+    return tuple(scripts)
+
+
+_INPUT_EXPRESSION = re.compile(
+    r"\$\{\{\s*inputs\.([A-Za-z0-9_]+)(?:\s*\|\|\s*'([^']*)')?\s*\}\}"
+)
+
+
+def _render_input_expressions(value: str, inputs: dict[str, str]) -> str:
+    def replace(match: re.Match[str]) -> str:
+        input_name, fallback = match.groups()
+        supplied = inputs.get(input_name, "")
+        return supplied or fallback or ""
+
+    return _INPUT_EXPRESSION.sub(replace, value)
+
+
+def workflow_job_input_env(name: str, job: str, inputs: dict[str, str]) -> dict[str, str]:
+    job_contents = workflow_job(name, job)
+    env_match = re.search(
+        r"^    env:\n(?P<env>(?:^      [A-Z0-9_]+:.*\n)+)",
+        job_contents,
+        re.MULTILINE,
+    )
+    if env_match is None:
+        return {}
+
+    resolved: dict[str, str] = {}
+    for key, value in re.findall(r"^      ([A-Z0-9_]+):\s*(.*)$", env_match.group("env"), re.MULTILINE):
+        resolved[key] = _render_input_expressions(value, inputs)
+    return resolved
+
+
+def expanded_workflow_run_step(
+    name: str,
+    job: str,
+    step_name: str,
+    inputs: dict[str, str],
+) -> tuple[str, dict[str, str]]:
+    script = _render_input_expressions(workflow_run_step(name, step_name), inputs)
+    script = re.sub(r"\$\{\{\s*steps\.[^}]+\}\}", "", script)
+    script = script.replace("${{ workflow.id }}", "test-workflow")
+    if "${{" in script:
+        raise AssertionError(f"unexpanded workflow expression in {step_name}: {script}")
+    return script, workflow_job_input_env(name, job, inputs)
+
+
+def write_executable(path: Path, contents: str) -> None:
+    path.write_text(contents, encoding="utf-8")
+    path.chmod(0o755)
+
+
+def install_workflow_command_fakes(root: Path) -> Path:
+    fake_bin = root / "bin"
+    fake_bin.mkdir()
+    write_executable(
+        fake_bin / "curl",
+        """#!/bin/bash
+printf '%s\n' "$@" > "$CURL_ARGS_PATH"
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "--output" ]; then
+    shift
+    mkdir -p "$(dirname "$1")"
+    : > "$1"
+    exit 0
+  fi
+  shift
+done
+exit 2
+""",
+    )
+    write_executable(fake_bin / "set-output", "#!/bin/bash\nexit 0\n")
+    write_executable(
+        fake_bin / "bash",
+        """#!/bin/bash
+printf '%s\n' "$SCENARIO" > "$BASH_SCENARIO_PATH"
+printf '%s\n' "$@" > "$BASH_ARGS_PATH"
+exit 0
+""",
+    )
+    write_executable(
+        fake_bin / "python3",
+        """#!/bin/bash
+printf '%s\n' "$@" > "$PYTHON_ARGS_PATH"
+exit 0
+""",
+    )
+    return fake_bin
+
+
 class WorkflowContractTests(unittest.TestCase):
+    def test_signed_url_steps_treat_dispatch_urls_as_data(self) -> None:
+        cases = (
+            ("eval-ios-app.yml", "eval_ios", "Download authored app by signed URL", "authored_app_url"),
+            ("eval-skill-use.yml", "skill_eval", "Download authored app by signed URL", "authored_app_url"),
+            ("eval-skill-use.yml", "skill_eval", "Download iOS eval report by signed URL", "ios_eval_report_url"),
+        )
+        malicious_url = "'; touch \"$INJECTION_MARKER\"; : '"
+
+        for workflow_name, job, step_name, input_name in cases:
+            with self.subTest(workflow=workflow_name, step=step_name):
+                inputs = {input_name: malicious_url}
+                script, input_env = expanded_workflow_run_step(workflow_name, job, step_name, inputs)
+                with tempfile.TemporaryDirectory() as temporary_directory:
+                    root = Path(temporary_directory)
+                    fake_bin = install_workflow_command_fakes(root)
+                    marker = root / "injected"
+                    curl_args = root / "curl-args"
+                    environment = {
+                        **os.environ,
+                        **input_env,
+                        "PATH": f"{fake_bin}:{os.environ.get('PATH', '')}",
+                        "INJECTION_MARKER": str(marker),
+                        "CURL_ARGS_PATH": str(curl_args),
+                        "BASH_SCENARIO_PATH": str(root / "bash-scenario"),
+                        "BASH_ARGS_PATH": str(root / "bash-args"),
+                        "PYTHON_ARGS_PATH": str(root / "python-args"),
+                    }
+                    completed = subprocess.run(
+                        ["/bin/bash", "-e", "-c", script],
+                        cwd=root,
+                        env=environment,
+                        capture_output=True,
+                        text=True,
+                    )
+
+                    self.assertEqual(completed.returncode, 0, completed.stderr)
+                    self.assertFalse(marker.exists(), "dispatch URL executed as shell code")
+                    self.assertIn(malicious_url, curl_args.read_text(encoding="utf-8").splitlines())
+
+    def test_skill_input_check_treats_artifact_inputs_as_data(self) -> None:
+        malicious_value = "' ]; then touch \"$INJECTION_MARKER\"; fi; if [ -z 'x"
+        for input_name in ("authored_app_artifact_id", "authored_app_url"):
+            with self.subTest(input=input_name):
+                inputs = {input_name: malicious_value}
+                script, input_env = expanded_workflow_run_step(
+                    "eval-skill-use.yml", "skill_eval", "Check artifact input", inputs
+                )
+                with tempfile.TemporaryDirectory() as temporary_directory:
+                    root = Path(temporary_directory)
+                    marker = root / "injected"
+                    completed = subprocess.run(
+                        ["/bin/bash", "-e", "-c", script],
+                        cwd=root,
+                        env={**os.environ, **input_env, "INJECTION_MARKER": str(marker)},
+                        capture_output=True,
+                        text=True,
+                    )
+
+                    self.assertEqual(completed.returncode, 0, completed.stderr)
+                    self.assertFalse(marker.exists(), "artifact input executed as shell code")
+
+    def test_skill_scenario_is_data_in_analyze_and_diagnostic_steps(self) -> None:
+        malicious_scenario = "'; touch \"$INJECTION_MARKER\"; : '"
+        cases = (
+            ("eval-skill-use.yml", "skill_eval", "Analyze skill-eval artifacts", "bash-scenario"),
+            ("eval-skill-use.yml", "skill_eval", "Package skill-eval report", "python-args"),
+            ("eval-e2e.yml", "eval_skill", "Analyze authored app for skill eval", "bash-scenario"),
+            ("eval-e2e.yml", "eval_skill", "Package skill-eval report", "python-args"),
+        )
+
+        for workflow_name, job, step_name, capture_name in cases:
+            with self.subTest(workflow=workflow_name, step=step_name):
+                inputs = {"scenario": malicious_scenario}
+                if workflow_name == "eval-e2e.yml":
+                    inputs = {"skill_scenario": malicious_scenario}
+                script, input_env = expanded_workflow_run_step(
+                    workflow_name, job, step_name, inputs
+                )
+                with tempfile.TemporaryDirectory() as temporary_directory:
+                    root = Path(temporary_directory)
+                    fake_bin = install_workflow_command_fakes(root)
+                    marker = root / "injected"
+                    environment = {
+                        **os.environ,
+                        **input_env,
+                        "PATH": f"{fake_bin}:{os.environ.get('PATH', '')}",
+                        "INJECTION_MARKER": str(marker),
+                        "CURL_ARGS_PATH": str(root / "curl-args"),
+                        "BASH_SCENARIO_PATH": str(root / "bash-scenario"),
+                        "BASH_ARGS_PATH": str(root / "bash-args"),
+                        "PYTHON_ARGS_PATH": str(root / "python-args"),
+                    }
+                    completed = subprocess.run(
+                        ["/bin/bash", "-e", "-c", script],
+                        cwd=root,
+                        env=environment,
+                        capture_output=True,
+                        text=True,
+                    )
+
+                    self.assertEqual(completed.returncode, 0, completed.stderr)
+                    self.assertFalse(marker.exists(), "scenario input executed as shell code")
+                    captured = (root / capture_name).read_text(encoding="utf-8").splitlines()
+                    self.assertIn(malicious_scenario, captured)
+
+    def test_skill_artifact_input_fallback_accepts_id_or_url_and_rejects_neither(self) -> None:
+        cases = (
+            ({"authored_app_artifact_id": "artifact-123"}, 0),
+            ({"authored_app_url": "https://example.invalid/artifact.tar.gz"}, 0),
+            ({}, 1),
+        )
+        for inputs, expected_returncode in cases:
+            with self.subTest(inputs=inputs):
+                script, input_env = expanded_workflow_run_step(
+                    "eval-skill-use.yml", "skill_eval", "Check artifact input", inputs
+                )
+                completed = subprocess.run(
+                    ["/bin/bash", "-e", "-c", script],
+                    env={**os.environ, **input_env},
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(completed.returncode, expected_returncode, completed.stderr)
+
+    def test_active_run_scripts_do_not_splice_dispatch_inputs(self) -> None:
+        for workflow_name in ACTIVE_WORKFLOWS:
+            for script in workflow_run_scripts(workflow_name):
+                with self.subTest(workflow=workflow_name, script=script):
+                    self.assertNotIn("${{ inputs.", script)
+
     def test_active_dispatches_stay_within_eas_ten_input_limit(self) -> None:
         """Adding an eleventh declared input makes EAS reject the run before creation."""
         for name in ACTIVE_WORKFLOWS:

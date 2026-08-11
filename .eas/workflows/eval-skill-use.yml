@@ -51,12 +51,17 @@ jobs:
   skill_eval:
     runs_on: linux-medium
     environment: production
+    env:
+      AUTHORED_APP_ARTIFACT_ID: ${{ inputs.authored_app_artifact_id || '' }}
+      AUTHORED_APP_URL: ${{ inputs.authored_app_url || '' }}
+      IOS_EVAL_REPORT_URL: ${{ inputs.ios_eval_report_url || '' }}
+      SKILL_SCENARIO: ${{ inputs.scenario }}
     steps:
       - uses: eas/checkout
 
       - name: Check artifact input
         run: |
-          if [ -z '${{ inputs.authored_app_artifact_id }}' ] && [ -z '${{ inputs.authored_app_url }}' ]; then
+          if [ -z "$AUTHORED_APP_ARTIFACT_ID" ] && [ -z "$AUTHORED_APP_URL" ]; then
             echo "Provide either authored_app_artifact_id or authored_app_url"
             exit 1
           fi
@@ -72,7 +77,6 @@ jobs:
         id: download_author_from_url
         if: ${{ !inputs.authored_app_artifact_id && inputs.authored_app_url }}
         run: |
-          AUTHORED_APP_URL='${{ inputs.authored_app_url }}'
           mkdir -p authored-app-download
           curl --fail --location --show-error "$AUTHORED_APP_URL" --output authored-app-download/authored-app.tar.gz
           set-output artifact_path "$(pwd)/authored-app-download/authored-app.tar.gz"
@@ -88,7 +92,6 @@ jobs:
         id: download_ios_eval_from_url
         if: ${{ !inputs.ios_eval_report_artifact_id && inputs.ios_eval_report_url }}
         run: |
-          IOS_EVAL_REPORT_URL='${{ inputs.ios_eval_report_url }}'
           mkdir -p ios-eval-report-download
           curl --fail --location --show-error "$IOS_EVAL_REPORT_URL" --output ios-eval-report-download/ios-eval-report.tar.gz
           set-output artifact_path "$(pwd)/ios-eval-report-download/ios-eval-report.tar.gz"
@@ -108,7 +111,7 @@ jobs:
           fi
           AUTHORED_ARTIFACT="$AUTHORED_ARTIFACT" \
           EVAL_ARTIFACT="$EVAL_ARTIFACT" \
-          SCENARIO='${{ inputs.scenario }}' \
+          SCENARIO="$SKILL_SCENARIO" \
           OUT_DIR=skill-eval-report \
           bash ./eval_harness/evaluator/skill_invocation/scripts/eval-skill-use.sh
 
@@ -119,7 +122,7 @@ jobs:
             python3 eval_harness/utils/artifacts/create_diagnostic_artifact.py \
               --kind skill --author-artifact-root "$PWD/authored-app-input" \
               --out-dir "$PWD/skill-eval-report" --run-id '${{ workflow.id }}' \
-              --scenario '${{ inputs.scenario }}' --stage workflow_preflight \
+              --scenario "$SKILL_SCENARIO" --stage workflow_preflight \
               --reason 'skill evaluator did not produce a canonical artifact; inspect job logs'
           fi
           bash eval_harness/utils/artifacts/package_artifact.sh skill-eval-report skill-eval-report.tar.gz '${{ workflow.id }}/skill-eval-report.tar.gz'

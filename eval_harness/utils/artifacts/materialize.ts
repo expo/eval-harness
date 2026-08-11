@@ -55,11 +55,13 @@ function physicalCandidate(path: string, label: string): string {
 
 export function firstArchive(path: string): string | null {
   const entries = readdirSync(path).sort(compareUnicodeCodePoints);
-  for (const suffix of [".tar.gz", ".tgz", ".tar"]) {
-    const match = entries.find((entry) => entry.endsWith(suffix));
-    if (match !== undefined) return join(path, match);
+  const matches = entries.filter((entry) =>
+    [".tar.gz", ".tgz", ".tar"].some((suffix) => entry.endsWith(suffix))
+  );
+  if (matches.length > 1) {
+    throw new Error(`ambiguous artifact archives: ${matches.join(", ")}`);
   }
-  return null;
+  return matches[0] === undefined ? null : join(path, matches[0]);
 }
 
 type TarEntryMetadata = { path: string; type?: string; linkpath?: string };

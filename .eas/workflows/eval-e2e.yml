@@ -190,6 +190,8 @@ jobs:
     after: [author_app]
     runs_on: linux-medium
     environment: production
+    env:
+      SKILL_SCENARIO: ${{ inputs.skill_scenario || 'skills_available_unmentioned' }}
     steps:
       - uses: eas/checkout
 
@@ -208,7 +210,7 @@ jobs:
       - name: Analyze authored app for skill eval
         run: |
           AUTHORED_ARTIFACT="$PWD/authored-app-input" \
-          SCENARIO='${{ inputs.skill_scenario }}' \
+          SCENARIO="$SKILL_SCENARIO" \
           OUT_DIR=skill-eval-report \
           bash ./eval_harness/evaluator/skill_invocation/scripts/eval-skill-use.sh
 
@@ -219,7 +221,7 @@ jobs:
             python3 eval_harness/utils/artifacts/create_diagnostic_artifact.py \
               --kind skill --author-artifact-root "$PWD/authored-app-input" \
               --out-dir "$PWD/skill-eval-report" --run-id '${{ workflow.id }}' \
-              --scenario '${{ inputs.skill_scenario }}' --stage workflow_preflight \
+              --scenario "$SKILL_SCENARIO" --stage workflow_preflight \
               --reason 'skill evaluator did not produce a canonical artifact; inspect job logs'
           fi
           bash eval_harness/utils/artifacts/package_artifact.sh skill-eval-report skill-eval-report.tar.gz '${{ workflow.id }}/skill-eval-report.tar.gz'

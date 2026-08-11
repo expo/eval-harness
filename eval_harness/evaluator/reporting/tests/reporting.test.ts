@@ -47,6 +47,18 @@ function tempRoot(): string {
 function copyFixture(name: "author" | "skill" | "ios", root: string): string {
   const target = join(root, name);
   cpSync(join(FIXTURES, name), target, { recursive: true });
+  if (name === "ios") {
+    // Keep the shared source fixture untouched while making each copied result
+    // internally consistent with the evaluator producer's scoring contract.
+    const resultPath = join(target, "result.json");
+    const result = readJson(resultPath);
+    result.score = 1;
+    result.full_points = 2;
+    result.macro_avg_pct = 50;
+    result.micro_pct = 50;
+    result.n_not_applicable = 0;
+    writeJson(resultPath, result);
+  }
   return target;
 }
 
@@ -84,6 +96,44 @@ function inputs(root: string, options: {
     skillArtifact: options.skill === false ? null : copyFixture("skill", root),
     iosArtifact: options.ios === false ? null : copyFixture("ios", root),
     outDir: join(root, "eval-report"),
+  };
+}
+
+function onePlanCompletedResult(): Record<string, unknown> {
+  return {
+    status: "completed",
+    expected_plan_count: 1,
+    terminal_plan_count: 1,
+    score: 1,
+    full_points: 1,
+    macro_avg_pct: 100,
+    micro_pct: 100,
+    n_not_applicable: 0,
+    evaluator_errors: [],
+    test_plans: [{
+      test_plan: "test_insert.txt",
+      run_index: 1,
+      status: "completed",
+      score: 1,
+      full_points: 1,
+      macro_pct: 100,
+      steps: [{
+        description: "PASSED: Insert a note",
+        points: 1,
+        max_points: 1,
+        iterations: 1,
+        hard_assertions: [{
+          command: "assertVisible: note-row",
+          fatal: false,
+          passed: true,
+        }],
+        soft_assertions: [],
+        hard_assertion_count: 1,
+        soft_assertion_count: 0,
+        screenshot: null,
+        screenshot_error: null,
+      }],
+    }],
   };
 }
 
@@ -597,7 +647,7 @@ describe("normalizeRun", () => {
       evaluator: { model: "claude-opus-4-8", effort: "high" },
     });
     expect(summary.scores).toEqual({
-      ios_macro_pct: 82.5,
+      ios_macro_pct: 50,
       skill_trigger_recall: 0.5,
       skill_uptake_rate: 0.75,
     });
@@ -670,7 +720,7 @@ describe("normalizeRun", () => {
     );
     expect(skillDisabled.status).toBe("complete");
     expect(skillDisabled.scores.skill_trigger_recall).toBeNull();
-    expect(skillDisabled.scores.ios_macro_pct).toBe(82.5);
+    expect(skillDisabled.scores.ios_macro_pct).toBe(50);
 
     const iosDisabledRoot = tempRoot();
     const iosDisabled = await normalizeRun(
@@ -734,6 +784,172 @@ describe("normalizeRun", () => {
     });
   });
 
+  test("withholds a completed score when suite counts disagree with serialized plans", async () => {
+    // Catches a top-level completed/count claim reaching the headline without
+    // the corresponding terminal plan records.
+    const root = tempRoot();
+    const args = inputs(root, { skill: false });
+    const result = onePlanCompletedResult();
+    result.expected_plan_count = 2;
+    writeJson(join(args.iosArtifact!, "result.json"), result);
+
+    const summary = await normalizeRun(args);
+
+    expect(summary.status).toBe("partial");
+    expect(summary.scores.ios_macro_pct).toBeNull();
+    expect(summary.warnings).toContain(
+      "iOS artifact required fields are invalid: iOS result is missing required fields",
+    );
+  });
+
+  test("withholds a completed score when any required suite aggregate is null or omitted", async () => {
+    // Catches a completed payload lacking the numerical evidence needed to
+    // support the report's green evaluation state.
+    for (const aggregate of [
+      "score",
+      "full_points",
+      "macro_avg_pct",
+      "micro_pct",
+      "n_not_applicable",
+    ] as const) {
+      for (const mutation of ["null", "omitted"] as const) {
+        const root = tempRoot();
+        const args = inputs(root, { skill: false });
+        const result = onePlanCompletedResult();
+        if (mutation === "null") result[aggregate] = null;
+        else delete result[aggregate];
+        writeJson(join(args.iosArtifact!, "result.json"), result);
+
+        const summary = await normalizeRun(args);
+
+        expect(summary.status).toBe("partial");
+        expect(summary.scores.ios_macro_pct).toBeNull();
+        expect(summary.warnings).toContain(
+          "iOS artifact required fields are invalid: iOS result is missing required fields",
+        );
+      }
+    }
+  });
+
+  test("withholds a completed score when a serialized plan is not a completed or N/A outcome", async () => {
+    // Catches a suite declaring completion while silently containing a terminal
+    // evaluator error that is absent from evaluator_errors.
+    const root = tempRoot();
+    const args = inputs(root, { skill: false });
+    const result = onePlanCompletedResult();
+    result.test_plans = [{
+      test_plan: "test_insert.txt",
+      run_index: 1,
+      status: "evaluator_error",
+      error_stage: "restart",
+      error_reason: "driver lost the app session",
+      score: null,
+      full_points: null,
+      macro_pct: null,
+      steps: [],
+    }];
+    writeJson(join(args.iosArtifact!, "result.json"), result);
+
+    const summary = await normalizeRun(args);
+
+    expect(summary.scores.ios_macro_pct).toBeNull();
+    expect(summary.warnings).toContain(
+      "iOS artifact required fields are invalid: iOS result is missing required fields",
+    );
+  });
+
+  test("withholds a completed score when the suite macro is out of range or disagrees with plans", async () => {
+    // Catches arbitrary top-level percentages bypassing the authoritative plan
+    // macros that the producer averages.
+    for (const macro of [101, 75]) {
+      const root = tempRoot();
+      const args = inputs(root, { skill: false });
+      const result = onePlanCompletedResult();
+      result.macro_avg_pct = macro;
+      writeJson(join(args.iosArtifact!, "result.json"), result);
+
+      const summary = await normalizeRun(args);
+
+      expect(summary.status).toBe("partial");
+      expect(summary.scores.ios_macro_pct).toBeNull();
+    }
+  });
+
+  test("withholds a completed score when plan score totals or macro disagree with its steps", async () => {
+    // Catches a plan-level score/macro being fabricated independently of the
+    // serialized step outcomes.
+    for (const mutation of ["score", "macro"] as const) {
+      const root = tempRoot();
+      const args = inputs(root, { skill: false });
+      const result = onePlanCompletedResult();
+      const plan = (result.test_plans as Array<Record<string, unknown>>)[0]!;
+      if (mutation === "score") plan.score = 0;
+      else plan.macro_pct = 0;
+      writeJson(join(args.iosArtifact!, "result.json"), result);
+
+      const summary = await normalizeRun(args);
+
+      expect(summary.status).toBe("partial");
+      expect(summary.scores.ios_macro_pct).toBeNull();
+    }
+  });
+
+  test("withholds a completed score when step points disagree with weighted assertions", async () => {
+    // Catches a completed step claiming points that the producer's weighted
+    // assertion formula could not have emitted.
+    const root = tempRoot();
+    const args = inputs(root, { skill: false });
+    const result = onePlanCompletedResult();
+    const plan = (result.test_plans as Array<Record<string, unknown>>)[0]!;
+    const step = (plan.steps as Array<Record<string, unknown>>)[0]!;
+    step.points = 1;
+    step.max_points = 2;
+    plan.score = 1;
+    plan.full_points = 2;
+    plan.macro_pct = 50;
+    result.score = 1;
+    result.full_points = 2;
+    result.macro_avg_pct = 50;
+    result.micro_pct = 50;
+    writeJson(join(args.iosArtifact!, "result.json"), result);
+
+    const summary = await normalizeRun(args);
+
+    expect(summary.status).toBe("partial");
+    expect(summary.scores.ios_macro_pct).toBeNull();
+  });
+
+  test("accepts producer-weighted points when assertion count differs from max points", async () => {
+    // Python rounds 3 * 1/2 to 2 (ties to even); the reader must mirror that
+    // without imposing a stricter assertion-count-equals-points convention.
+    const root = tempRoot();
+    const args = inputs(root, { skill: false });
+    const result = onePlanCompletedResult();
+    const plan = (result.test_plans as Array<Record<string, unknown>>)[0]!;
+    const step = (plan.steps as Array<Record<string, unknown>>)[0]!;
+    (step.hard_assertions as Array<Record<string, unknown>>).push({
+      command: "assertVisible: optional-detail",
+      fatal: false,
+      passed: false,
+    });
+    step.hard_assertion_count = 2;
+    step.points = 2;
+    step.max_points = 3;
+    plan.score = 2;
+    plan.full_points = 3;
+    plan.macro_pct = 66.67;
+    result.score = 2;
+    result.full_points = 3;
+    result.macro_avg_pct = 66.67;
+    result.micro_pct = 66.67;
+    writeJson(join(args.iosArtifact!, "result.json"), result);
+
+    const summary = await normalizeRun(args);
+
+    expect(summary.status).toBe("complete");
+    expect(summary.scores.ios_macro_pct).toBe(66.67);
+  });
+
   test("marks partial behavioral credit warning while keeping the run terminal", async () => {
     // Catches a non-perfect behavioral score rendering as a green evaluation rung.
     const root = tempRoot();
@@ -742,12 +958,12 @@ describe("normalizeRun", () => {
     const summary = await normalizeRun(args);
 
     expect(summary.status).toBe("complete");
-    expect(summary.scores.ios_macro_pct).toBe(82.5);
+    expect(summary.scores.ios_macro_pct).toBe(50);
     expect(summary.build_health[6]).toEqual({
       id: "evaluation",
       label: "iOS evaluation completion",
       status: "warning",
-      detail: "iOS behavior completed with partial credit (82.5%)",
+      detail: "iOS behavior completed with partial credit (50%)",
       log: "logs/s7-eval.log",
     });
   });
@@ -760,7 +976,11 @@ describe("normalizeRun", () => {
       status: "completed",
       expected_plan_count: 1,
       terminal_plan_count: 1,
+      score: 0,
+      full_points: 0,
       macro_avg_pct: 0,
+      micro_pct: 0,
+      n_not_applicable: 1,
       evaluator_errors: [],
       test_plans: [{
         test_plan: "test_insert.txt",
@@ -793,7 +1013,11 @@ describe("normalizeRun", () => {
       status: "completed",
       expected_plan_count: 1,
       terminal_plan_count: 1,
+      score: 0,
+      full_points: 0,
       macro_avg_pct: 0,
+      micro_pct: 0,
+      n_not_applicable: 1,
       evaluator_errors: [],
       test_plans: [{
         test_plan: "test_insert.txt",
@@ -1023,8 +1247,9 @@ describe("normalizeRun", () => {
     expect(summary.scores.skill_trigger_recall).toBe(0.5);
   });
 
-  test("preserves legitimate null and numeric zero scores", async () => {
-    // Catches nullish coercion (`Number(null)` or `|| 0`) corrupting unavailable data.
+  test("preserves legitimate unavailable skill scores and numeric zero scores", async () => {
+    // Catches nullish coercion (`Number(null)` or `|| 0`) corrupting skill data
+    // whose producer contract permits unavailable values.
     const nullRoot = tempRoot();
     const nullArgs = inputs(nullRoot);
     const nullMetrics = readJson(join(nullArgs.skillArtifact!, "metrics.json"));
@@ -1032,14 +1257,10 @@ describe("normalizeRun", () => {
     nullScore.trigger_quality!.recall = null;
     nullScore.context_uptake!.uptake_rate = null;
     writeJson(join(nullArgs.skillArtifact!, "metrics.json"), nullMetrics);
-    const nullResult = readJson(join(nullArgs.iosArtifact!, "result.json"));
-    nullResult.macro_avg_pct = null;
-    writeJson(join(nullArgs.iosArtifact!, "result.json"), nullResult);
-
     const nullSummary = await normalizeRun(nullArgs);
     expect(nullSummary.status).toBe("complete");
     expect(nullSummary.scores).toEqual({
-      ios_macro_pct: null,
+      ios_macro_pct: 50,
       skill_trigger_recall: null,
       skill_uptake_rate: null,
     });
@@ -1052,7 +1273,20 @@ describe("normalizeRun", () => {
     zeroScore.context_uptake!.uptake_rate = 0;
     writeJson(join(zeroArgs.skillArtifact!, "metrics.json"), zeroMetrics);
     const zeroResult = readJson(join(zeroArgs.iosArtifact!, "result.json"));
+    const zeroPlan = (zeroResult.test_plans as Array<Record<string, unknown>>)[0]!;
+    const zeroSteps = zeroPlan.steps as Array<Record<string, unknown>>;
+    for (const step of zeroSteps) {
+      step.points = 0;
+      for (const assertion of [
+        ...(step.hard_assertions as Array<Record<string, unknown>>),
+        ...(step.soft_assertions as Array<Record<string, unknown>>),
+      ]) assertion.passed = false;
+    }
+    zeroPlan.score = 0;
+    zeroPlan.macro_pct = 0;
+    zeroResult.score = 0;
     zeroResult.macro_avg_pct = 0;
+    zeroResult.micro_pct = 0;
     writeJson(join(zeroArgs.iosArtifact!, "result.json"), zeroResult);
 
     const zeroSummary = await normalizeRun(zeroArgs);
@@ -2155,6 +2389,8 @@ describe("copyScreenshotEvidence", () => {
     secondPlan.test_plan = "test_a_b.txt";
     result.expected_plan_count = 2;
     result.terminal_plan_count = 2;
+    result.score = 2;
+    result.full_points = 4;
     result.test_plans = [firstPlan, secondPlan];
     writeJson(join(run.iosRoot, "result.json"), result);
     rmSync(join(run.iosRoot, "traces"), { recursive: true });
