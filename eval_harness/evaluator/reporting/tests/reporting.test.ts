@@ -1262,6 +1262,7 @@ describe("renderReport", () => {
     expect(html).not.toMatch(/[✓×→]/);
     expect(html).toContain('<meta charset="utf-8">');
     expect(html).not.toMatch(/[âðï�]/i);
+    expect(html).not.toMatch(/font-weight:\s*[789]\d{2}/);
   });
 
   test("places failed final-state evidence before passing evidence", async () => {

@@ -562,7 +562,7 @@ export function renderReport(summary: ConsolidatedSummary): string {
     code { font-family: var(--mono); font-size: .88em; overflow-wrap: anywhere; }
     .hero { background: var(--navy); color: var(--white); padding: 30px max(28px, calc((100% - 1120px) / 2)); }
     .hero-inner { margin-inline: auto; max-width: 1120px; }
-    .eyebrow { color: #B9CEDD; font-size: .69rem; font-weight: 750; letter-spacing: .08em; margin: 0; text-transform: uppercase; }
+    .eyebrow { color: #B9CEDD; font-size: .69rem; font-weight: 500; letter-spacing: .08em; margin: 0; text-transform: uppercase; }
     .hero-deck { color: #DCE6ED; margin: 0; }
     .hero-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
     .chip { border: 1px solid rgba(255, 255, 255, .21); border-radius: 999px; color: #E9F0F5; font-size: .75rem; padding: 5px 9px; }
@@ -576,12 +576,12 @@ export function renderReport(summary: ConsolidatedSummary): string {
     .metric-tone-amber { background: var(--amber-soft); }
     .metric-tone-red { background: var(--red-soft); }
     .score-card-top { align-items: center; display: flex; gap: 8px; justify-content: space-between; }
-    .score-label { color: var(--muted); font-size: .69rem; font-weight: 750; letter-spacing: .055em; margin: 0; text-transform: uppercase; }
+    .score-label { color: var(--muted); font-size: .69rem; font-weight: 500; letter-spacing: .055em; margin: 0; text-transform: uppercase; }
     .score-value { font-family: var(--serif); font-size: 2.2rem; line-height: 1; margin: 10px 0 7px; overflow-wrap: anywhere; }
     .score-note, .lede { color: var(--muted); font-size: .81rem; margin: 0; }
     .panel { margin-top: 20px; padding: 24px; }
     .section-head { align-items: start; display: flex; gap: 18px; justify-content: space-between; margin-bottom: 16px; }
-    .status { align-items: center; background: var(--blue-soft); border-radius: 999px; color: var(--not-run); display: inline-flex; flex: none; font-size: .7rem; font-weight: 750; gap: 6px; padding: 5px 9px; white-space: nowrap; }
+    .status { align-items: center; background: var(--blue-soft); border-radius: 999px; color: var(--not-run); display: inline-flex; flex: none; font-size: .7rem; font-weight: 600; gap: 6px; padding: 5px 9px; white-space: nowrap; }
     .status-dot { background: currentColor; border-radius: 50%; display: block; height: 7px; width: 7px; }
     .status-passed { background: var(--green-soft); color: var(--pass); }
     .status-warning { background: var(--amber-soft); color: var(--warn); }
@@ -625,9 +625,9 @@ export function renderReport(summary: ConsolidatedSummary): string {
     .evidence-frame img { display: block; height: auto; max-height: 500px; max-width: 100%; object-fit: contain; }
     figcaption { display: grid; gap: 7px; padding: 12px; }
     figcaption > span { color: var(--muted); font-size: .75rem; }
-    .evidence-link { color: var(--blue); font-size: .75rem; font-weight: 700; width: fit-content; }
+    .evidence-link { color: var(--blue); font-size: .75rem; font-weight: 600; width: fit-content; }
     .evidence-caption-top { align-items: center; display: flex; gap: 8px; justify-content: space-between; }
-    .evidence-caption-top > span { color: var(--muted); font-size: .67rem; font-weight: 700; text-transform: uppercase; }
+    .evidence-caption-top > span { color: var(--muted); font-size: .67rem; font-weight: 500; text-transform: uppercase; }
     details { background: var(--white); border: 1px solid var(--line); border-radius: 9px; overflow: hidden; }
     details + details { margin-top: 8px; }
     summary { align-items: center; cursor: pointer; display: flex; gap: 16px; justify-content: space-between; list-style-position: outside; min-width: 0; padding: 15px 18px; }
@@ -639,7 +639,7 @@ export function renderReport(summary: ConsolidatedSummary): string {
     .step-content { background: var(--white); border-top: 1px solid var(--line); padding: 16px; }
     .key-values { display: grid; gap: 0; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0; }
     .key-values > div { border-bottom: 1px solid var(--line); min-width: 0; padding: 10px 12px 10px 0; }
-    .key-values dt { color: var(--muted); font-size: .68rem; font-weight: 750; letter-spacing: .07em; text-transform: uppercase; }
+    .key-values dt { color: var(--muted); font-size: .68rem; font-weight: 500; letter-spacing: .07em; text-transform: uppercase; }
     .key-values dd { margin: 3px 0 0; overflow-wrap: anywhere; }
     .assertion-list, .check-list, .warning-list { list-style: none; margin: 0; padding: 0; }
     .assertion-list li, .check-list li { align-items: start; border-top: 1px solid var(--line); display: grid; gap: 12px; grid-template-columns: auto minmax(0, 1fr); padding: 12px 0; }
@@ -650,7 +650,7 @@ export function renderReport(summary: ConsolidatedSummary): string {
     .telemetry-card .key-values { grid-template-columns: 1fr; }
     .telemetry-card .key-values > div { padding: 7px 0; }
     .warning-list li { align-items: start; border-bottom: 1px solid var(--line); display: grid; gap: 10px; grid-template-columns: 20px minmax(0, 1fr); padding: 9px 0; }
-    .warning-list li > span:first-child { color: var(--warn); font-weight: 900; }
+    .warning-list li > span:first-child { color: var(--warn); font-weight: 600; }
     .warning-panel { background: #FCF8EF; border-left: 4px solid var(--amber); border-radius: 7px; margin-top: 15px; padding: 13px 14px; }
     .warning-panel h3 { margin-bottom: 6px; }
     .empty-state { align-items: start; color: var(--muted); display: flex; flex-direction: column; gap: 4px; padding: 18px 0; }
