@@ -95,7 +95,9 @@ class EvalIosScriptTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("missing author.env", result.stdout)
 
-    def test_regression_incomplete_author_is_a_diagnostic_without_evaluator_setup(self) -> None:
+    def assert_incomplete_author_is_a_diagnostic_without_evaluator_setup(
+        self, author_detail: str | None
+    ) -> None:
         """An author failure is final evidence, not an iOS build input.
 
         Oracle: the iOS artifact preserves the author's failed state while
@@ -156,7 +158,7 @@ SCENARIO=skills_available_unmentioned
                         "build_health": {
                             "app_authored": {
                                 "status": "failed",
-                                "detail": None,
+                                "detail": author_detail,
                                 "log": "author-agent-metadata/incomplete-author/logs/c-agent.log",
                             }
                         },
@@ -189,7 +191,12 @@ SCENARIO=skills_available_unmentioned
             )
 
             self.assertEqual(result.returncode, 1, result.stderr)
-            self.assertIn("authoring did not complete; skipping build/eval", result.stdout)
+            expected_reason = (
+                f"authoring did not complete: {author_detail}"
+                if author_detail
+                else "authoring did not complete; skipping build/eval"
+            )
+            self.assertIn(expected_reason, result.stdout)
             self.assertFalse(setup_marker.exists())
             artifact_manifest = json.loads(
                 (root / "ios-eval-report" / "manifest.json").read_text(encoding="utf-8")
@@ -198,12 +205,22 @@ SCENARIO=skills_available_unmentioned
                 artifact_manifest["build_health"]["app_authored"],
                 {
                     "status": "failed",
-                    "detail": None,
+                    "detail": author_detail,
                     "log": "author-agent-metadata/incomplete-author/logs/c-agent.log",
                 },
             )
             for stage in ("dependency_install", "native_build", "app_launch", "evaluation"):
                 self.assertEqual(artifact_manifest["build_health"][stage]["status"], "not_run")
+
+    def test_regression_incomplete_author_is_a_diagnostic_without_evaluator_setup(self) -> None:
+        """An absent author detail must use the truthful generic early-failure reason."""
+        self.assert_incomplete_author_is_a_diagnostic_without_evaluator_setup(None)
+
+    def test_regression_incomplete_author_detail_is_preserved_in_diagnostic(self) -> None:
+        """A reported author failure detail must be preserved in the early diagnostic."""
+        self.assert_incomplete_author_is_a_diagnostic_without_evaluator_setup(
+            "author agent exited 17 while generating the app"
+        )
 
     def test_spec_completed_result_requires_numeric_score_fields(self) -> None:
         """Specification: a green evaluation contains a usable score artifact.

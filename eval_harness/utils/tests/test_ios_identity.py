@@ -27,26 +27,23 @@ def normalize(workspace: Path, config: dict[str, object], output: Path) -> subpr
     )
 
 
-def load_expo_dynamic_config(workspace: Path) -> subprocess.CompletedProcess[str]:
-    """Use Expo's dynamic-config filename precedence and unwrap its expo envelope."""
+def load_expo_config(workspace: Path) -> subprocess.CompletedProcess[str]:
+    """Resolve the workspace with Expo's production config loader."""
+    node_modules = workspace / "node_modules"
+    node_modules.mkdir(exist_ok=True)
+    expo_packages = node_modules / "@expo"
+    if not expo_packages.exists():
+        expo_packages.symlink_to(ROOT / "node_modules" / "@expo", target_is_directory=True)
     return subprocess.run(
         [
-            "bun",
+            "node",
             "-e",
             """
-const fs = require('node:fs');
-const path = require('node:path');
+const { getConfig } = require('@expo/config');
 const workspace = process.argv[1];
-const candidates = ['app.config.ts', 'app.config.mts', 'app.config.cts', 'app.config.mjs', 'app.config.cjs', 'app.config.js'];
-const configPath = candidates.map((name) => path.join(workspace, name)).find(fs.existsSync);
-if (!configPath) throw new Error('no dynamic Expo config');
-const loaded = require(configPath);
-const value = typeof loaded === 'function'
-  ? loaded({ config: { slug: 'dynamic-notes' } })
-  : loaded.default && typeof loaded.default === 'function'
-    ? loaded.default({ config: { slug: 'dynamic-notes' } })
-    : loaded.default || loaded;
-console.log(JSON.stringify(value.expo || value));
+console.log(JSON.stringify(getConfig(workspace, {
+  skipSDKVersionRequirement: true,
+}).exp));
 """,
             str(workspace),
         ],
@@ -141,6 +138,18 @@ class IosIdentityTests(unittest.TestCase):
             (source / "app.config.js").parent.mkdir(parents=True, exist_ok=True)
             (source / "app.config.js").write_text(author_config, encoding="utf-8")
             shutil.copytree(source, workspace)
+            write_json(workspace / "package.json", {})
+            write_json(workspace / "app.json", {"expo": {"name": "Dynamic Notes", "slug": "dynamic-notes"}})
+            plugin = workspace / "node_modules" / "expo-router" / "app.plugin.js"
+            plugin.parent.mkdir(parents=True, exist_ok=True)
+            plugin.write_text(
+                """module.exports = (config, props) => ({
+  ...config,
+  extra: { ...(config.extra || {}), pluginOrigin: props.origin },
+});
+""",
+                encoding="utf-8",
+            )
 
             result = normalize(
                 workspace,
@@ -155,24 +164,13 @@ class IosIdentityTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual((source / "app.config.js").read_text(encoding="utf-8"), author_config)
-            resolved = subprocess.run(
-                [
-                    "node",
-                    "-e",
-                    "const config = require(process.argv[1])({ config: { slug: 'dynamic-notes' } }); console.log(JSON.stringify(config));",
-                    str(workspace / "app.config.js"),
-                ],
-                cwd=ROOT,
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-            self.assertEqual(resolved.returncode, 0, resolved.stderr)
-            normalized = json.loads(resolved.stdout)
-            self.assertEqual(normalized["plugins"], [["expo-router", {"origin": "author"}]])
-            self.assertEqual(normalized["ios"]["buildNumber"], "7")
-            self.assertEqual(normalized["ios"]["bundleIdentifier"], "com.evalharness.da74b6b1b847")
-            self.assertEqual(normalized["scheme"], "eval-da74b6b1b847")
+            loaded = load_expo_config(workspace)
+            self.assertEqual(loaded.returncode, 0, loaded.stderr)
+            effective = json.loads(loaded.stdout)
+            self.assertEqual(effective["extra"]["pluginOrigin"], "author")
+            self.assertEqual(effective["ios"]["buildNumber"], "7")
+            self.assertEqual(effective["ios"]["bundleIdentifier"], "com.evalharness.da74b6b1b847")
+            self.assertEqual(effective["scheme"], "eval-da74b6b1b847")
 
     def test_dynamic_config_with_identity_is_not_wrapped(self) -> None:
         """Authored dynamic identity must not receive an evaluator wrapper.
@@ -210,6 +208,17 @@ class IosIdentityTests(unittest.TestCase):
             workspace = root / "evaluator-materialization"
             output = root / "ios-identity-adjustments.json"
             write_json(workspace / "package.json", {})
+            write_json(workspace / "app.json", {"expo": {"name": "Dynamic Notes", "slug": "dynamic-notes"}})
+            plugin = workspace / "node_modules" / "expo-router" / "app.plugin.js"
+            plugin.parent.mkdir(parents=True, exist_ok=True)
+            plugin.write_text(
+                """module.exports = (config, props) => ({
+  ...config,
+  extra: { ...(config.extra || {}), pluginOrigin: props.origin },
+});
+""",
+                encoding="utf-8",
+            )
             (workspace / "app.config.js").parent.mkdir(parents=True, exist_ok=True)
             (workspace / "app.config.js").write_text(
                 """module.exports = ({ config }) => ({ expo: {
@@ -231,12 +240,12 @@ class IosIdentityTests(unittest.TestCase):
                 },
                 output,
             )
-            loaded = load_expo_dynamic_config(workspace)
+            loaded = load_expo_config(workspace)
 
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(loaded.returncode, 0, loaded.stderr)
             effective = json.loads(loaded.stdout)
-            self.assertEqual(effective["plugins"], [["expo-router", {"origin": "author"}]])
+            self.assertEqual(effective["extra"]["pluginOrigin"], "author")
             self.assertEqual(effective["ios"]["buildNumber"], "7")
             self.assertEqual(
                 effective.get("ios", {}).get("bundleIdentifier"),
@@ -255,13 +264,18 @@ class IosIdentityTests(unittest.TestCase):
             workspace = root / "evaluator-materialization"
             output = root / "ios-identity-adjustments.json"
             write_json(workspace / "package.json", {})
+            write_json(workspace / "app.json", {"expo": {"name": "Dynamic Notes", "slug": "dynamic-notes"}})
             (workspace / "app.config.js").parent.mkdir(parents=True, exist_ok=True)
             (workspace / "app.config.js").write_text(
                 "module.exports = () => { throw new Error('wrong config selected'); };\n",
                 encoding="utf-8",
             )
             (workspace / "app.config.ts").write_text(
-                "module.exports = ({ config }) => ({ expo: { ...config, ios: { buildNumber: '8' } } });\n",
+                """import type { ConfigContext, ExpoConfig } from '@expo/config';
+export default ({ config }: ConfigContext): { expo: ExpoConfig } => ({
+  expo: { ...config, ios: { buildNumber: '8' } },
+});
+""",
                 encoding="utf-8",
             )
 
@@ -270,7 +284,7 @@ class IosIdentityTests(unittest.TestCase):
                 {"name": "Dynamic Notes", "slug": "dynamic-notes", "ios": {"buildNumber": "8"}},
                 output,
             )
-            loaded = load_expo_dynamic_config(workspace)
+            loaded = load_expo_config(workspace)
 
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertTrue((workspace / ".eval-ios-author-app.config.ts").exists())
@@ -293,11 +307,19 @@ class IosIdentityTests(unittest.TestCase):
         cases = [
             (
                 "mts",
-                "export default ({ config }) => ({ expo: { ...config, ios: { buildNumber: '9' } } });\n",
+                """import type { ConfigContext, ExpoConfig } from '@expo/config';
+export default ({ config }: ConfigContext): { expo: ExpoConfig } => ({
+  expo: { ...config, ios: { buildNumber: '9' } },
+});
+""",
             ),
             (
                 "cts",
-                "module.exports = ({ config }) => ({ expo: { ...config, ios: { buildNumber: '10' } } });\n",
+                """import type { ConfigContext, ExpoConfig } from '@expo/config';
+export = ({ config }: ConfigContext): { expo: ExpoConfig } => ({
+  expo: { ...config, ios: { buildNumber: '10' } },
+});
+""",
             ),
         ]
         for extension, config_source in cases:
@@ -306,6 +328,7 @@ class IosIdentityTests(unittest.TestCase):
                 workspace = root / "evaluator-materialization"
                 output = root / "ios-identity-adjustments.json"
                 write_json(workspace / "package.json", {})
+                write_json(workspace / "app.json", {"expo": {"name": "Dynamic Notes", "slug": "dynamic-notes"}})
                 (workspace / "app.config.js").parent.mkdir(parents=True, exist_ok=True)
                 (workspace / "app.config.js").write_text(
                     "module.exports = () => { throw new Error('wrong config selected'); };\n",
@@ -318,7 +341,7 @@ class IosIdentityTests(unittest.TestCase):
                     {"name": "Dynamic Notes", "slug": "dynamic-notes", "ios": {}},
                     output,
                 )
-                loaded = load_expo_dynamic_config(workspace)
+                loaded = load_expo_config(workspace)
 
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertTrue((workspace / f".eval-ios-author-app.config.{extension}").exists())

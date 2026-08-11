@@ -41,7 +41,7 @@ function identityFor(run) {
   };
 }
 
-function wrapperSource(extension, backupName, identity, packageType) {
+function wrapperSource(extension, backupName, backupPath, identity, packageType) {
   const normalize = `const evaluatorIdentity = ${JSON.stringify(identity)};
 const missing = (value) => typeof value === "string" ? value.trim().length === 0 : !Array.isArray(value) || value.length === 0;
 const withEvaluatorIdentity = (value) => {
@@ -60,7 +60,7 @@ const withEvaluatorIdentity = (value) => {
   };
   return hasExpoEnvelope ? { ...config, expo: normalized } : normalized;
 };`;
-  const esm = ["mjs", "mts", "ts"].includes(extension) || (extension === "js" && packageType === "module");
+  const esm = ["mjs", "mts"].includes(extension) || (extension === "js" && packageType === "module");
   if (esm) {
     return `import authoredConfig from "./${backupName}";
 ${normalize}
@@ -69,7 +69,9 @@ export default (context) => withEvaluatorIdentity(
 );
 `;
   }
-  return `const authoredConfig = require("./${backupName}");
+  return `const { loadModuleSync } = require("@expo/require-utils");
+const authoredModule = loadModuleSync(${JSON.stringify(backupPath)});
+const authoredConfig = authoredModule.default ?? authoredModule;
 ${normalize}
 module.exports = (context) => withEvaluatorIdentity(
   typeof authoredConfig === "function" ? authoredConfig(context) : authoredConfig,
@@ -88,7 +90,7 @@ function replaceDynamicConfig(config, identity, packageType) {
   try {
     fs.writeFileSync(
       config.path,
-      wrapperSource(config.extension, backupName, identity, packageType),
+      wrapperSource(config.extension, backupName, backupPath, identity, packageType),
       "utf8",
     );
   } catch (error) {
