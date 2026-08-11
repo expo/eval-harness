@@ -14,6 +14,7 @@ shared modules (`scoring`, `tracer`, `prompt_agent`, `agent_hooks`,
 
 import asyncio
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -42,6 +43,7 @@ from claude_agent_sdk import (
     ResultMessage,
     UserMessage,
 )
+from claude_agent_sdk.types import TextBlock
 
 from ..core.test_plan_parser import parse_test_plan
 
@@ -61,6 +63,38 @@ from ..core.scoring import (
     TestPlanResult,
     score_step,
 )
+
+
+_PROVIDER_SESSION_LIMIT = re.compile(
+    r"^You've hit your session limit · resets "
+    r"((?:1[0-2]|[1-9]):[0-5][0-9](?:am|pm) \(America/Los_Angeles\))$"
+)
+_TOKEN_USAGE_FIELDS = (
+    "input_tokens",
+    "output_tokens",
+    "cache_creation_input_tokens",
+    "cache_read_input_tokens",
+)
+
+
+def _provider_quota_reason(message: AssistantMessage) -> str | None:
+    """Recognize only Claude's zero-token synthetic session-limit response."""
+    if message.model != "<synthetic>" or len(message.content) != 1:
+        return None
+    block = message.content[0]
+    if not isinstance(block, TextBlock):
+        return None
+    usage = message.usage or {}
+    if not isinstance(usage, dict):
+        return None
+    for field in _TOKEN_USAGE_FIELDS:
+        value = usage.get(field, 0)
+        if not isinstance(value, int) or isinstance(value, bool) or value != 0:
+            return None
+    match = _PROVIDER_SESSION_LIMIT.fullmatch(block.text)
+    if match is None:
+        return None
+    return f"provider_quota: Claude session limit reached; resets {match.group(1)}"
 
 
 # ----- The evaluator -----
@@ -273,7 +307,12 @@ class AgentDeviceEvaluator:
                 )
 
                 await client.query(_seed_prompt(seeding_clean, self.seed_iterations, self.prd_text))
-                await self._receive_phase_response(client, state, turn_agg, agg_usage)
+                provider_failure = await self._receive_phase_response(
+                    client,
+                    state,
+                    turn_agg,
+                    agg_usage,
+                )
 
                 turn_agg.flush(reason="seed_end")
                 tracer.log(
@@ -284,6 +323,35 @@ class AgentDeviceEvaluator:
                     n_soft_assertions=len(state.soft_assertions),
                 )
                 prd_already_injected = bool(self.prd_text.strip())
+
+                if provider_failure is not None:
+                    result.status = "evaluator_error"
+                    result.error_stage = "seed"
+                    result.error_reason = provider_failure
+                    result.abort_scope = "suite"
+                    tracer.log(
+                        "plan_aborted",
+                        reason="provider_quota",
+                        category="evaluator_infrastructure",
+                        error=provider_failure,
+                        abort_scope="suite",
+                    )
+                    tracer.write_summary({
+                        "plan": test_plan_path.name,
+                        "run_index": run_index,
+                        "platform": self.platform,
+                        "driver": "agent-device",
+                        "status": "evaluator_error",
+                        "error_stage": "seed",
+                        "error_reason": provider_failure,
+                        "abort_scope": "suite",
+                        "score": None,
+                        "full_points": None,
+                        "total_usage": agg_usage.snapshot(),
+                        "steps": [],
+                        "terminal_evidence": [],
+                    })
+                    return result
 
                 if state.aborted:
                     result.status = "evaluator_error"
@@ -368,35 +436,48 @@ class AgentDeviceEvaluator:
                 # (see above) and persist in the SDK session's context, so step
                 # prompts no longer re-inject them.
                 await client.query(_step_prompt(i, len(plan["steps"]), step, self.max_iterations))
-                await self._receive_phase_response(client, state, turn_agg, agg_usage)
+                provider_failure = await self._receive_phase_response(
+                    client,
+                    state,
+                    turn_agg,
+                    agg_usage,
+                )
 
                 turn_agg.flush(reason="step_end")
 
-                if state.aborted or not state.completed:
+                if provider_failure is not None or state.aborted or not state.completed:
                     screenshot_path, screenshot_error = self._capture_terminal_screenshot(
                         tracer,
                         i,
                     )
                     result.status = "evaluator_error"
                     result.error_stage = f"step_{i}"
-                    if state.aborted:
+                    if provider_failure is not None:
+                        result.error_reason = provider_failure
+                        result.abort_scope = "suite"
+                        abort_reason = "provider_quota"
+                        abort_category = "evaluator_infrastructure"
+                    elif state.aborted:
                         result.error_reason = (
                             f"{state.abort_category}: {state.abort_reason}"
                             if state.abort_category
                             else state.abort_reason
                         )
                         abort_reason = "agent_aborted_step"
+                        abort_category = state.abort_category
                     else:
                         result.error_reason = (
                             "step response ended without complete_step or abort_step"
                         )
                         abort_reason = "step_ended_without_terminal_tool"
+                        abort_category = state.abort_category
                     tracer.log(
                         "plan_aborted",
                         reason=abort_reason,
                         step_number=i,
-                        category=state.abort_category,
+                        category=abort_category,
                         error=result.error_reason,
+                        abort_scope=result.abort_scope,
                         screenshot=screenshot_path,
                         screenshot_error=screenshot_error,
                     )
@@ -407,7 +488,7 @@ class AgentDeviceEvaluator:
                         screenshot_error=screenshot_error,
                     )
                     result.terminal_evidence.append(terminal_evidence)
-                    tracer.write_summary({
+                    summary = {
                         "plan": test_plan_path.name,
                         "run_index": run_index,
                         "platform": self.platform,
@@ -426,7 +507,10 @@ class AgentDeviceEvaluator:
                             "screenshot": terminal_evidence.screenshot_path,
                             "screenshot_error": terminal_evidence.screenshot_error,
                         }],
-                    })
+                    }
+                    if provider_failure is not None:
+                        summary["abort_scope"] = "suite"
+                    tracer.write_summary(summary)
                     return result
 
                 step_result = score_step(step, state.assertions, state.soft_assertions, state.completed, state.turns_used)
@@ -521,7 +605,7 @@ class AgentDeviceEvaluator:
         state: StepState,
         turn_agg: TurnAggregator,
         agg_usage: UsageAccumulator,
-    ) -> None:
+    ) -> str | None:
         """Process one SDK response and stop model work at a terminal tool call.
 
         MCP tools mutate ``state`` before their tool-result UserMessage reaches
@@ -530,17 +614,27 @@ class AgentDeviceEvaluator:
         the SDK is ready for the next query, but ignore post-terminal model work.
         """
         interrupted = False
+        provider_failure = None
         async for message in client.receive_response():
-            if interrupted and not isinstance(message, ResultMessage):
+            if (
+                (interrupted or provider_failure is not None)
+                and not isinstance(message, ResultMessage)
+            ):
                 continue
 
             self._process_message(message, turn_agg, agg_usage)
             if isinstance(message, ResultMessage):
                 break
 
+            if isinstance(message, AssistantMessage):
+                provider_failure = _provider_quota_reason(message)
+                if provider_failure is not None:
+                    continue
+
             if (state.completed or state.aborted) and not interrupted:
                 await client.interrupt()
                 interrupted = True
+        return provider_failure
 
     def _process_message(
         self,

@@ -323,7 +323,125 @@ class SuiteBlockingRestartEvaluator:
         )
 
 
+class SuiteProviderQuotaEvaluator:
+    def __init__(self) -> None:
+        self.calls = 0
+        self.bridge = RecordingBridge()
+
+    def evaluate_test_plan(self, plan_path: Path, run_index: int = 1) -> TestPlanResult:
+        self.calls += 1
+        return TestPlanResult(
+            score=0,
+            full_points=6,
+            status="evaluator_error",
+            error_stage="seed",
+            error_reason=(
+                "provider_quota: Claude session limit reached; "
+                "resets 3:30am (America/Los_Angeles)"
+            ),
+            abort_scope="suite",
+        )
+
+
+class SuiteProviderQuotaAfterCompletedPlanEvaluator(SuiteProviderQuotaEvaluator):
+    def evaluate_test_plan(self, plan_path: Path, run_index: int = 1) -> TestPlanResult:
+        self.calls += 1
+        if self.calls == 1:
+            return completed_plan(score=3, full_points=3)
+        return TestPlanResult(
+            score=0,
+            full_points=6,
+            status="evaluator_error",
+            error_stage="step_1",
+            error_reason=(
+                "provider_quota: Claude session limit reached; "
+                "resets 3:30am (America/Los_Angeles)"
+            ),
+            abort_scope="suite",
+        )
+
+
 class SuiteCheckpointTests(unittest.TestCase):
+    def test_provider_quota_fails_fast_with_null_suite_score_and_truthful_report(self) -> None:
+        """Provider quota is one unscored infrastructure failure, not app zeroes.
+
+        Catches: evaluating every plan or rendering macro/micro 0 after quota.
+        """
+        evaluator = SuiteProviderQuotaEvaluator()
+
+        with tempfile.TemporaryDirectory() as td:
+            output_path = Path(td) / "result.json"
+            output, exit_code = _run_suite(
+                evaluator=evaluator,
+                test_plans=[
+                    Path("test_select.txt"),
+                    Path("test_search.txt"),
+                    Path("test_permission.txt"),
+                ],
+                repeat=1,
+                output_path=output_path,
+            )
+            on_disk = json.loads(output_path.read_text(encoding="utf-8"))
+            report = output_path.with_suffix(".html").read_text(encoding="utf-8")
+
+        self.assertEqual(exit_code, 1)
+        self.assertEqual(evaluator.calls, 1)
+        self.assertEqual(on_disk, output)
+        self.assertEqual(output["status"], "incomplete")
+        self.assertEqual(output["terminal_plan_count"], 1)
+        self.assertIsNone(output["score"])
+        self.assertIsNone(output["full_points"])
+        self.assertIsNone(output["macro_avg_pct"])
+        self.assertIsNone(output["micro_pct"])
+        self.assertEqual(output["test_plans"][0]["score"], None)
+        self.assertEqual(output["test_plans"][0]["abort_scope"], "suite")
+        self.assertEqual(
+            output["evaluator_errors"],
+            [{
+                "test_plan": "test_select.txt",
+                "run_index": 1,
+                "stage": "seed",
+                "reason": (
+                    "provider_quota: Claude session limit reached; "
+                    "resets 3:30am (America/Los_Angeles)"
+                ),
+                "scope": "suite",
+            }],
+        )
+        self.assertIn("unscored due evaluator infrastructure", report)
+        self.assertIn("provider_quota: Claude session limit reached", report)
+        self.assertNotIn("0/0 points", report)
+        self.assertNotIn("macro avg 0", report)
+        self.assertEqual(evaluator.bridge.cleanup_calls, 1)
+
+    def test_provider_quota_nulls_suite_score_after_prior_completed_plan(self) -> None:
+        """Earlier plan scores remain diagnostic, never a partial suite score."""
+        evaluator = SuiteProviderQuotaAfterCompletedPlanEvaluator()
+
+        with tempfile.TemporaryDirectory() as td:
+            output, exit_code = _run_suite(
+                evaluator=evaluator,
+                test_plans=[
+                    Path("test_select.txt"),
+                    Path("test_search.txt"),
+                    Path("test_permission.txt"),
+                ],
+                repeat=1,
+                output_path=Path(td) / "result.json",
+            )
+
+        self.assertEqual(exit_code, 1)
+        self.assertEqual(evaluator.calls, 2)
+        self.assertEqual(output["status"], "incomplete")
+        self.assertIsNone(output["score"])
+        self.assertIsNone(output["full_points"])
+        self.assertIsNone(output["macro_avg_pct"])
+        self.assertIsNone(output["micro_pct"])
+        self.assertEqual(output["test_plans"][0]["status"], "completed")
+        self.assertEqual(output["test_plans"][0]["score"], 3)
+        self.assertEqual(output["test_plans"][1]["status"], "evaluator_error")
+        self.assertEqual(output["test_plans"][1]["abort_scope"], "suite")
+
     def test_spec_pre_session_restart_block_aborts_suite_after_one_plan(self) -> None:
         """Specification: one systematic readiness block cannot consume every plan.
 

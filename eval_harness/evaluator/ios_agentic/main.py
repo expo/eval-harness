@@ -224,6 +224,10 @@ def _build_suite_output(
             error["scope"] = "suite"
         plan_errors.append(error)
     evaluator_errors = plan_errors + suite_errors
+    provider_quota_failure = any(
+        str(error.get("reason") or "").startswith("provider_quota:")
+        for error in evaluator_errors
+    )
     terminal_statuses = {"completed", "not_applicable", "evaluator_error"}
     terminal_plan_count = sum(
         1 for plan in plan_results if plan.get("status") in terminal_statuses
@@ -254,19 +258,35 @@ def _build_suite_output(
 
     na_suffix = f", {len(not_applicable)} N/A" if not_applicable else ""
     error_suffix = f", {len(evaluator_errors)} evaluator error(s)" if evaluator_errors else ""
+    if provider_quota_failure:
+        test_overview = (
+            f"Adaptive evaluation ({status}): {len(plan_results)}/{expected_plan_count} "
+            f"test plan(s){na_suffix}{error_suffix}, "
+            "unscored due evaluator infrastructure (provider quota)"
+        )
+        output_score = None
+        output_full_points = None
+        output_macro_avg = None
+        output_micro_pct = None
+    else:
+        test_overview = (
+            f"Adaptive evaluation ({status}): {len(plan_results)}/{expected_plan_count} "
+            f"test plan(s){na_suffix}{error_suffix}, macro avg {suite_macro_avg}% "
+            f"(micro {suite_micro_pct}%, {total_score}/{total_full} points)"
+        )
+        output_score = total_score
+        output_full_points = total_full
+        output_macro_avg = suite_macro_avg
+        output_micro_pct = suite_micro_pct
     return {
         "status": status,
         "expected_plan_count": expected_plan_count,
         "terminal_plan_count": terminal_plan_count,
-        "test_overview": (
-            f"Adaptive evaluation ({status}): {len(plan_results)}/{expected_plan_count} "
-            f"test plan(s){na_suffix}{error_suffix}, macro avg {suite_macro_avg}% "
-            f"(micro {suite_micro_pct}%, {total_score}/{total_full} points)"
-        ),
-        "score": total_score,
-        "full_points": total_full,
-        "macro_avg_pct": suite_macro_avg,
-        "micro_pct": suite_micro_pct,
+        "test_overview": test_overview,
+        "score": output_score,
+        "full_points": output_full_points,
+        "macro_avg_pct": output_macro_avg,
+        "micro_pct": output_micro_pct,
         "n_not_applicable": len(not_applicable),
         "evaluator_errors": evaluator_errors,
         "test_plans": plan_results,

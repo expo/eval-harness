@@ -46,6 +46,7 @@ class RecordingTracer:
         type(self).latest = self
         self.root = Path("/tmp/test-ios-evaluator-trace")
         self.events: list[tuple[str, dict]] = []
+        self.records: list[dict] = []
         self.close_calls = 0
         self.start_time = 0.0
         self.summary = None
@@ -55,6 +56,9 @@ class RecordingTracer:
 
     def log(self, event: str, **fields) -> None:
         self.events.append((event, fields))
+
+    def log_record(self, record: dict) -> None:
+        self.records.append(record)
 
     def close(self) -> None:
         self.close_calls += 1
@@ -144,6 +148,57 @@ class PassiveSdkClient:
 
     async def query(self, prompt: str) -> None:
         self.queries.append(prompt)
+
+
+SESSION_LIMIT_TEXT = (
+    "You've hit your session limit · resets 3:30am (America/Los_Angeles)"
+)
+SESSION_LIMIT_REASON = (
+    "provider_quota: Claude session limit reached; "
+    "resets 3:30am (America/Los_Angeles)"
+)
+
+
+class SyntheticSessionLimitClient(PassiveSdkClient):
+    latest = None
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        type(self).latest = self
+
+    async def receive_response(self):
+        yield AssistantMessage(
+            content=[TextBlock(text=SESSION_LIMIT_TEXT)],
+            model="<synthetic>",
+            usage={
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+            },
+        )
+        yield sdk_result()
+
+
+class OrdinaryUnterminatedClient(PassiveSdkClient):
+    latest = None
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        type(self).latest = self
+
+    async def receive_response(self):
+        yield AssistantMessage(
+            content=[TextBlock(text=SESSION_LIMIT_TEXT)],
+            model="claude-opus-4-8",
+            usage={
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+            },
+        )
+        yield sdk_result()
 
 
 class SuccessfulDevClientRestartBridge(SuccessfulRestartBridge):
@@ -238,6 +293,137 @@ class AgentDeviceEvaluatorOutcomeTests(unittest.TestCase):
         step_event = next(fields for event, fields in RecordingTracer.latest.events if event == "step_complete")
         self.assertEqual(step_event["screenshot"], "screenshots/step-01-final.png")
         self.assertIsNone(step_event["screenshot_error"])
+
+    def test_provider_session_limit_in_seed_aborts_suite_unscored(self) -> None:
+        """The exact zero-token synthetic quota response is infrastructure.
+
+        Catches: reporting a seed protocol failure and continuing later plans.
+        """
+        bridge = SuccessfulRestartBridge()
+        evaluator = self._formal_step_evaluator(bridge)
+
+        with (
+            patch(
+                "eval_harness.evaluator.ios_agentic.agent_device.evaluator.parse_test_plan",
+                return_value={
+                    "full_points": 6,
+                    "steps": [
+                        {"name": "first", "description": "", "points": 3},
+                        {"name": "second", "description": "", "points": 3},
+                    ],
+                    "seeding": "Create a note before evaluation.",
+                },
+            ),
+            patch(
+                "eval_harness.evaluator.ios_agentic.agent_device.evaluator.Tracer",
+                RecordingTracer,
+            ),
+            patch(
+                "eval_harness.evaluator.ios_agentic.agent_device.evaluator.ClaudeSDKClient",
+                SyntheticSessionLimitClient,
+            ),
+        ):
+            result = asyncio.run(
+                evaluator._evaluate_test_plan_async(Path("test_insert.txt"))
+            )
+
+        self.assertEqual(len(SyntheticSessionLimitClient.latest.queries), 1)
+        self.assertEqual(result.status, "evaluator_error")
+        self.assertEqual(result.error_stage, "seed")
+        self.assertEqual(result.error_reason, SESSION_LIMIT_REASON)
+        self.assertEqual(result.abort_scope, "suite")
+        self.assertEqual(result.steps, [])
+        aborted = next(
+            fields
+            for event, fields in RecordingTracer.latest.events
+            if event == "plan_aborted"
+        )
+        self.assertEqual(aborted["reason"], "provider_quota")
+        self.assertEqual(aborted["category"], "evaluator_infrastructure")
+        self.assertEqual(RecordingTracer.latest.summary["score"], None)
+        self.assertEqual(RecordingTracer.latest.summary["abort_scope"], "suite")
+
+    def test_provider_session_limit_in_formal_step_aborts_suite_unscored(self) -> None:
+        """Formal-phase quota exhaustion stops before any later scored step.
+
+        Catches: recording a model/app zero and querying the next formal phase.
+        """
+        bridge = SuccessfulRestartBridge()
+        evaluator = self._formal_step_evaluator(bridge)
+
+        with (
+            patch(
+                "eval_harness.evaluator.ios_agentic.agent_device.evaluator.parse_test_plan",
+                return_value={
+                    "full_points": 6,
+                    "steps": [
+                        {"name": "first", "description": "", "points": 3},
+                        {"name": "second", "description": "", "points": 3},
+                    ],
+                    "seeding": "",
+                },
+            ),
+            patch(
+                "eval_harness.evaluator.ios_agentic.agent_device.evaluator.Tracer",
+                RecordingTracer,
+            ),
+            patch(
+                "eval_harness.evaluator.ios_agentic.agent_device.evaluator.ClaudeSDKClient",
+                SyntheticSessionLimitClient,
+            ),
+        ):
+            result = asyncio.run(
+                evaluator._evaluate_test_plan_async(Path("test_insert.txt"))
+            )
+
+        self.assertEqual(len(SyntheticSessionLimitClient.latest.queries), 1)
+        self.assertEqual(result.status, "evaluator_error")
+        self.assertEqual(result.error_stage, "step_1")
+        self.assertEqual(result.error_reason, SESSION_LIMIT_REASON)
+        self.assertEqual(result.abort_scope, "suite")
+        self.assertEqual(result.steps, [])
+        self.assertEqual(len(result.terminal_evidence), 1)
+        self.assertEqual(RecordingTracer.latest.summary["score"], None)
+        self.assertEqual(RecordingTracer.latest.summary["abort_scope"], "suite")
+
+    def test_nonquota_unterminated_response_keeps_generic_protocol_error(self) -> None:
+        """Matching text from a real model is not provider quota evidence.
+
+        Catches: broad text-only matching that changes ordinary protocol handling.
+        """
+        bridge = SuccessfulRestartBridge()
+        evaluator = self._formal_step_evaluator(bridge)
+
+        with (
+            patch(
+                "eval_harness.evaluator.ios_agentic.agent_device.evaluator.parse_test_plan",
+                return_value={
+                    "full_points": 3,
+                    "steps": [{"name": "first", "description": "", "points": 3}],
+                    "seeding": "",
+                },
+            ),
+            patch(
+                "eval_harness.evaluator.ios_agentic.agent_device.evaluator.Tracer",
+                RecordingTracer,
+            ),
+            patch(
+                "eval_harness.evaluator.ios_agentic.agent_device.evaluator.ClaudeSDKClient",
+                OrdinaryUnterminatedClient,
+            ),
+        ):
+            result = asyncio.run(
+                evaluator._evaluate_test_plan_async(Path("test_insert.txt"))
+            )
+
+        self.assertEqual(len(OrdinaryUnterminatedClient.latest.queries), 1)
+        self.assertEqual(result.status, "evaluator_error")
+        self.assertEqual(result.error_stage, "step_1")
+        self.assertEqual(
+            result.error_reason,
+            "step response ended without complete_step or abort_step",
+        )
+        self.assertEqual(result.abort_scope, "plan")
 
     def test_regression_screenshot_failure_does_not_change_step_score(self) -> None:
         """Regression: screenshot diagnostics are independent of app scoring.
