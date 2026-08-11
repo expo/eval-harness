@@ -1,3 +1,27 @@
+eval::run_authored() { # command [args...]
+  local scrubbed_env=(
+    CLAUDE_CODE_OAUTH_TOKEN
+    ANTHROPIC_API_KEY
+    ANTHROPIC_AUTH_TOKEN
+    OPENAI_API_KEY
+    META_API_KEY
+    MUSE_API_KEY
+    EXPO_TOKEN
+    EXPO_MCP_BEARER_TOKEN
+    EXPO_MCP_REFRESH_TOKEN
+    MUSE_MCP_TOKEN
+    BRAINTRUST_API_KEY
+    GCP_SA_KEY
+    GOOGLE_APPLICATION_CREDENTIALS
+    GCS_BUCKET
+  )
+  local env_args=() name
+  for name in "${scrubbed_env[@]}"; do
+    env_args+=( -u "$name" )
+  done
+  /usr/bin/env "${env_args[@]}" "$@"
+}
+
 eval::configure_ios_app_mode() {
   EVAL_IOS_APP_MODE="${EVAL_IOS_APP_MODE:-release}"
   case "$EVAL_IOS_APP_MODE" in
@@ -23,7 +47,7 @@ eval::configure_ios_app_mode() {
 eval::npm_install() { # app_dir out_dir
   local app_dir="$1" out="$2"
   echo "================= STAGE 5: app deps ($app_dir) ================="
-  ( cd "$app_dir" && npm install ) >"$out/s5-npm.log" 2>&1
+  ( cd "$app_dir" && eval::run_authored npm install ) >"$out/s5-npm.log" 2>&1
   local rc=$?
   eval::gate $rc "npm install ($app_dir)"
   [ "$rc" != 0 ] && { echo "  --- s5-npm.log tail ---"; tail -60 "$out/s5-npm.log" | sed 's/^/    /'; }
@@ -34,7 +58,7 @@ eval::npm_install() { # app_dir out_dir
 eval::start_metro_expo_go() { # app_dir out_dir
   local app_dir="$1" out="$2"
   echo "================= STAGE 6: Metro + load app in Expo Go ================="
-  ( cd "$app_dir" && npx expo start --ios ) >"$out/s6-metro.log" 2>&1 &
+  ( cd "$app_dir" && eval::run_authored npx expo start --ios ) >"$out/s6-metro.log" 2>&1 &
   export EVAL_METRO_PID=$!
   local up=1 _
   for _ in $(seq 1 60); do
@@ -52,7 +76,7 @@ eval::start_metro_expo_go() { # app_dir out_dir
 eval::start_metro_dev_build() { # app_dir out_dir device
   local app_dir="$1" out="$2" device="$3"
   echo "================= STAGE 6 (dev build): expo run:ios + Metro ================="
-  ( cd "$app_dir" && npx expo run:ios --device "$device" ) >"$out/s6-devbuild.log" 2>&1 &
+  ( cd "$app_dir" && eval::run_authored npx expo run:ios --device "$device" ) >"$out/s6-devbuild.log" 2>&1 &
   export EVAL_METRO_PID=$!
   local up=1 _
   # Up to ~15 min: build (compile + install) must finish before Metro serves :8081.
@@ -74,7 +98,7 @@ eval::start_metro_dev_build() { # app_dir out_dir device
 
 eval::expo_run_ios_supports_output() { # app_dir help_log
   local app_dir="$1" help_log="$2"
-  if ! ( cd "$app_dir" && npx expo run:ios --help ) >"$help_log" 2>&1; then
+  if ! ( cd "$app_dir" && eval::run_authored npx expo run:ios --help ) >"$help_log" 2>&1; then
     return 2
   fi
   grep -Eq -- '(^|[[:space:]])--output([=,[:space:]<]|$)' "$help_log"
@@ -202,7 +226,7 @@ eval::build_release_ios_app() { # app_dir out_dir device_udid
   if eval::expo_run_ios_supports_output "$app_dir" "$out/d-expo-run-ios-help.log"; then
     EVAL_IOS_RELEASE_MODE=generic_output
     export EVAL_IOS_RELEASE_MODE
-    ( cd "$app_dir" && bun "$_EVAL_STAGES_DIR/timeout_exec.ts" 1800 npx expo run:ios \
+    ( cd "$app_dir" && eval::run_authored bun "$_EVAL_STAGES_DIR/timeout_exec.ts" 1800 npx expo run:ios \
         --configuration Release --device generic --output "$build_output" ) >"$out/s6-release.log" 2>&1
     rc=$?
     if [ "$rc" != 0 ]; then
@@ -263,7 +287,7 @@ eval::build_release_ios_app() { # app_dir out_dir device_udid
         export EVAL_IOS_NATIVE_BUILD_OUTCOME
         rc=1
       else
-        ( cd "$app_dir" && bun "$_EVAL_STAGES_DIR/timeout_exec.ts" 1800 npx expo run:ios \
+        ( cd "$app_dir" && eval::run_authored bun "$_EVAL_STAGES_DIR/timeout_exec.ts" 1800 npx expo run:ios \
             --configuration Release --device "$device" ) >"$out/s6-release.log" 2>&1
         rc=$?
         if grep -Eiq -- '(^|[^[:alpha:]])BUILD[[:space:]]+SUCCEEDED([^[:alpha:]]|$)' "$out/s6-release.log"; then

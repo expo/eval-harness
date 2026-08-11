@@ -11,10 +11,160 @@ ROOT = Path(__file__).resolve().parents[3]
 APP_RUNTIME = ROOT / "eval_harness" / "utils" / "shell" / "app_runtime.sh"
 IOS_RUNTIME = ROOT / "eval_harness" / "utils" / "shell" / "ios.sh"
 
+AUTHORED_SECRET_ENV = (
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "OPENAI_API_KEY",
+    "META_API_KEY",
+    "MUSE_API_KEY",
+    "EXPO_TOKEN",
+    "EXPO_MCP_BEARER_TOKEN",
+    "EXPO_MCP_REFRESH_TOKEN",
+    "MUSE_MCP_TOKEN",
+    "BRAINTRUST_API_KEY",
+    "GCP_SA_KEY",
+    "GOOGLE_APPLICATION_CREDENTIALS",
+    "GCS_BUCKET",
+)
+
 
 def executable(path: Path, contents: str) -> None:
     path.write_text(textwrap.dedent(contents), encoding="utf-8")
     path.chmod(0o755)
+
+
+class AuthoredSubprocessEnvironmentTests(unittest.TestCase):
+    def test_authored_subprocess_scrubs_credentials_and_preserves_build_context(self) -> None:
+        """App-controlled commands get build metadata but no evaluator credentials."""
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            capture = root / "environment.txt"
+            poisoned_env_capture = root / "poisoned-env.txt"
+            bin_dir = root / "bin"
+            bin_dir.mkdir()
+            executable(
+                bin_dir / "env",
+                """\
+                #!/usr/bin/env bash
+                if [ "${1:-}" = -u ]; then
+                  printf '%s' "${CLAUDE_CODE_OAUTH_TOKEN:-}" > "$TEST_POISONED_ENV"
+                fi
+                /usr/bin/env "$@"
+                """,
+            )
+            script = textwrap.dedent(
+                f"""\
+                set -uo pipefail
+                source {APP_RUNTIME!s}
+                eval::run_authored bash -c 'env | sort >"$1"' bash {capture!s}
+                """
+            )
+            env = os.environ.copy()
+            env.update(
+                {
+                    name: f"secret-{index}"
+                    for index, name in enumerate(AUTHORED_SECRET_ENV)
+                }
+            )
+            env["PATH"] = f"{bin_dir}:{env['PATH']}"
+            env["TEST_POISONED_ENV"] = str(poisoned_env_capture)
+            env["EVAL_APP_BUNDLE_ID"] = "com.example.preserved"
+
+            result = subprocess.run(
+                ["bash", "-c", script],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertFalse(
+                poisoned_env_capture.exists(),
+                "the credential boundary must invoke the system env utility",
+            )
+            captured = capture.read_text(encoding="utf-8")
+            for name in AUTHORED_SECRET_ENV:
+                self.assertNotIn(f"{name}=", captured)
+            self.assertIn("EVAL_APP_BUNDLE_ID=com.example.preserved", captured)
+
+    def test_metro_launchers_scrub_credentials_and_preserve_build_context(self) -> None:
+        """Both long-lived Metro launch paths keep evaluator credentials private."""
+        cases = (
+            ("expo-go", "eval::start_metro_expo_go \"$APP\" \"$OUT\""),
+            (
+                "dev-build",
+                "eval::start_metro_dev_build \"$APP\" \"$OUT\" SELECTED-UDID",
+            ),
+        )
+        for name, invocation in cases:
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                app = root / "app"
+                out = root / "out"
+                bin_dir = root / "bin"
+                capture = root / "metro-environment.txt"
+                app.mkdir()
+                out.mkdir()
+                bin_dir.mkdir()
+                executable(
+                    bin_dir / "npx",
+                    """\
+                    #!/usr/bin/env bash
+                    env | sort > "$TEST_METRO_ENV.tmp"
+                    mv "$TEST_METRO_ENV.tmp" "$TEST_METRO_ENV"
+                    """,
+                )
+                executable(
+                    bin_dir / "curl",
+                    """\
+                    #!/usr/bin/env bash
+                    while [ ! -s "$TEST_METRO_ENV" ]; do /bin/sleep 0.01; done
+                    exit 0
+                    """,
+                )
+                script = textwrap.dedent(
+                    f"""\
+                    set -uo pipefail
+                    source {APP_RUNTIME!s}
+                    eval::gate() {{ return "$1"; }}
+                    sleep() {{ :; }}
+                    APP={app!s}
+                    OUT={out!s}
+                    {invocation}
+                    """
+                )
+                env = os.environ.copy()
+                env.update(
+                    {
+                        name: f"secret-{index}"
+                        for index, name in enumerate(AUTHORED_SECRET_ENV)
+                    }
+                )
+                env.update(
+                    {
+                        "PATH": f"{bin_dir}:{env['PATH']}",
+                        "TEST_METRO_ENV": str(capture),
+                        "EVAL_APP_BUNDLE_ID": "com.example.preserved",
+                    }
+                )
+
+                result = subprocess.run(
+                    ["bash", "-c", script],
+                    cwd=ROOT,
+                    env=env,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                captured = capture.read_text(encoding="utf-8")
+                for secret_name in AUTHORED_SECRET_ENV:
+                    self.assertNotIn(f"{secret_name}=", captured)
+                self.assertIn("EVAL_APP_BUNDLE_ID=com.example.preserved", captured)
 
 
 class ReleaseIosBuildTests(unittest.TestCase):

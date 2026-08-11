@@ -11,6 +11,13 @@ ROOT = Path(__file__).resolve().parents[4]
 SCRIPT = ROOT / "eval_harness/evaluator/ios_agentic/scripts/eval-ios-app.sh"
 EVALUATOR_SH = ROOT / "eval_harness/utils/shell/evaluator.sh"
 APP_RUNTIME_SH = ROOT / "eval_harness/utils/shell/app_runtime.sh"
+IOS_COLLECTOR = ROOT / "eval_harness/utils/artifacts/collect_ios_artifact.sh"
+IOS_SANITIZER = ROOT / "eval_harness/utils/artifacts/sanitize_ios_artifact.py"
+
+
+def copy_ios_collector(destination: Path) -> None:
+    shutil.copy2(IOS_COLLECTOR, destination)
+    shutil.copy2(IOS_SANITIZER, destination.with_name(IOS_SANITIZER.name))
 
 
 def validate_result(contents: str | None) -> subprocess.CompletedProcess[str]:
@@ -83,10 +90,7 @@ class EvalIosScriptTests(unittest.TestCase):
         stages.parent.mkdir(parents=True, exist_ok=True)
         identity.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(SCRIPT, script)
-        shutil.copy2(
-            ROOT / "eval_harness/utils/artifacts/collect_ios_artifact.sh",
-            collector,
-        )
+        copy_ios_collector(collector)
         shutil.copy2(
             ROOT / "eval_harness/utils/artifacts/create_diagnostic_artifact.py",
             diagnostic,
@@ -116,6 +120,7 @@ eval::install_uv_and_evaluator() { eval::fail_prerequisite evaluator-dependencie
 eval::launch_proxy() { :; }
 eval::wait_for_port() { return 0; }
 eval::launch_otlp_receiver() { :; }
+eval::run_authored() { "$@"; }
 eval::npm_install() { touch "$DEPENDENCY_MARKER"; return 0; }
 eval::configure_ios_app_mode() { EVAL_IOS_APP_MODE=release; export EVAL_IOS_APP_MODE; }
 eval::boot_sim_and_runner() {
@@ -264,10 +269,7 @@ done
             collector.parent.mkdir(parents=True, exist_ok=True)
             stages.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(SCRIPT, script)
-            shutil.copy2(
-                ROOT / "eval_harness/utils/artifacts/collect_ios_artifact.sh",
-                collector,
-            )
+            copy_ios_collector(collector)
             shutil.copy2(
                 ROOT / "eval_harness/utils/artifacts/create_diagnostic_artifact.py",
                 diagnostic,
@@ -386,10 +388,7 @@ SCENARIO=skills_available_unmentioned
             collector.parent.mkdir(parents=True, exist_ok=True)
             stages.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(SCRIPT, script)
-            shutil.copy2(
-                ROOT / "eval_harness/utils/artifacts/collect_ios_artifact.sh",
-                collector,
-            )
+            copy_ios_collector(collector)
             shutil.copy2(
                 ROOT / "eval_harness/utils/artifacts/create_diagnostic_artifact.py",
                 diagnostic,
@@ -531,6 +530,205 @@ SCENARIO=skills_available_unmentioned
         for stage in ("native_build", "app_launch", "evaluation"):
             self.assertEqual(manifest["build_health"][stage]["status"], "not_run")
 
+    def test_authored_build_commands_cannot_copy_ambient_credentials_into_artifact(self) -> None:
+        """Malicious package/config/native commands must not inherit evaluator secrets."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            run_id = "credential-boundary"
+            script = root / "eval_harness/evaluator/ios_agentic/scripts/eval-ios-app.sh"
+            collector = root / "eval_harness/utils/artifacts/collect_ios_artifact.sh"
+            diagnostic = root / "eval_harness/utils/artifacts/create_diagnostic_artifact.py"
+            stages = root / "eval_harness/utils/shell/eval_stages.sh"
+            identity = root / "eval_harness/utils/ios/normalize_ios_identity.mjs"
+            author_env = root / "author-agent-metadata" / run_id / "author.env"
+            workspace = root / "author-agent-workspace" / run_id
+            artifact = root / "ios-eval-report"
+            fake_bin = root / "bin"
+
+            script.parent.mkdir(parents=True, exist_ok=True)
+            collector.parent.mkdir(parents=True, exist_ok=True)
+            stages.parent.mkdir(parents=True, exist_ok=True)
+            identity.parent.mkdir(parents=True, exist_ok=True)
+            fake_bin.mkdir()
+            shutil.copy2(SCRIPT, script)
+            copy_ios_collector(collector)
+            shutil.copy2(
+                ROOT / "eval_harness/utils/artifacts/create_diagnostic_artifact.py",
+                diagnostic,
+            )
+            identity.write_text(
+                """import fs from 'node:fs';
+const [, , workspace, runId, configPath, adjustmentsPath] = process.argv;
+fs.writeFileSync(adjustmentsPath, JSON.stringify({source:'evaluator', adjustments:[]}));
+""",
+                encoding="utf-8",
+            )
+            stages.write_text(
+                f"""_EVAL_STAGES_DIR={APP_RUNTIME_SH.parent!s}
+source {APP_RUNTIME_SH!s}
+eval::gate() {{ return "$1"; }}
+eval::resolve_reasoning_effort() {{ printf '%s' "${{1:-high}}"; }}
+eval::fix_java_home() {{ :; }}
+eval::env_banner() {{ :; }}
+eval::stop_proxies() {{ :; }}
+eval::install_agent_device() {{ :; }}
+eval::install_maestro() {{ :; }}
+eval::install_uv_and_evaluator() {{ :; }}
+eval::launch_proxy() {{ :; }}
+eval::wait_for_port() {{ return 0; }}
+eval::launch_otlp_receiver() {{ :; }}
+eval::boot_sim_and_runner() {{
+  EVAL_DEVNAME='iPhone 17 Pro'; EVAL_DEV_UDID='SELECTED-UDID'; EVAL_IOS_RUNTIME_VERSION=26.5
+  EVAL_IOS_AVAILABLE_RUNTIME_VERSIONS_JSON='["26.5"]'
+  export EVAL_DEVNAME EVAL_DEV_UDID EVAL_IOS_RUNTIME_VERSION EVAL_IOS_AVAILABLE_RUNTIME_VERSIONS_JSON
+}}
+eval::probe_snapshot() {{ return 0; }}
+eval::run_evaluator() {{
+  [ "$CLAUDE_CODE_OAUTH_TOKEN" = "$EXPECTED_EVALUATOR_SECRET" ] || return 91
+  [ "$BRAINTRUST_API_KEY" = "$EXPECTED_EVALUATOR_SECRET" ] || return 92
+  printf '%s\n' '{{"status":"completed","expected_plan_count":1,"terminal_plan_count":1,"evaluator_errors":[],"score":1,"full_points":1,"macro_avg_pct":100,"micro_pct":100,"test_plans":[]}}' >"$4"
+  printf '%s\n' '<html></html>' >"${{4%.json}}.html"
+}}
+eval::require_evaluator_result() {{ return 0; }}
+sleep() {{ :; }}
+""",
+                encoding="utf-8",
+            )
+            author_env.parent.mkdir(parents=True, exist_ok=True)
+            author_env.write_text(
+                f"""RUN_ID={run_id}
+RUN_START_MTIME=0
+AGENT=claude-code
+AGENT_MODEL=sonnet
+AGENT_REASONING_EFFORT=high
+PRD=dataset/prds/notes/prd/mvp.txt
+METRO_MODE=release
+SCENARIO=skills_available_unmentioned
+""",
+                encoding="utf-8",
+            )
+            workspace.mkdir(parents=True, exist_ok=True)
+            (workspace / "package.json").write_text("{}", encoding="utf-8")
+
+            credential_dump = " ".join(
+                f'"${{{name}:-}}"' for name in (
+                    "CLAUDE_CODE_OAUTH_TOKEN",
+                    "ANTHROPIC_API_KEY",
+                    "ANTHROPIC_AUTH_TOKEN",
+                    "OPENAI_API_KEY",
+                    "META_API_KEY",
+                    "MUSE_API_KEY",
+                    "EXPO_TOKEN",
+                    "EXPO_MCP_BEARER_TOKEN",
+                    "EXPO_MCP_REFRESH_TOKEN",
+                    "MUSE_MCP_TOKEN",
+                    "BRAINTRUST_API_KEY",
+                    "GCP_SA_KEY",
+                    "GOOGLE_APPLICATION_CREDENTIALS",
+                    "GCS_BUCKET",
+                )
+            )
+            (fake_bin / "npm").write_text(
+                f"""#!/usr/bin/env bash
+printf '%s\\n' {credential_dump} "$PRESERVED_BUILD_CONTEXT"
+mkdir -p "$OUT/telemetry"
+printf '%s\\n' {credential_dump} >"$OUT/telemetry/authored-npm.txt"
+""",
+                encoding="utf-8",
+            )
+            (fake_bin / "npx").write_text(
+                f"""#!/usr/bin/env bash
+printf '%s\\n' {credential_dump} "$PRESERVED_BUILD_CONTEXT" >&2
+mkdir -p "$OUT/telemetry"
+printf '%s\\n' {credential_dump} >"$OUT/telemetry/authored-expo.txt"
+if [[ "$*" = *"expo config --json" ]]; then
+  printf '%s\\n' '{{"scheme":"fixture","ios":{{"bundleIdentifier":"com.example.fixture"}}}}'
+elif [ "$*" = "expo run:ios --help" ]; then
+  printf '%s\\n' 'Usage: expo run:ios [options]' '  --output <dir>'
+fi
+""",
+                encoding="utf-8",
+            )
+            (fake_bin / "bun").write_text(
+                f"""#!/usr/bin/env bash
+set -eu
+trace_out=''; build_out=''; previous=''
+for argument in "$@"; do
+  [ "$previous" != '--out' ] || trace_out="$argument"
+  [ "$previous" != '--output' ] || build_out="$argument"
+  previous="$argument"
+done
+if [ -n "$trace_out" ]; then
+  mkdir -p "$(dirname "$trace_out")"
+  printf '%s\\n' '{{"n_sessions":0,"sessions":[]}}' >"$trace_out"
+fi
+if [ -n "$build_out" ]; then
+  printf '%s\\n' {credential_dump} "$PRESERVED_BUILD_CONTEXT"
+  mkdir -p "$OUT/telemetry"
+  printf '%s\\n' {credential_dump} >"$OUT/telemetry/authored-native.txt"
+  mkdir -p "$build_out/Fixture.app"
+  printf '%s\\n' '<?xml version="1.0"?><plist version="1.0"><dict><key>MinimumOSVersion</key><string>26.0</string></dict></plist>' >"$build_out/Fixture.app/Info.plist"
+fi
+""",
+                encoding="utf-8",
+            )
+            (fake_bin / "agent-device").write_text(
+                "#!/usr/bin/env bash\nexit 0\n",
+                encoding="utf-8",
+            )
+            for executable_path in fake_bin.iterdir():
+                executable_path.chmod(0o755)
+
+            secret = "EVALUATOR_SECRET_SENTINEL_73f1"
+            env = os.environ.copy()
+            env.update(
+                {
+                    "PATH": f"{fake_bin}:{env['PATH']}",
+                    "AUTHOR_ENV": str(author_env),
+                    "EXPECTED_EVALUATOR_SECRET": secret,
+                    "PRESERVED_BUILD_CONTEXT": "preserved-build-context",
+                    "CLAUDE_CODE_OAUTH_TOKEN": secret,
+                    "ANTHROPIC_API_KEY": secret,
+                    "ANTHROPIC_AUTH_TOKEN": secret,
+                    "OPENAI_API_KEY": secret,
+                    "META_API_KEY": secret,
+                    "MUSE_API_KEY": secret,
+                    "EXPO_TOKEN": secret,
+                    "EXPO_MCP_BEARER_TOKEN": secret,
+                    "EXPO_MCP_REFRESH_TOKEN": secret,
+                    "MUSE_MCP_TOKEN": secret,
+                    "BRAINTRUST_API_KEY": secret,
+                    "GCP_SA_KEY": secret,
+                    "GOOGLE_APPLICATION_CREDENTIALS": secret,
+                    "GCS_BUCKET": secret,
+                }
+            )
+            result = subprocess.run(
+                ["bash", str(script)],
+                cwd=root,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            retained = "\n".join(
+                path.read_text(encoding="utf-8", errors="ignore")
+                for path in artifact.rglob("*")
+                if path.is_file()
+            )
+            self.assertNotIn(secret, retained)
+            self.assertIn("preserved-build-context", retained)
+
+    def test_dev_client_dependency_install_uses_authored_credential_boundary(self) -> None:
+        """Dev-client provisioning can execute package hooks and must be scrubbed."""
+        source = SCRIPT.read_text(encoding="utf-8")
+        self.assertIn(
+            'eval::run_authored npx --yes expo install expo-dev-client',
+            source,
+        )
+
     def test_spec_completed_result_requires_numeric_score_fields(self) -> None:
         """Specification: a green evaluation contains a usable score artifact.
 
@@ -587,10 +785,7 @@ SCENARIO=skills_available_unmentioned
             stages.parent.mkdir(parents=True, exist_ok=True)
             identity.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(SCRIPT, script)
-            shutil.copy2(
-                ROOT / "eval_harness/utils/artifacts/collect_ios_artifact.sh",
-                collector,
-            )
+            copy_ios_collector(collector)
             shutil.copy2(
                 ROOT / "eval_harness/utils/artifacts/create_diagnostic_artifact.py",
                 diagnostic,
@@ -613,6 +808,7 @@ eval::install_uv_and_evaluator() { :; }
 eval::launch_proxy() { :; }
 eval::wait_for_port() { return 0; }
 eval::launch_otlp_receiver() { :; }
+eval::run_authored() { "$@"; }
 eval::npm_install() { return 0; }
 eval::configure_ios_app_mode() { EVAL_IOS_APP_MODE=release; export EVAL_IOS_APP_MODE; }
 eval::boot_sim_and_runner() {

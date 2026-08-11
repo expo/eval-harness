@@ -178,7 +178,7 @@ eval::configure_ios_app_mode || {
 echo "  iOS app mode: $EVAL_IOS_APP_MODE"
 if [ "$EVAL_IOS_APP_MODE" = "dev-client" ]; then
   echo "  ensuring expo-dev-client is installed (dev-build deep-link handshake)"
-  ( cd "$WORKSPACE" && npx --yes expo install expo-dev-client ) >"$OUT/d-devclient.log" 2>&1 \
+  ( cd "$WORKSPACE" && eval::run_authored npx --yes expo install expo-dev-client ) >"$OUT/d-devclient.log" 2>&1 \
     || echo "  ⚠️  expo install expo-dev-client failed (see d-devclient.log)"
 
   DEV_CLIENT_DEFAULT_URL="${DEV_CLIENT_DEFAULT_URL:-http://localhost:8081}"
@@ -188,7 +188,7 @@ if [ "$EVAL_IOS_APP_MODE" = "dev-client" ]; then
 fi
 
 BUNDLE_ID=""; SCHEME=""; EXPO_CONFIG_RESOLVED=0
-if ( cd "$WORKSPACE" && npx --yes expo config --json >"$OUT/d-expo-config.json" 2>"$OUT/d-expo-config.err" ); then
+if ( cd "$WORKSPACE" && eval::run_authored npx --yes expo config --json >"$OUT/d-expo-config.json" 2>"$OUT/d-expo-config.err" ); then
   EXPO_CONFIG_RESOLVED=1
   BUNDLE_ID="$(python3 -c "import json; d=json.load(open('$OUT/d-expo-config.json')); print((d.get('ios') or {}).get('bundleIdentifier') or '')" 2>/dev/null)"
   SCHEME="$(python3 -c "import json; d=json.load(open('$OUT/d-expo-config.json')); s=d.get('scheme'); print((s[0] if isinstance(s,list) else s) or '')" 2>/dev/null)"
@@ -209,7 +209,7 @@ if ! node "$ROOT/eval_harness/utils/ios/normalize_ios_identity.mjs" \
   IOS_NATIVE_BUILD_LOG="logs/d-ios-identity-normalize.log"
   eval_fail native_build "evaluator could not normalize the iOS app identity; see logs/d-ios-identity-normalize.log"
 fi
-if ! ( cd "$WORKSPACE" && npx --yes expo config --json >"$OUT/d-expo-config.normalized.json" 2>>"$OUT/d-expo-config.err" ); then
+if ! ( cd "$WORKSPACE" && eval::run_authored npx --yes expo config --json >"$OUT/d-expo-config.normalized.json" 2>>"$OUT/d-expo-config.err" ); then
   IOS_NATIVE_BUILD_STATUS=failed
   IOS_NATIVE_BUILD_LOG="logs/d-expo-config.err"
   eval_fail native_build "normalized Expo config could not be resolved; see logs/d-expo-config.err"
