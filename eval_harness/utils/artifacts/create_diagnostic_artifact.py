@@ -34,6 +34,7 @@ def parse_args() -> argparse.Namespace:
         default="failed",
     )
     parser.add_argument("--required-ios-version", default="")
+    parser.add_argument("--selected-ios-version", default="")
     parser.add_argument("--available-ios-versions-json", default="[]")
     parser.add_argument(
         "--preserve-existing",
@@ -196,6 +197,16 @@ def create_ios(out: Path, author: dict[str, Any], args: argparse.Namespace) -> N
         "full_points": None,
         "macro_avg_pct": None,
         "micro_pct": None,
+        "environment": {
+            "selected_ios": args.selected_ios_version or None,
+            "required_ios": args.required_ios_version or None,
+            "available_ios": available_ios_versions(args),
+            "classification": (
+                "unsupported_environment"
+                if args.classification == "unsupported_environment"
+                else None
+            ),
+        },
         "build_health": build_health,
         "artifacts": {
             "result": "result.json",

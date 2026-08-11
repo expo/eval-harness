@@ -112,6 +112,7 @@ if [ ! -f "$OUT/result.json" ] || [ ! -f "$OUT/report.html" ]; then
     diagnostic_args+=(
       --classification unsupported_environment
       --required-ios-version "${IOS_REQUIRED_VERSION:-}"
+      --selected-ios-version "${EVAL_IOS_RUNTIME_VERSION:-}"
       --available-ios-versions-json "${EVAL_IOS_AVAILABLE_RUNTIME_VERSIONS_JSON:-[]}"
     )
   fi

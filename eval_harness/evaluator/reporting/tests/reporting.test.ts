@@ -224,6 +224,12 @@ describe("normalizeRun", () => {
     health.native_build = { status: "passed", detail: null, log: "logs/s6-release.log" };
     health.app_launch = { status: "warning", detail: reason, log: "logs/s6-release.log" };
     health.evaluation = { status: "not_run", detail: null, log: null };
+    manifest.environment = {
+      selected_ios: "26.5",
+      required_ios: "27.0",
+      available_ios: ["26.5", "18.6"],
+      classification: "unsupported_environment",
+    };
     writeJson(join(args.iosArtifact!, "manifest.json"), manifest);
 
     const summary = await normalizeRun(args);
@@ -241,6 +247,126 @@ describe("normalizeRun", () => {
     expect(summary.warnings.join(" ")).not.toContain("result is non-terminal");
     expect(summary.warnings.join(" ")).not.toContain("non-terminal build or evaluation stage");
     expect(summary.warnings).not.toContain("iOS evaluator job failed");
+  });
+
+  test("failed iOS job trusts only canonical unsupported-environment evidence", async () => {
+    // Catches a malformed result or inconsistent producer manifest suppressing
+    // the authoritative failed EAS job state merely by naming the status.
+    const malformedRoot = tempRoot();
+    const malformed = inputs(malformedRoot, { skill: false, ios: true });
+    malformed.iosJobStatus = "failure";
+    malformed.skillJobStatus = "skipped";
+    const reason = "authored app requires iOS 27.0; available iOS simulator runtimes: 26.5";
+    writeJson(join(malformed.iosArtifact!, "result.json"), {
+      status: "unsupported_environment",
+      expected_plan_count: 1,
+      terminal_plan_count: 0,
+      macro_avg_pct: null,
+      evaluator_errors: [],
+      test_plans: [],
+      environment: { required_ios: "27.0", available_ios: ["26.5"] },
+      reason,
+    });
+    const malformedManifest = readJson(join(malformed.iosArtifact!, "manifest.json"));
+    const malformedHealth = malformedManifest.build_health as Record<string, unknown>;
+    malformedHealth.native_build = { status: "passed", detail: null, log: "logs/s6-release.log" };
+    malformedHealth.app_launch = { status: "warning", detail: reason, log: "logs/s6-release.log" };
+    malformedHealth.evaluation = { status: "not_run", detail: null, log: null };
+    malformedManifest.environment = {
+      selected_ios: "26.5",
+      required_ios: "27.0",
+      available_ios: ["26.5"],
+      classification: "unsupported_environment",
+    };
+    writeJson(join(malformed.iosArtifact!, "manifest.json"), malformedManifest);
+
+    const malformedSummary = await normalizeRun(malformed);
+
+    expect(malformedSummary.status).toBe("failed");
+    expect(malformedSummary.scores.ios_macro_pct).toBeNull();
+    expect(malformedSummary.warnings).toContain("iOS evaluator job failed");
+    expect(malformedSummary.warnings.join(" ")).toContain("required fields are invalid");
+    expect(malformedSummary.warnings.join(" ")).not.toContain("iOS environment unsupported:");
+
+    const inconsistentRoot = tempRoot();
+    const inconsistent = inputs(inconsistentRoot, { skill: false, ios: true });
+    inconsistent.iosJobStatus = "failure";
+    inconsistent.skillJobStatus = "skipped";
+    writeJson(join(inconsistent.iosArtifact!, "result.json"), {
+      status: "unsupported_environment",
+      expected_plan_count: 0,
+      terminal_plan_count: 0,
+      macro_avg_pct: null,
+      evaluator_errors: [],
+      test_plans: [],
+      environment: { required_ios: "27.0", available_ios: ["26.5"] },
+      reason,
+    });
+
+    const inconsistentSummary = await normalizeRun(inconsistent);
+
+    expect(inconsistentSummary.status).toBe("failed");
+    expect(inconsistentSummary.scores.ios_macro_pct).toBeNull();
+    expect(inconsistentSummary.warnings).toContain("iOS evaluator job failed");
+    expect(inconsistentSummary.warnings.join(" ")).not.toContain("iOS environment unsupported:");
+
+    const missingManifestRoot = tempRoot();
+    const missingManifest = inputs(missingManifestRoot, { skill: false, ios: true });
+    missingManifest.iosJobStatus = "failure";
+    missingManifest.skillJobStatus = "skipped";
+    writeJson(join(missingManifest.iosArtifact!, "result.json"), {
+      status: "unsupported_environment",
+      expected_plan_count: 0,
+      terminal_plan_count: 0,
+      macro_avg_pct: null,
+      evaluator_errors: [],
+      test_plans: [],
+      environment: { required_ios: "27.0", available_ios: ["26.5"] },
+      reason,
+    });
+    rmSync(join(missingManifest.iosArtifact!, "manifest.json"));
+
+    const missingManifestSummary = await normalizeRun(missingManifest);
+
+    expect(missingManifestSummary.status).toBe("failed");
+    expect(missingManifestSummary.scores.ios_macro_pct).toBeNull();
+    expect(missingManifestSummary.warnings).toContain("iOS evaluator job failed");
+    expect(missingManifestSummary.warnings.join(" ")).toContain("iOS artifact is incomplete:");
+    expect(missingManifestSummary.warnings.join(" ")).not.toContain("iOS environment unsupported:");
+
+    const nonNewerRoot = tempRoot();
+    const nonNewer = inputs(nonNewerRoot, { skill: false, ios: true });
+    nonNewer.iosJobStatus = "failure";
+    nonNewer.skillJobStatus = "skipped";
+    const nonNewerReason = "authored app requires iOS 26.5; available iOS simulator runtimes: 26.5";
+    writeJson(join(nonNewer.iosArtifact!, "result.json"), {
+      status: "unsupported_environment",
+      expected_plan_count: 0,
+      terminal_plan_count: 0,
+      macro_avg_pct: null,
+      evaluator_errors: [],
+      test_plans: [],
+      environment: { required_ios: "26.5", available_ios: ["26.5"] },
+      reason: nonNewerReason,
+    });
+    const nonNewerManifest = readJson(join(nonNewer.iosArtifact!, "manifest.json"));
+    const nonNewerHealth = nonNewerManifest.build_health as Record<string, unknown>;
+    nonNewerHealth.native_build = { status: "passed", detail: null, log: "logs/s6-release.log" };
+    nonNewerHealth.app_launch = { status: "warning", detail: nonNewerReason, log: "logs/s6-release.log" };
+    nonNewerHealth.evaluation = { status: "not_run", detail: null, log: null };
+    nonNewerManifest.environment = {
+      selected_ios: "26.5",
+      required_ios: "26.5",
+      available_ios: ["26.5"],
+      classification: "unsupported_environment",
+    };
+    writeJson(join(nonNewer.iosArtifact!, "manifest.json"), nonNewerManifest);
+
+    const nonNewerSummary = await normalizeRun(nonNewer);
+
+    expect(nonNewerSummary.status).toBe("failed");
+    expect(nonNewerSummary.warnings).toContain("iOS evaluator job failed");
+    expect(nonNewerSummary.warnings.join(" ")).not.toContain("iOS environment unsupported:");
   });
 
   test("rejects authoritative JSON symlinks, hardlinks, and FIFOs", async () => {

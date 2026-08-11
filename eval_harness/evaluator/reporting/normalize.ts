@@ -242,6 +242,66 @@ function validateIosManifestFields(value: JsonRecord | null): string | null {
   return null;
 }
 
+function equalStringArrays(left: unknown, right: unknown): boolean {
+  return Array.isArray(left) && Array.isArray(right) &&
+    left.every((item) => typeof item === "string") &&
+    right.every((item) => typeof item === "string") &&
+    left.length === right.length && left.every((item, index) => item === right[index]);
+}
+
+function iosVersionIsNewer(required: unknown, selected: unknown): boolean {
+  if (
+    typeof required !== "string" || typeof selected !== "string" ||
+    !/^[0-9]{1,3}(?:\.[0-9]{1,3}){0,3}$/.test(required) ||
+    !/^[0-9]{1,3}(?:\.[0-9]{1,3}){0,3}$/.test(selected)
+  ) {
+    return false;
+  }
+  const requiredParts = required.split(".").map(Number);
+  const selectedParts = selected.split(".").map(Number);
+  const length = Math.max(requiredParts.length, selectedParts.length);
+  for (let index = 0; index < length; index += 1) {
+    const requiredPart = requiredParts[index] ?? 0;
+    const selectedPart = selectedParts[index] ?? 0;
+    if (requiredPart !== selectedPart) return requiredPart > selectedPart;
+  }
+  return false;
+}
+
+function validUnsupportedIosEvidence(
+  result: JsonRecord | null,
+  resultValid: boolean,
+  manifest: JsonRecord | null,
+  manifestValid: boolean,
+): boolean {
+  if (!resultValid || result?.status !== "unsupported_environment" || !manifestValid) {
+    return false;
+  }
+  const resultEnvironment = record(result.environment);
+  const manifestEnvironment = record(manifest?.environment);
+  const health = record(manifest?.build_health);
+  const nativeBuild = record(health?.native_build);
+  const appLaunch = record(health?.app_launch);
+  const evaluation = record(health?.evaluation);
+  const requiredIos = resultEnvironment?.required_ios;
+  const selectedIos = manifestEnvironment?.selected_ios;
+  const availableIos = manifestEnvironment?.available_ios;
+  return resultEnvironment !== null && manifestEnvironment !== null &&
+    nonEmptyString(result.reason) &&
+    nonEmptyString(requiredIos) && nonEmptyString(selectedIos) &&
+    iosVersionIsNewer(requiredIos, selectedIos) &&
+    manifestEnvironment.classification === "unsupported_environment" &&
+    manifestEnvironment.required_ios === requiredIos &&
+    Array.isArray(availableIos) && availableIos.length > 0 &&
+    availableIos.includes(selectedIos) &&
+    equalStringArrays(availableIos, resultEnvironment.available_ios) &&
+    Array.isArray(result.test_plans) && result.test_plans.length === 0 &&
+    nativeBuild?.status === "passed" &&
+    nativeBuild.detail === null &&
+    appLaunch?.status === "warning" && appLaunch.detail === result.reason &&
+    evaluation?.status === "not_run" && evaluation.detail === null;
+}
+
 function nullableFiniteNumber(value: unknown): boolean {
   return value === null || (typeof value === "number" && Number.isFinite(value));
 }
@@ -943,6 +1003,7 @@ async function normalizeInto(inputs: ReportInputs): Promise<ConsolidatedSummary>
 
   let iosManifest: ReadJsonResult | null = null;
   let iosResult: ReadJsonResult | null = null;
+  let iosManifestValid = false;
   let iosResultValid = false;
   if (iosRoot === null) {
     warnings.push("iOS evaluation was not supplied (disabled or unavailable)");
@@ -955,6 +1016,8 @@ async function normalizeInto(inputs: ReportInputs): Promise<ConsolidatedSummary>
       warnings.push(
         `iOS artifact is incomplete: ${manifestError ?? manifestFieldsError}`,
       );
+    } else {
+      iosManifestValid = true;
     }
     iosResult = await readJson(iosRoot, "result.json");
     if (iosResult.error !== null) {
@@ -985,7 +1048,12 @@ async function normalizeInto(inputs: ReportInputs): Promise<ConsolidatedSummary>
 
   const metrics = skillMetrics?.value ?? null;
   const result = iosResult?.value ?? null;
-  const iosEnvironmentUnsupported = result?.status === "unsupported_environment";
+  const iosEnvironmentUnsupported = validUnsupportedIosEvidence(
+    result,
+    iosResultValid,
+    iosManifest?.value ?? null,
+    iosManifestValid,
+  );
   if (
     inputs.iosJobStatus === "failure" && iosRoot !== null &&
     !iosEnvironmentUnsupported

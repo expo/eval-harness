@@ -154,6 +154,16 @@ for pattern in (
 PY
 }
 
+eval::ios_newer_required_version_from_log() { # log
+  local log="$1" required_version
+  eval::ios_runtime_mismatch_in_log "$log" || return 1
+  required_version="$(eval::ios_required_version_from_log "$log")"
+  [ -n "$required_version" ] || return 1
+  [ -n "${EVAL_IOS_RUNTIME_VERSION:-}" ] || return 1
+  eval::ios_version_is_newer "$required_version" "$EVAL_IOS_RUNTIME_VERSION" || return 1
+  printf '%s\n' "$required_version"
+}
+
 eval::mark_ios_runtime_unsupported() { # required
   local required="$1" available_detail
   available_detail="$(eval::ios_available_runtime_detail)"
@@ -190,8 +200,7 @@ eval::build_release_ios_app() { # app_dir out_dir device_udid
         --configuration Release --device generic --output "$build_output" ) >"$out/s6-release.log" 2>&1
     rc=$?
     if [ "$rc" != 0 ]; then
-      if eval::ios_runtime_mismatch_in_log "$out/s6-release.log"; then
-        required_version="$(eval::ios_required_version_from_log "$out/s6-release.log")"
+      if required_version="$(eval::ios_newer_required_version_from_log "$out/s6-release.log")"; then
         eval::mark_ios_runtime_unsupported "$required_version"
         rc=$?
       else
@@ -220,8 +229,7 @@ eval::build_release_ios_app() { # app_dir out_dir device_udid
           if [ "$rc" = 0 ]; then
             EVAL_IOS_INSTALL_OUTCOME=passed
             export EVAL_IOS_INSTALL_OUTCOME
-          elif eval::ios_runtime_mismatch_in_log "$out/s6-release.log"; then
-            [ -n "$required_version" ] || required_version="$(eval::ios_required_version_from_log "$out/s6-release.log")"
+          elif required_version="$(eval::ios_newer_required_version_from_log "$out/s6-release.log")"; then
             eval::mark_ios_runtime_unsupported "$required_version"
             rc=$?
           else
@@ -255,10 +263,14 @@ eval::build_release_ios_app() { # app_dir out_dir device_udid
         EVAL_IOS_NATIVE_BUILD_OUTCOME=passed
         EVAL_IOS_INSTALL_OUTCOME=passed
         export EVAL_IOS_NATIVE_BUILD_OUTCOME EVAL_IOS_INSTALL_OUTCOME
-      elif eval::ios_runtime_mismatch_in_log "$out/s6-release.log"; then
-        [ -n "$required_version" ] || required_version="$(eval::ios_required_version_from_log "$out/s6-release.log")"
+      elif required_version="$(eval::ios_newer_required_version_from_log "$out/s6-release.log")"; then
         eval::mark_ios_runtime_unsupported "$required_version"
         rc=$?
+      elif [ -n "$release_app" ] && [ -f "$release_app/Info.plist" ] && \
+          grep -Eiq -- '(^|[^[:alpha:]])BUILD[[:space:]]+SUCCEEDED([^[:alpha:]]|$)' "$out/s6-release.log"; then
+        EVAL_IOS_NATIVE_BUILD_OUTCOME=passed
+        EVAL_IOS_INSTALL_OUTCOME=failed
+        export EVAL_IOS_NATIVE_BUILD_OUTCOME EVAL_IOS_INSTALL_OUTCOME
       else
         EVAL_IOS_NATIVE_BUILD_OUTCOME=failed
         export EVAL_IOS_NATIVE_BUILD_OUTCOME
@@ -332,10 +344,11 @@ eval::probe_blocking_app_shell_error() { # snapshot_file
 
 eval::probe_snapshot() { # out_dir app_id
   local out="$1" app_id="${2:-host.exp.Exponent}"
+  local sim_device="${EVAL_DEV_UDID:-booted}"
   echo "================= STAGE 6b: agent-device probe (open $app_id + snapshot) ================="
   local rc open_label
   if [ "${EVAL_APP_USE_SIMCTL_LAUNCH:-}" = "1" ]; then
-    xcrun simctl launch booted "$app_id" >"$out/s6b-open.log" 2>&1
+    xcrun simctl launch "$sim_device" "$app_id" >"$out/s6b-open.log" 2>&1
     rc=$?
     open_label="simctl launch $app_id + agent-device session bind"
     if [ "$rc" = 0 ]; then
@@ -343,7 +356,7 @@ eval::probe_snapshot() { # out_dir app_id
       rc=$?
     fi
   elif [ -n "${EVAL_APP_DEEP_LINK:-}" ]; then
-    xcrun simctl openurl booted "$EVAL_APP_DEEP_LINK" >"$out/s6b-open.log" 2>&1
+    xcrun simctl openurl "$sim_device" "$EVAL_APP_DEEP_LINK" >"$out/s6b-open.log" 2>&1
     rc=$?
     open_label="simctl openurl dev-client deep link + agent-device session bind"
     if [ "$rc" = 0 ]; then
@@ -386,7 +399,7 @@ eval::probe_snapshot() { # out_dir app_id
     fi
     if grep -Eq 'Recently opened|Development servers|Enter URL manually|Scan QR code' "$out/s6b-snap.log"; then
       echo "  Expo dev-client launcher is visible; re-opening dev-client URL (attempt $i)" >>"$out/s6b-open.log"
-      [ -n "${EVAL_APP_DEEP_LINK:-}" ] && xcrun simctl openurl booted "$EVAL_APP_DEEP_LINK" >>"$out/s6b-open.log" 2>&1 || true
+      [ -n "${EVAL_APP_DEEP_LINK:-}" ] && xcrun simctl openurl "$sim_device" "$EVAL_APP_DEEP_LINK" >>"$out/s6b-open.log" 2>&1 || true
       sleep 2
       continue
     fi

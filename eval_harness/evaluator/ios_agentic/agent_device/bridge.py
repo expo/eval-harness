@@ -130,6 +130,7 @@ class AgentDeviceBridge:
         if deep_link:
             cfg["deep_link"] = deep_link
         self.config = cfg
+        self.simulator = os.environ.get("EVAL_DEV_UDID") or "booted"
         if verbose:
             print(f"  [bridge] app_id={cfg['app_id']} deep_link={cfg['deep_link']}")
         # Common flags appended to every agent-device call.
@@ -1154,7 +1155,7 @@ class AgentDeviceBridge:
         # state, causing a 15-20s session-rebuild that breaks the first 1-2
         # interactions with the target app. Leave it alone.
 
-        self._simctl(["terminate", "booted", app_id])
+        self._simctl(["terminate", self.simulator, app_id])
 
         # 2: clearState equivalent — wipe app data subdirs. Historically we
         # preserved dev-client data because its launcher state also lived in the
@@ -1167,7 +1168,10 @@ class AgentDeviceBridge:
         elif clear_state:
             if self.verbose and is_dev_client:
                 print("  [bridge] clearing dev-client container state during restart")
-            info = self._simctl(["get_app_container", "booted", app_id, "data"], timeout=10)
+            info = self._simctl(
+                ["get_app_container", self.simulator, app_id, "data"],
+                timeout=10,
+            )
             if info.success and info.output:
                 data_path = info.output
                 for sub in ("Documents", "Library", "tmp"):
@@ -1181,11 +1185,11 @@ class AgentDeviceBridge:
         # can replay stale LAN URLs after a process restart, while the captured
         # URL is the current Metro endpoint for this workflow run.
         if use_simctl_launch:
-            self._simctl(["launch", "booted", app_id], timeout=30)
+            self._simctl(["launch", self.simulator, app_id], timeout=30)
         elif is_dev_client:
-            self._simctl(["openurl", "booted", deep_link], timeout=30)
+            self._simctl(["openurl", self.simulator, deep_link], timeout=30)
         else:
-            self._simctl(["openurl", "booted", deep_link])
+            self._simctl(["openurl", self.simulator, deep_link])
         # Brief settle: let Expo Go's process come up before any agent-device
         # interaction. Without this, our first snapshot can race the JS
         # bundle load and trigger an unnecessary session rebuild.
@@ -1308,7 +1312,7 @@ class AgentDeviceBridge:
                     print(f"  [bridge] dismissing reconnect alert: {self._debug_node_summary(nodes)}")
                 self._run_cmd(["press", 'label="OK"'])
                 if is_dev_client:
-                    self._simctl(["openurl", "booted", deep_link], timeout=30)
+                    self._simctl(["openurl", self.simulator, deep_link], timeout=30)
                 dismiss_attempts += 1
                 time.sleep(2.0)
                 if dismiss_attempts > 9:
@@ -1331,9 +1335,9 @@ class AgentDeviceBridge:
                 if self.verbose:
                     print(f"  [bridge] dev-client launcher visible: {self._debug_node_summary(nodes)}")
                 if is_dev_client:
-                    self._simctl(["openurl", "booted", deep_link], timeout=30)
+                    self._simctl(["openurl", self.simulator, deep_link], timeout=30)
                 else:
-                    self._simctl(["openurl", "booted", deep_link])
+                    self._simctl(["openurl", self.simulator, deep_link])
                 dismiss_attempts += 1
                 time.sleep(2.0)
                 if dismiss_attempts > 9:

@@ -67,8 +67,10 @@ class SequencedAlertRestartBridge(AgentDeviceBridge):
         self.snapshots = list(snapshots)
         self.last_snapshot = snapshots[-1]
         self.commands: list[list[str]] = []
+        self.simctl_commands: list[list[str]] = []
 
     def _simctl(self, args: list[str], timeout: int = 15) -> AgentDeviceResult:
+        self.simctl_commands.append(args)
         return AgentDeviceResult(success=True, output="ok")
 
     def _snapshot_raw(self) -> list[dict]:
@@ -197,6 +199,67 @@ class AgentDeviceBridgeFillTests(unittest.TestCase):
 
 
 class AgentDeviceBridgeRestartTests(unittest.TestCase):
+    @patch.dict(
+        os.environ,
+        {"EVAL_DEV_UDID": "SELECTED-UDID", "EVAL_DEV_CLIENT_CLEAR_STATE": "1"},
+    )
+    @patch("eval_harness.evaluator.ios_agentic.agent_device.bridge.time.sleep")
+    def test_simctl_lifecycle_targets_selected_simulator_udid(self, _sleep) -> None:
+        """Every native lifecycle operation stays on the selected runtime.
+
+        Catches: using the ambiguous `booted` alias after simulator selection
+        boots a higher runtime while a lower-runtime device remains booted.
+        """
+        bridge = RecordingDevClientRestartBridge()
+
+        result = bridge.restart_app(clear_state=True)
+
+        self.assertTrue(result.success, result.error)
+        self.assertEqual(
+            bridge.simctl_commands,
+            [
+                ["terminate", "SELECTED-UDID", "com.example.authored"],
+                [
+                    "get_app_container",
+                    "SELECTED-UDID",
+                    "com.example.authored",
+                    "data",
+                ],
+                [
+                    "openurl",
+                    "SELECTED-UDID",
+                    "example://expo-development-client/"
+                    "?url=http%3A%2F%2Flocalhost%3A8081",
+                ],
+            ],
+        )
+
+    @patch.dict(os.environ, {"EVAL_DEV_UDID": "SELECTED-UDID"})
+    @patch("eval_harness.evaluator.ios_agentic.agent_device.bridge.time.sleep")
+    def test_dev_client_retry_reopens_selected_simulator_udid(self, _sleep) -> None:
+        """Launcher recovery cannot drift to another booted simulator."""
+        bridge = SequencedAlertRestartBridge(
+            [
+                [
+                    {"type": "Application", "label": "Development servers"},
+                    {"type": "StaticText", "label": "Recently opened"},
+                ],
+                authored_content(),
+            ]
+        )
+
+        result = bridge.restart_app(clear_state=False)
+
+        self.assertTrue(result.success, result.error)
+        self.assertEqual(
+            bridge.simctl_commands,
+            [
+                ["terminate", "SELECTED-UDID", "com.example.authored"],
+                ["openurl", "SELECTED-UDID", "example://ready"],
+                ["openurl", "SELECTED-UDID", "example://ready"],
+            ],
+        )
+
     @patch("eval_harness.evaluator.ios_agentic.agent_device.bridge.time.sleep")
     def test_spec_preflight_neutrally_dismisses_known_permission_alerts(
         self,

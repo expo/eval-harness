@@ -178,6 +178,8 @@ class DiagnosticArtifactTests(unittest.TestCase):
             "unsupported_environment",
             "--required-ios-version",
             "27.0",
+            "--selected-ios-version",
+            "26.5",
             "--available-ios-versions-json",
             '["26.5", "18.6"]',
         ]
@@ -199,6 +201,15 @@ class DiagnosticArtifactTests(unittest.TestCase):
         self.assertEqual(manifest["build_health"]["native_build"]["status"], "passed")
         self.assertEqual(manifest["build_health"]["app_launch"]["status"], "warning")
         self.assertEqual(manifest["build_health"]["evaluation"]["status"], "not_run")
+        self.assertEqual(
+            manifest["environment"],
+            {
+                "selected_ios": "26.5",
+                "required_ios": "27.0",
+                "available_ios": ["26.5", "18.6"],
+                "classification": "unsupported_environment",
+            },
+        )
         self.assertIn("unsupported", (output / "report.html").read_text(encoding="utf-8").lower())
 
 
