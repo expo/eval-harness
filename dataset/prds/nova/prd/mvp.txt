@@ -1,0 +1,215 @@
+Nova — Deterministic Streaming Chat (MVP)
+
+## Overview
+
+Nova is a single-user chat application with a native mobile conversation
+experience. The user can start conversations, send messages, watch Nova's reply
+arrive incrementally, stop a reply, retry a failed reply, and manage locally
+persisted conversation history.
+
+Nova behaves like an AI chat product but does not call a live model. Responses
+come from deterministic, bundled scenarios so streaming, failure recovery, and
+history management work without an API key, network connection, or external
+service.
+
+## Target Platforms And Persistence
+
+- Must work on iOS and Android with Expo SDK 57.x.
+- Conversation and message data persists locally across cold app restarts.
+- The app has no account, sign-in screen, cloud sync, or server database.
+- Layouts respect the status bar, screen cutouts, home indicator, tab or drawer
+  chrome, and the soft keyboard.
+- System light and dark appearance changes update visible surfaces without a
+  relaunch or layout flash.
+
+## Conversation Model
+
+A conversation contains:
+
+- a stable identifier;
+- a title;
+- created and last-updated timestamps;
+- an ordered list of user and Nova messages.
+
+A message contains:
+
+- a stable identifier;
+- its conversation identifier;
+- role: `user` or `nova`;
+- plain-text content;
+- state: `complete`, `stopped`, or `error`;
+- a creation timestamp.
+
+The drawer sorts conversations by last-updated timestamp, newest first.
+
+## Fresh Conversation And Empty State
+
+On the very first launch, and whenever the user taps `New chat`, the main screen
+shows a fresh unsaved conversation.
+
+The empty state includes:
+
+- the title `Nova`;
+- the message `How can I help?`;
+- a multiline composer with placeholder `Message Nova`;
+- a send action labelled `Send`.
+
+The empty state is visible only while the current conversation has no messages.
+It disappears immediately after the first user message is sent.
+
+A fresh conversation is not added to the drawer until its first message is
+sent. Sending that message creates exactly one conversation record. Its initial
+title is the first user message trimmed to a maximum of 40 visible characters;
+longer titles end in an ellipsis.
+
+## Composer And Keyboard
+
+- The composer accepts multiple lines and grows until a reasonable maximum
+  height, after which its own content scrolls.
+- `Send` is disabled when the composer is empty or contains only whitespace.
+- `Send` is enabled when the composer contains non-whitespace text.
+- Sending clears the composer immediately and appends the user message once.
+- While Nova is responding, `Send` is disabled and a `Stop` action replaces or
+  appears next to it.
+- The composer stays visible above the keyboard on supported screen sizes.
+- Dragging or scrolling the message list down dismisses the keyboard
+  interactively. Tapping outside the composer may also dismiss it.
+
+## Deterministic Streaming Responses
+
+After a user message is appended, show a visible `Nova is responding` loading
+state until the first response text arrives.
+
+Every successful Nova response must arrive in at least three separately
+rendered chunks with a short deterministic delay between chunks. Text visibly
+grows in the existing Nova message rather than appearing all at once or as
+separate message rows.
+
+Use these bundled scenarios:
+
+1. Exact prompt `Hey Nova, introduce yourself`
+   - Stream: `I'm Nova, a deterministic chat companion. I respond in small`
+     ` chunks so this app can demonstrate a real streaming conversation`
+     ` without relying on an external service.`
+2. Exact prompt `Tell me a long story`
+   - Stream at least three short paragraphs totalling at least 500 visible
+     characters so scroll anchoring and Stop remain exercisable.
+3. Exact prompt `Simulate an error`
+   - The first attempt enters the error state described below.
+   - Retrying the failed turn streams: `The retry worked. This deterministic`
+     ` response replaces the earlier error without duplicating your message.`
+4. Any other prompt
+   - Stream: `You said: <trimmed user text>. Nova is using a bundled response`
+     ` for this offline evaluation.`
+
+Prompt matching for the three named scenarios is case-insensitive after trimming
+leading and trailing whitespace.
+
+## Stop, Scrolling, And Completion
+
+Tapping `Stop` during a response:
+
+- stops additional chunks;
+- keeps the partial Nova text already visible;
+- marks that message `stopped`;
+- restores the enabled composer after the stop completes;
+- persists the partial text across restart.
+
+While the user is at the bottom of the conversation, incoming chunks keep the
+latest text visible. If the user scrolls upward during a long response, Nova
+must not force the list back to the bottom. Instead, show a `Jump to latest`
+action until the user returns to the bottom.
+
+A completed response is marked `complete` and persists in its final form.
+
+## Error And Retry
+
+The first attempt for `Simulate an error` adds one Nova error row with the text
+`Response failed` and a `Retry` action. It must not remove or duplicate the user
+message.
+
+Tapping `Retry`:
+
+- removes or replaces the error presentation for that turn;
+- runs the bundled successful retry response;
+- creates only one final Nova message for the retried turn;
+- keeps the composer and conversation usable throughout.
+
+## Conversation Drawer
+
+The main header contains labelled `Open conversations` and `New chat` actions.
+
+`Open conversations` presents a side drawer over the current chat. The drawer
+may also be opened by a horizontal edge swipe that tracks the user's finger. A
+dimmed portion of the chat remains visible beside the open drawer; tapping that
+area or swiping the drawer closed restores the same chat and scroll state.
+
+The drawer contains:
+
+- the title `Conversations`;
+- a search field with placeholder `Search conversations`;
+- a `New chat` action;
+- one row for every saved conversation.
+
+Each row shows its title and a short preview of the most recent message. Tapping
+a row closes the drawer and loads that exact conversation, including its title,
+message order, message text, and stopped or error state.
+
+Search is a case-insensitive substring match against conversation titles and all
+message text. Matching conversations remain visible; non-matching conversations
+are hidden. Clearing the query restores the complete newest-first list.
+
+## Rename And Delete
+
+Long-pressing a conversation row exposes `Rename` and `Delete` actions.
+
+### Rename
+
+`Rename` opens an editable prompt containing the current title. Saving a
+non-empty trimmed title updates that row and the current chat header when the
+renamed conversation is open. The new title persists across restart. Cancelling
+leaves the old title unchanged.
+
+### Delete
+
+`Delete` opens a confirmation modal that:
+
+- names the conversation being deleted;
+- explains that its messages will also be removed;
+- exposes `Cancel` and a visually destructive `Delete conversation` action.
+
+Cancel dismisses the modal and restores the drawer with the conversation and
+current chat unchanged. Confirming removes only the selected conversation and
+its messages. If it was the current conversation, Nova shows another saved
+conversation or a fresh empty conversation. Deleted data does not return after
+a cold restart.
+
+## Accessibility And Interaction
+
+- User messages, Nova messages, stopped state, error state, and loading state
+  are distinguishable through accessible text and roles.
+- Drawer rows expose their full conversation title to accessibility even when
+  visually truncated.
+- Composer, Send, Stop, Retry, Jump to latest, drawer, rename, delete, cancel,
+  and new-chat controls have visible and accessible labels.
+- Primary tap targets are at least 44 by 44 points.
+- Plain text is sufficient; markdown rendering is not required.
+
+## Out Of Scope
+
+- Live model or provider requests
+- API keys, server routes, or network access
+- Model selection or per-conversation provider configuration
+- Accounts, authentication, or cloud synchronization
+- Attachments, voice input, image generation, markdown, or code highlighting
+- Multi-user messaging, presence, typing indicators, or read receipts
+- Push notifications or deep links
+- Screenshot-perfect matching to another chat product
+
+## Source Adaptation
+
+This PRD is adapted for deterministic evaluation from the Nova specification in
+Rami Maalouf's `fable-5-vs-gpt-5-6` Expo model-comparison repository. The source
+experiment used a live OpenAI-backed route and provider model picker; this
+harness version keeps the mobile chat interactions while replacing the provider
+with repeatable local streams.
