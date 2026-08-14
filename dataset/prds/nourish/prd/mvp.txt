@@ -1,0 +1,181 @@
+Nourish — Meal Photo Nutrition Tracker (MVP)
+
+## Overview
+
+Nourish is a single-user daily nutrition tracker. The user chooses or captures
+one meal photo, sees a deterministic estimate for calories and macronutrients,
+and either accepts the result into today's meal list or discards it.
+
+The app is intentionally small and offline. It uses bundled sample photos and
+fixed analysis outcomes so its complete flow can be exercised repeatedly on an
+iOS or Android simulator without an API key, network service, account, or
+manually prepared photo library.
+
+## Target Platforms And Session Scope
+
+- Must work on iOS and Android with Expo SDK 57.x.
+- Use safe-area-aware layouts around the status bar, camera cutout, home
+  indicator, and any modal controls.
+- Meals exist only for the current running app session.
+- A cold app restart resets the day to zero meals and resets all totals.
+- The system light or dark appearance should update the app without making text
+  or controls unreadable.
+
+## Daily Goals
+
+Nourish uses these fixed daily goals:
+
+- Calories: 2,000 kcal
+- Protein: 150 g
+- Carbohydrates: 250 g
+- Fat: 70 g
+
+Displayed consumed totals are the sum of accepted meals. Remaining values are
+the goal minus the consumed value and may become negative when a goal is
+exceeded. Calories display as whole numbers. Macro values display as whole
+numbers or with at most one decimal place.
+
+## Today Dashboard
+
+The first screen is titled `Nourish` and identifies the current view as `Today`.
+
+It displays:
+
+- a prominent remaining-calories value and progress indicator;
+- consumed and remaining values for protein, carbohydrates, and fat;
+- a `Today's meals` section;
+- a prominent `Scan meal` action that remains reachable above the bottom safe
+  area.
+
+On every cold launch, all consumed totals are zero. The meal section shows an
+explicit empty state with the text `No meals yet` and guidance to scan the first
+meal. No blank placeholder list is acceptable.
+
+After at least one meal is accepted, the empty state disappears. Each meal row
+shows its sample image, food name, calories, protein, carbohydrates, and fat in
+the same units used by the dashboard.
+
+## Scan Meal Modal
+
+Tapping `Scan meal` opens a full-screen modal titled `Scan a meal`. The
+underlying Today dashboard remains mounted and unchanged while the modal is
+open.
+
+The initial modal state exposes these labelled actions:
+
+- `Use camera`
+- `Choose sample photo`
+- `Close`
+
+Tapping `Close` dismisses the modal and restores the Today dashboard with the
+same meals and totals it had before the modal opened.
+
+### Camera Permission
+
+The app checks camera permission only after the user taps `Use camera`.
+
+- If permission is undetermined, show the operating-system camera permission
+  prompt.
+- If permission is granted, show a camera preview or a clear simulator-safe
+  camera surface with a `Capture` action.
+- If permission is denied, show a readable explanation and a `Choose sample
+  photo` fallback.
+- Denial must not crash, dismiss, or dead-end the scan modal.
+- Do not request camera permission on cold launch or when the user uses only
+  bundled sample photos.
+
+The evaluator may use the sample-photo path for nutrition results even when a
+simulator cannot provide a useful camera image.
+
+## Deterministic Sample Photos
+
+`Choose sample photo` opens an in-app sample gallery with exactly these choices
+and outcomes:
+
+1. `Chicken rice bowl`
+   - Food: Chicken rice bowl
+   - Calories: 640 kcal
+   - Protein: 42 g
+   - Carbohydrates: 68 g
+   - Fat: 22 g
+2. `Berry yogurt`
+   - Food: Berry yogurt
+   - Calories: 310 kcal
+   - Protein: 18 g
+   - Carbohydrates: 44 g
+   - Fat: 8 g
+3. `Desk lamp`
+   - Outcome: not food
+4. `Analysis failure`
+   - Outcome: recoverable analysis error
+
+The gallery is bundled with the app and must not open the operating-system
+photo picker or require external files.
+
+## Analysis And Result States
+
+Selecting a sample immediately shows that same sample image with a visible
+`Analyzing meal` loading state. Analysis completes automatically after a short,
+deterministic delay. Do not display a fabricated percentage.
+
+### Successful Analysis
+
+`Chicken rice bowl` and `Berry yogurt` show a result card over or directly
+beneath the same sample image. The card includes:
+
+- the food name;
+- an `Estimated` label;
+- calories, protein, carbohydrates, and fat;
+- an `Add to today` action;
+- a `Discard` action.
+
+`Add to today` may be triggered only once for the current result. It appends one
+meal, dismisses the scan modal, and updates every dashboard total using the
+fixed values above. Repeated taps must not add duplicates.
+
+`Discard` dismisses the scan modal without changing meals or totals.
+
+### Not-Food State
+
+`Desk lamp` shows the message `That does not look like food` with:
+
+- `Choose another photo`, returning to the sample gallery;
+- `Discard`, returning to the unchanged Today dashboard.
+
+### Recoverable Failure State
+
+`Analysis failure` shows the message `Meal analysis failed` with:
+
+- `Retry analysis`;
+- `Discard`.
+
+Retry keeps the same sample image visible and runs the deterministic analyzing
+state again. It may return the same failure so repeated failure handling remains
+testable. Discard returns to the unchanged Today dashboard.
+
+## Accessibility And Interaction
+
+- Every sample choice, result action, recovery action, and close action has a
+  visible label that is also exposed to accessibility.
+- Primary tap targets are at least 44 by 44 points.
+- Loading, success, not-food, and failure states are announced by visible text,
+  not color alone.
+- Modal content remains usable in system light and dark appearances.
+
+## Out Of Scope
+
+- Live AI or nutrition-provider requests
+- API keys, server routes, or network access
+- Accounts, authentication, or cross-device sync
+- Persistent meals, history, date navigation, or meal editing
+- Manual meal or nutrition entry
+- Home-screen widgets or Live Activities
+- Medical advice, dietary recommendations, or accuracy claims
+- Exact animation timing or screenshot-based visual matching
+
+## Source Adaptation
+
+This PRD is adapted for deterministic evaluation from the Nourish specification
+in Rami Maalouf's `fable-5-vs-gpt-5-6` Expo model-comparison repository. The
+source experiment used live image analysis and a widget; this harness version
+uses bundled outcomes and omits the widget so the core flow is repeatable.

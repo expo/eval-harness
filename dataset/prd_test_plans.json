@@ -46,5 +46,10 @@
     "test_scrollable_grid.txt",
     "test_native_form_sheet.txt",
     "test_theme_selection.txt"
+  ],
+  "nourish": [
+    "test_empty_state.txt",
+    "test_modal_dismiss.txt",
+    "test_permission_prompt.txt"
   ]
 }
