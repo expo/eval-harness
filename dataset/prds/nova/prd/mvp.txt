@@ -100,7 +100,7 @@ Use these bundled scenarios:
      ` response replaces the earlier error without duplicating your message.`
 4. Any other prompt
    - Stream: `You said: <trimmed user text>. Nova is using a bundled response`
-     ` for this offline evaluation.`
+     ` for this offline experience.`
 
 Prompt matching for the three named scenarios is case-insensitive after trimming
 leading and trailing whitespace.
@@ -205,11 +205,3 @@ a cold restart.
 - Multi-user messaging, presence, typing indicators, or read receipts
 - Push notifications or deep links
 - Screenshot-perfect matching to another chat product
-
-## Source Adaptation
-
-This PRD is adapted for deterministic evaluation from the Nova specification in
-Rami Maalouf's `fable-5-vs-gpt-5-6` Expo model-comparison repository. The source
-experiment used a live OpenAI-backed route and provider model picker; this
-harness version keeps the mobile chat interactions while replacing the provider
-with repeatable local streams.

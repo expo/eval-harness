@@ -7,8 +7,8 @@ their recent sleep, inspect trends, and maintain a history of sleep logs. It
 combines a dashboard, an analytics view, an editable log, and a small settings
 area in a native mobile experience.
 
-The app starts with deterministic sample history so every evaluator sees the
-same meaningful dashboard and range comparisons. All edits persist locally;
+The app starts with deterministic sample history so its dashboard is immediately
+useful and its time-range comparisons are meaningful. All edits persist locally;
 Twilight does not depend on HealthKit, a wearable, an account, or a server.
 
 ## Target Platforms And Persistence
@@ -202,11 +202,3 @@ mode.
 - AI-generated coaching or live network data
 - Exact reproduction of Swift Charts, Apple Health, or another existing app
 - Import, export, or sharing
-
-## Source Adaptation
-
-This PRD adapts Twilight from the native Swift sleep-tracking app in Rami
-Maalouf's `fable-5-vs-gpt-5-6` model-comparison repository. The harness version
-keeps the dashboard, range analysis, editable logs, native sheet behavior, and
-theme selection while replacing device-only integrations with repeatable local
-data and accessible numeric outcomes.

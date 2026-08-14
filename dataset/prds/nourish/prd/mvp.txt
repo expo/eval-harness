@@ -7,9 +7,8 @@ one meal photo, sees a deterministic estimate for calories and macronutrients,
 and either accepts the result into today's meal list or discards it.
 
 The app is intentionally small and offline. It uses bundled sample photos and
-fixed analysis outcomes so its complete flow can be exercised repeatedly on an
-iOS or Android simulator without an API key, network service, account, or
-manually prepared photo library.
+fixed analysis outcomes, requiring no API key, network service, account, or
+pre-existing photo library.
 
 ## Target Platforms And Session Scope
 
@@ -76,16 +75,16 @@ The app checks camera permission only after the user taps `Use camera`.
 
 - If permission is undetermined, show the operating-system camera permission
   prompt.
-- If permission is granted, show a camera preview or a clear simulator-safe
-  camera surface with a `Capture` action.
+- If permission is granted, show a camera preview or a clear unavailable-camera
+  placeholder with a `Capture` action.
 - If permission is denied, show a readable explanation and a `Choose sample
   photo` fallback.
 - Denial must not crash, dismiss, or dead-end the scan modal.
 - Do not request camera permission on cold launch or when the user uses only
   bundled sample photos.
 
-The evaluator may use the sample-photo path for nutrition results even when a
-simulator cannot provide a useful camera image.
+The sample-photo path must remain available when the camera cannot provide a
+useful image.
 
 ## Deterministic Sample Photos
 
@@ -150,8 +149,8 @@ fixed values above. Repeated taps must not add duplicates.
 - `Discard`.
 
 Retry keeps the same sample image visible and runs the deterministic analyzing
-state again. It may return the same failure so repeated failure handling remains
-testable. Discard returns to the unchanged Today dashboard.
+state again. It may return the same failure. Discard returns to the unchanged
+Today dashboard.
 
 ## Accessibility And Interaction
 
@@ -172,10 +171,3 @@ testable. Discard returns to the unchanged Today dashboard.
 - Home-screen widgets or Live Activities
 - Medical advice, dietary recommendations, or accuracy claims
 - Exact animation timing or screenshot-based visual matching
-
-## Source Adaptation
-
-This PRD is adapted for deterministic evaluation from the Nourish specification
-in Rami Maalouf's `fable-5-vs-gpt-5-6` Expo model-comparison repository. The
-source experiment used live image analysis and a widget; this harness version
-uses bundled outcomes and omits the widget so the core flow is repeatable.
