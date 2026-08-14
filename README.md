@@ -48,7 +48,7 @@ eval_harness/
 dataset/
   prompts/                    # coding-agent authoring prompt variants
   prompts.json               # prompt-variant id -> prompt file registry
-  prds/                       # Notes, Hot Chocolate, Wiki Reader, and Pool app PRDs (shared)
+  prds/                       # app PRDs shared by authoring and evaluation
   test_plans/primitives/      # app-agnostic primitive plans
   prd_skills.json             # app -> expected skill ids (skill-eval ground truth)
   prd_test_plans.json         # app -> relevant test-plan filenames (iOS-eval ground truth)
