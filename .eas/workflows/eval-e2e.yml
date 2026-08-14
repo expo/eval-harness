@@ -1,8 +1,5 @@
-# End-to-end Evaluation Harness I, split across two workers:
-#   linux: PRD → coding agent authors an Expo app → upload authored-app artifact
-#   macOS: download authored app → native iOS build → evaluator scores it →
-#          upload eval output artifact.
-#   linux: download authored app → analyze skill trigger quality + static uptake
+# End-to-end Evaluation Harness: author once, evaluate in parallel, then create
+# one offline collaborator-facing report from the available producer artifacts.
 # Manual trigger only (consumes CI minutes + does a native iOS build).
 #   eas workflow:run .eas/workflows/eval-e2e.yml
 #
@@ -39,6 +36,20 @@ on:
         default: ''
         required: false
         description: Optional model alias/name; defaults to sonnet (Claude Code), gpt-5-mini (Codex), or muse-spark-1.2 (Muse)
+      agent_reasoning_effort:
+        type: choice
+        options:
+          - low
+          - medium
+          - high
+        default: high
+        required: false
+        description: Reasoning effort for the selected coding agent
+      evaluator_model:
+        type: string
+        default: claude-opus-4-8
+        required: false
+        description: Claude model used only by the iOS evaluator
       prd:
         type: string
         default: dataset/prds/hot_chocolate/prd/mvp.txt
@@ -47,14 +58,6 @@ on:
           PRD path under dataset/. Also determines which test plans run in
           eval_ios (auto-resolved from dataset/prd_test_plans.json) and which
           skills are expected in eval_skill (dataset/prd_skills.json).
-      ios_app_mode:
-        type: choice
-        options:
-          - dev-client
-          - release
-        default: release
-        required: false
-        description: iOS app mode to build for evaluation
       run_eval_ios:
         type: boolean
         default: false
@@ -88,7 +91,7 @@ on:
         required: false
         description: >-
           Authoring prompt variant id from dataset/prompts.json (e.g. baseline,
-          minimal). An unknown id fails the run immediately rather than
+          realistic, minimal). An unknown id fails the run immediately rather than
           authoring with an empty prompt.
 
 jobs:
@@ -98,6 +101,7 @@ jobs:
     env:
       AGENT: ${{ inputs.agent || 'claude-code' }}
       AGENT_MODEL: ${{ inputs.agent_model || '' }}
+      AGENT_REASONING_EFFORT: ${{ inputs.agent_reasoning_effort || 'high' }}
       PRD: ${{ inputs.prd || 'dataset/prds/hot_chocolate/prd/mvp.txt' }}
       SCENARIO: ${{ inputs.skill_scenario || 'skills_available_unmentioned' }}
       SKILL_MENTION: ${{ inputs.skill_mention || '' }}
@@ -111,28 +115,9 @@ jobs:
       - name: Author app with coding agent
         run: bash ./eval_harness/app_builder/scripts/author-app.sh
 
-      # Carries both the authored workspace and author-side diagnostics to macOS.
       - name: Package authored app
         if: ${{ always() }}
-        run: |
-          tar \
-            --exclude 'agent-workspace/*/node_modules' \
-            --exclude 'agent-workspace/*/.expo' \
-            --exclude 'agent-workspace/*/ios/build' \
-            --exclude 'agent-workspace/*/android/.gradle' \
-            --exclude 'agent-workspace/*/android/build' \
-            --exclude 'agent-workspace/*/.mcp.json' \
-            --exclude 'agent-workspace/*/.eval-bundle-export-tmp' \
-            --exclude 'eval-out/*/codex-home/skills' \
-            --exclude 'eval-out/*/codex-home/.tmp' \
-            --exclude 'eval-out/*/codex-home/tmp' \
-            --exclude 'eval-out/*/codex-home/shell_snapshots' \
-            --exclude 'eval-out/*/codex-home/state_*.sqlite*' \
-            --exclude 'eval-out/*/codex-home/memories_*.sqlite*' \
-            --exclude 'eval-out/*/codex-home/goals_*.sqlite*' \
-            --exclude 'eval-out/*/muse-xdg-data' \
-            --exclude 'eval-out/*/muse-bin' \
-            -czf authored-app.tar.gz agent-workspace eval-out
+        run: bash eval_harness/utils/artifacts/package_artifact.sh authored-app authored-app.tar.gz '${{ workflow.id }}/authored-app.tar.gz'
 
       - name: Upload authored app
         if: ${{ always() }}
@@ -144,72 +129,69 @@ jobs:
 
   eval_ios:
     if: ${{ inputs.run_eval_ios }}
-    needs: [author_app]
+    after: [author_app]
     runs_on: macos-medium
     environment: production
     env:
       AGENT: ${{ inputs.agent || 'claude-code' }}
       AGENT_MODEL: ${{ inputs.agent_model || '' }}
+      AGENT_REASONING_EFFORT: ${{ inputs.agent_reasoning_effort || 'high' }}
+      EVALUATOR_MODEL: ${{ inputs.evaluator_model || 'claude-opus-4-8' }}
+      EVALUATOR_REASONING_EFFORT: high
       PRD_OVERRIDE: ${{ inputs.prd || '' }}
-      EVAL_IOS_APP_MODE: ${{ inputs.ios_app_mode || 'release' }}
+      EVAL_IOS_APP_MODE: release
     steps:
       - uses: eas/checkout
+
+      - uses: eas/install_node_modules
+
+      - name: Download authored app
+        uses: eas/download_artifact
+        id: download_author
+        with:
+          name: authored-app
+
+      - name: Materialize authored app safely
+        run: |
+          artifact_path="${{ steps.download_author.outputs.artifact_path }}"
+          bun eval_harness/utils/artifacts/materialize.ts \
+            --artifact "$artifact_path" --dest "$PWD/authored-app-input" --root-name authored-app
 
       - name: Check Claude subscription OAuth
         run: bash ./eval_harness/utils/shell/check_claude_auth.sh
 
-      - name: Download authored app
-        uses: eas/download_artifact
-        id: download_author
-        with:
-          name: authored-app
-
-      - name: Unpack authored app
-        run: |
-          artifact_path="${{ steps.download_author.outputs.artifact_path }}"
-          echo "download_author artifact_path=$artifact_path"
-          if [ -d "$artifact_path" ]; then
-            echo "downloaded artifact directory contents:"
-            find "$artifact_path" -maxdepth 2 -mindepth 1 -print | sort | head -40
-            if [ -f "$artifact_path/authored-app.tar.gz" ]; then
-              tar -xzf "$artifact_path/authored-app.tar.gz"
-            elif [ -d "$artifact_path/agent-workspace" ] || [ -d "$artifact_path/eval-out" ]; then
-              cp -R "$artifact_path"/. .
-            else
-              echo "Could not locate authored app contents in $artifact_path"
-              exit 1
-            fi
-          else
-            ls -lah "$artifact_path"
-            tar -xzf "$artifact_path"
-          fi
-
       - name: Build, run, and evaluate authored app
-        run: bash ./eval_harness/evaluator/ios_agentic/scripts/eval-ios-app.sh
+        run: AUTHORED_ARTIFACT_ROOT="$PWD/authored-app-input" bash ./eval_harness/evaluator/ios_agentic/scripts/eval-ios-app.sh
 
-      # tar ourselves -> clean `eval-out/` root (upload_artifact bakes in abs paths)
-      - name: Package eval output
+      - name: Package iOS eval report
         if: ${{ always() }}
         run: |
-          mkdir -p eval-out
-          # collect_artifacts.sh already leaves an inner .tgz beside the
-          # inspectable bundle. Do not upload that compressed duplicate again.
-          tar --exclude 'eval-out/*/*.tgz' -czf eval-out.tar.gz eval-out
+          if [ ! -f ios-eval-report/manifest.json ]; then
+            python3 eval_harness/utils/artifacts/create_diagnostic_artifact.py \
+              --kind ios --author-artifact-root "$PWD/authored-app-input" \
+              --out-dir "$PWD/ios-eval-report" --run-id '${{ workflow.id }}' \
+              --stage workflow_preflight \
+              --reason 'iOS evaluator did not produce a canonical artifact; inspect job logs' \
+              --evaluator-model "$EVALUATOR_MODEL" \
+              --evaluator-reasoning-effort "$EVALUATOR_REASONING_EFFORT"
+          fi
+          bash eval_harness/utils/artifacts/package_artifact.sh ios-eval-report ios-eval-report.tar.gz '${{ workflow.id }}/ios-eval-report.tar.gz'
 
-      # type: other = generic artifact for custom jobs.
-      - name: Upload eval output
+      - name: Upload iOS eval report
         if: ${{ always() }}
         uses: eas/upload_artifact
         with:
           type: other
-          name: eval-e2e-output
-          path: eval-out.tar.gz
+          name: ios-eval-report
+          path: ios-eval-report.tar.gz
 
   eval_skill:
     if: ${{ inputs.run_eval_skill }}
-    needs: [author_app]
+    after: [author_app]
     runs_on: linux-medium
     environment: production
+    env:
+      SKILL_SCENARIO: ${{ inputs.skill_scenario || 'skills_available_unmentioned' }}
     steps:
       - uses: eas/checkout
 
@@ -219,16 +201,30 @@ jobs:
         with:
           name: authored-app
 
+      - name: Materialize authored app safely
+        run: |
+          artifact_path='${{ steps.download_author.outputs.artifact_path }}'
+          bun eval_harness/utils/artifacts/materialize.ts \
+            --artifact "$artifact_path" --dest "$PWD/authored-app-input" --root-name authored-app
+
       - name: Analyze authored app for skill eval
         run: |
-          AUTHORED_ARTIFACT='${{ steps.download_author.outputs.artifact_path }}' \
-          SCENARIO='${{ inputs.skill_scenario }}' \
+          AUTHORED_ARTIFACT="$PWD/authored-app-input" \
+          SCENARIO="$SKILL_SCENARIO" \
           OUT_DIR=skill-eval-report \
           bash ./eval_harness/evaluator/skill_invocation/scripts/eval-skill-use.sh
 
       - name: Package skill-eval report
         if: ${{ always() }}
-        run: tar -czf skill-eval-report.tar.gz skill-eval-report
+        run: |
+          if [ ! -f skill-eval-report/manifest.json ]; then
+            python3 eval_harness/utils/artifacts/create_diagnostic_artifact.py \
+              --kind skill --author-artifact-root "$PWD/authored-app-input" \
+              --out-dir "$PWD/skill-eval-report" --run-id '${{ workflow.id }}' \
+              --scenario "$SKILL_SCENARIO" --stage workflow_preflight \
+              --reason 'skill evaluator did not produce a canonical artifact; inspect job logs'
+          fi
+          bash eval_harness/utils/artifacts/package_artifact.sh skill-eval-report skill-eval-report.tar.gz '${{ workflow.id }}/skill-eval-report.tar.gz'
 
       - name: Upload skill-eval report
         if: ${{ always() }}
@@ -237,3 +233,74 @@ jobs:
           type: other
           name: skill-eval-report
           path: skill-eval-report.tar.gz
+
+  report:
+    after: [eval_ios, eval_skill]
+    runs_on: linux-medium
+    steps:
+      - uses: eas/checkout
+
+      - name: Download authored app
+        uses: eas/download_artifact
+        id: report_author
+        with:
+          name: authored-app
+
+      - name: Download iOS eval report
+        if: ${{ always() && inputs.run_eval_ios && after.eval_ios.status != 'skipped' }}
+        uses: eas/download_artifact
+        id: report_ios
+        with:
+          name: ios-eval-report
+
+      - name: Download skill-eval report
+        if: ${{ always() && inputs.run_eval_skill && after.eval_skill.status != 'skipped' }}
+        uses: eas/download_artifact
+        id: report_skill
+        with:
+          name: skill-eval-report
+
+      - name: Build consolidated report
+        if: ${{ always() }}
+        run: |
+          author_path='${{ steps.report_author.outputs.artifact_path }}'
+          [ -n "$author_path" ] && [ "$author_path" != undefined ] && [ "$author_path" != null ] || {
+            echo 'authored-app artifact is unavailable; cannot build the required report' >&2
+            exit 1
+          }
+          bun eval_harness/utils/artifacts/materialize.ts \
+            --artifact "$author_path" --dest "$PWD/report-inputs/author" --root-name authored-app
+          report_args=(
+            --authored-artifact report-inputs/author --out-dir eval-report
+            --ios-job-status '${{ after.eval_ios.status }}'
+            --skill-job-status '${{ after.eval_skill.status }}'
+          )
+          skill_path='${{ steps.report_skill.outputs.artifact_path }}'
+          if [ -n "$skill_path" ] && [ "$skill_path" != undefined ] && [ "$skill_path" != null ]; then
+            bun eval_harness/utils/artifacts/materialize.ts \
+              --artifact "$skill_path" --dest "$PWD/report-inputs/skill" --root-name skill-eval-report
+            report_args+=(--skill-artifact report-inputs/skill)
+          else
+            echo 'skill-eval artifact disabled or unavailable; continuing without it'
+          fi
+          ios_path='${{ steps.report_ios.outputs.artifact_path }}'
+          if [ -n "$ios_path" ] && [ "$ios_path" != undefined ] && [ "$ios_path" != null ]; then
+            bun eval_harness/utils/artifacts/materialize.ts \
+              --artifact "$ios_path" --dest "$PWD/report-inputs/ios" --root-name ios-eval-report
+            report_args+=(--ios-artifact report-inputs/ios)
+          else
+            echo 'iOS eval artifact disabled or unavailable; continuing without it'
+          fi
+          bun eval_harness/evaluator/reporting/main.ts "${report_args[@]}"
+
+      - name: Package consolidated report
+        if: ${{ always() }}
+        run: bash eval_harness/utils/artifacts/package_artifact.sh eval-report eval-report.tar.gz '${{ workflow.id }}/eval-report.tar.gz'
+
+      - name: Upload consolidated report
+        if: ${{ always() }}
+        uses: eas/upload_artifact
+        with:
+          type: other
+          name: eval-report
+          path: eval-report.tar.gz

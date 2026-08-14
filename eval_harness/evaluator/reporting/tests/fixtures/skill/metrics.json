@@ -1,0 +1,36 @@
+{
+  "summary": "Skill eval artifact analysis for notes",
+  "scenario": "skills_available_unmentioned",
+  "outcome_status": "complete",
+  "warnings": ["fixture skill warning"],
+  "score": {
+    "trigger_quality": {
+      "recall": 0.5
+    },
+    "context_uptake": {
+      "uptake_rate": 0.75
+    }
+  },
+  "build_health": {
+    "syntax": {
+      "ok": true,
+      "failed_files": []
+    },
+    "bundle": {
+      "ok": false,
+      "reason": "Expo export probe failed"
+    }
+  },
+  "skills": {
+    "expo-router": {
+      "expected": true,
+      "triggered": true,
+      "trigger_status": "observed",
+      "uptake_status": "measured",
+      "passed": 3,
+      "total": 4,
+      "uptake_rate": 0.75,
+      "checks": []
+    }
+  }
+}

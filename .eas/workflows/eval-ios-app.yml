@@ -39,19 +39,35 @@ on:
         default: release
         required: false
         description: iOS app mode to build for evaluation
+      evaluator_model:
+        type: string
+        default: claude-opus-4-8
+        required: false
+        description: Claude model used by the iOS evaluator
+      evaluator_reasoning_effort:
+        type: choice
+        options:
+          - low
+          - medium
+          - high
+        default: high
+        required: false
+        description: Reasoning effort for the iOS evaluator
 
 jobs:
   eval_ios:
     runs_on: macos-medium
     environment: production
     env:
+      AUTHORED_APP_URL: ${{ inputs.authored_app_url || '' }}
       PRD_OVERRIDE: ${{ inputs.prd || '' }}
       EVAL_IOS_APP_MODE: ${{ inputs.ios_app_mode || 'release' }}
+      EVALUATOR_MODEL: ${{ inputs.evaluator_model || 'claude-opus-4-8' }}
+      EVALUATOR_REASONING_EFFORT: ${{ inputs.evaluator_reasoning_effort || 'high' }}
     steps:
       - uses: eas/checkout
 
-      - name: Check Claude subscription OAuth
-        run: bash ./eval_harness/utils/shell/check_claude_auth.sh
+      - uses: eas/install_node_modules
 
       - name: Download authored app by artifact ID
         uses: eas/download_artifact
@@ -64,46 +80,40 @@ jobs:
         id: download_author_from_url
         if: ${{ !inputs.authored_app_artifact_id && inputs.authored_app_url }}
         run: |
-          AUTHORED_APP_URL='${{ inputs.authored_app_url }}'
           mkdir -p authored-app-download
           curl --fail --location --show-error "$AUTHORED_APP_URL" --output authored-app-download/authored-app.tar.gz
           set-output artifact_path "$(pwd)/authored-app-download/authored-app.tar.gz"
 
-      - name: Unpack authored app
+      - name: Materialize authored app safely
         run: |
           artifact_path="${{ steps.download_author.outputs.artifact_path || steps.download_author_from_url.outputs.artifact_path }}"
-          echo "download_author artifact_path=$artifact_path"
-          if [ -d "$artifact_path" ]; then
-            echo "downloaded artifact directory contents:"
-            find "$artifact_path" -maxdepth 2 -mindepth 1 -print | sort | head -200
-            if [ -f "$artifact_path/authored-app.tar.gz" ]; then
-              tar -xzf "$artifact_path/authored-app.tar.gz"
-            elif [ -d "$artifact_path/agent-workspace" ] || [ -d "$artifact_path/eval-out" ]; then
-              cp -R "$artifact_path"/. .
-            else
-              echo "Could not locate authored app contents in $artifact_path"
-              exit 1
-            fi
-          else
-            ls -lah "$artifact_path"
-            tar -xzf "$artifact_path"
-          fi
+          bun eval_harness/utils/artifacts/materialize.ts \
+            --artifact "$artifact_path" --dest "$PWD/authored-app-input" --root-name authored-app
+
+      - name: Check Claude subscription OAuth
+        run: bash ./eval_harness/utils/shell/check_claude_auth.sh
 
       - name: Build, run, and evaluate authored app
-        run: bash ./eval_harness/evaluator/ios_agentic/scripts/eval-ios-app.sh
+        run: AUTHORED_ARTIFACT_ROOT="$PWD/authored-app-input" bash ./eval_harness/evaluator/ios_agentic/scripts/eval-ios-app.sh
 
-      - name: Package eval output
+      - name: Package iOS eval report
         if: ${{ always() }}
         run: |
-          mkdir -p eval-out
-          # collect_artifacts.sh already leaves an inner .tgz beside the
-          # inspectable bundle. Do not upload that compressed duplicate again.
-          tar --exclude 'eval-out/*/*.tgz' -czf eval-out.tar.gz eval-out
+          if [ ! -f ios-eval-report/manifest.json ]; then
+            python3 eval_harness/utils/artifacts/create_diagnostic_artifact.py \
+              --kind ios --author-artifact-root "$PWD/authored-app-input" \
+              --out-dir "$PWD/ios-eval-report" --run-id '${{ workflow.id }}' \
+              --stage workflow_preflight \
+              --reason 'iOS evaluator did not produce a canonical artifact; inspect job logs' \
+              --evaluator-model "$EVALUATOR_MODEL" \
+              --evaluator-reasoning-effort "$EVALUATOR_REASONING_EFFORT"
+          fi
+          bash eval_harness/utils/artifacts/package_artifact.sh ios-eval-report ios-eval-report.tar.gz '${{ workflow.id }}/ios-eval-report.tar.gz'
 
-      - name: Upload eval output
+      - name: Upload iOS eval report
         if: ${{ always() }}
         uses: eas/upload_artifact
         with:
           type: other
-          name: eval-ios-replay-output
-          path: eval-out.tar.gz
+          name: ios-eval-report
+          path: ios-eval-report.tar.gz

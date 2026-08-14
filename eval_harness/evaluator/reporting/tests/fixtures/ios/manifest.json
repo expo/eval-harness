@@ -1,0 +1,33 @@
+{
+  "schema_version": 2,
+  "artifact_type": "ios-eval-report",
+  "run_id": "run-fixture-1",
+  "evaluator_model": "claude-opus-4-8",
+  "evaluator_reasoning_effort": "high",
+  "build_health": {
+    "dependency_install": {
+      "status": "passed",
+      "detail": null,
+      "log": "logs/s5-npm.log"
+    },
+    "native_build": {
+      "status": "passed",
+      "detail": null,
+      "log": "logs/s6-release.log"
+    },
+    "app_launch": {
+      "status": "passed",
+      "detail": null,
+      "log": "logs/s6b-open.log"
+    },
+    "evaluation": {
+      "status": "passed",
+      "detail": null,
+      "log": "logs/s7-eval.log"
+    }
+  },
+  "artifacts": {
+    "result": "result.json",
+    "test_plan_traces": "traces/test-plans/"
+  }
+}

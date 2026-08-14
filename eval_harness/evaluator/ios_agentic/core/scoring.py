@@ -22,6 +22,8 @@ from typing import Literal
 
 
 PlanStatus = Literal["in_progress", "completed", "not_applicable", "evaluator_error"]
+AbortScope = Literal["plan", "suite"]
+EvidenceKind = Literal["formal_step", "preflight"]
 
 
 @dataclass
@@ -49,6 +51,19 @@ class StepResult:
     soft_assertions: list[SoftAssertionResult] = field(default_factory=list)
     iterations_used: int = 0
     completed_by_llm: bool = False
+    screenshot_path: str | None = None
+    screenshot_error: str | None = None
+
+
+@dataclass
+class TerminalEvidence:
+    """Human-only evidence for a formal step or pre-plan lifecycle abort."""
+
+    step_number: int | None
+    step_name: str
+    evidence_kind: EvidenceKind = "formal_step"
+    screenshot_path: str | None = None
+    screenshot_error: str | None = None
 
 
 @dataclass
@@ -56,9 +71,11 @@ class TestPlanResult:
     score: int
     full_points: int
     steps: list[StepResult] = field(default_factory=list)
+    terminal_evidence: list[TerminalEvidence] = field(default_factory=list)
     status: PlanStatus = "in_progress"
     error_stage: str = ""
     error_reason: str = ""
+    abort_scope: AbortScope = "plan"
     not_applicable: bool = False  # True when seed phase signaled N/A; formal steps skipped
     na_reason: str = ""  # the agent's N/A justification (from the seed complete_step summary)
 

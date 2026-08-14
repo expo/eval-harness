@@ -14,6 +14,7 @@ shared modules (`scoring`, `tracer`, `prompt_agent`, `agent_hooks`,
 
 import asyncio
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -42,6 +43,7 @@ from claude_agent_sdk import (
     ResultMessage,
     UserMessage,
 )
+from claude_agent_sdk.types import TextBlock
 
 from ..core.test_plan_parser import parse_test_plan
 
@@ -57,9 +59,42 @@ from ..core.scoring import (
     AssertionResult,
     SoftAssertionResult,
     StepResult,
+    TerminalEvidence,
     TestPlanResult,
     score_step,
 )
+
+
+_PROVIDER_SESSION_LIMIT = re.compile(
+    r"^You've hit your session limit · resets "
+    r"((?:1[0-2]|[1-9]):[0-5][0-9](?:am|pm) \(America/Los_Angeles\))$"
+)
+_TOKEN_USAGE_FIELDS = (
+    "input_tokens",
+    "output_tokens",
+    "cache_creation_input_tokens",
+    "cache_read_input_tokens",
+)
+
+
+def _provider_quota_reason(message: AssistantMessage) -> str | None:
+    """Recognize only Claude's zero-token synthetic session-limit response."""
+    if message.model != "<synthetic>" or len(message.content) != 1:
+        return None
+    block = message.content[0]
+    if not isinstance(block, TextBlock):
+        return None
+    usage = message.usage or {}
+    if not isinstance(usage, dict):
+        return None
+    for field in _TOKEN_USAGE_FIELDS:
+        value = usage.get(field, 0)
+        if not isinstance(value, int) or isinstance(value, bool) or value != 0:
+            return None
+    match = _PROVIDER_SESSION_LIMIT.fullmatch(block.text)
+    if match is None:
+        return None
+    return f"provider_quota: Claude session limit reached; resets {match.group(1)}"
 
 
 # ----- The evaluator -----
@@ -80,6 +115,8 @@ class AgentDeviceEvaluator:
         prd_path: Path | None = None,
         hybrid_restart: bool = False,
         seed_iterations: int = 100,
+        model: str = "claude-opus-4-8",
+        reasoning_effort: str = "high",
     ):
         self.platform = platform
         self.max_iterations = max_iterations
@@ -87,19 +124,33 @@ class AgentDeviceEvaluator:
         self.verbose = verbose
         self.prd_text = prd_path.read_text() if prd_path else ""
         self.hybrid_restart = hybrid_restart
+        self.model = model
+        self.reasoning_effort = reasoning_effort
         self.bridge = AgentDeviceBridge(
             platform=platform, timeout=timeout, verbose=verbose,
         )
 
-    def evaluate_test_plan(self, test_plan_path: Path) -> TestPlanResult:
-        return asyncio.run(self._evaluate_test_plan_async(test_plan_path))
+    def evaluate_test_plan(
+        self,
+        test_plan_path: Path,
+        run_index: int = 1,
+    ) -> TestPlanResult:
+        return asyncio.run(self._evaluate_test_plan_async(test_plan_path, run_index))
 
-    async def _evaluate_test_plan_async(self, test_plan_path: Path) -> TestPlanResult:
+    async def _evaluate_test_plan_async(
+        self,
+        test_plan_path: Path,
+        run_index: int = 1,
+    ) -> TestPlanResult:
         tracer = Tracer(plan_stem=test_plan_path.stem, root=_trace_root_for(test_plan_path))
         os.environ["EVAL_SCREENSHOT_DIR"] = str(tracer.root / "screenshots")
         tracer.capture_console()
         try:
-            return await self._evaluate_test_plan_inner_async(test_plan_path, tracer)
+            return await self._evaluate_test_plan_inner_async(
+                test_plan_path,
+                tracer,
+                run_index,
+            )
         finally:
             tracer.close()
 
@@ -107,6 +158,7 @@ class AgentDeviceEvaluator:
         self,
         test_plan_path: Path,
         tracer: Tracer,
+        run_index: int,
     ) -> TestPlanResult:
         plan = parse_test_plan(test_plan_path)
         result = TestPlanResult(score=0, full_points=plan["full_points"])
@@ -129,9 +181,9 @@ class AgentDeviceEvaluator:
         restart_label = "maestro hybrid" if self.hybrid_restart else "agent-device native"
         print(f"\n  Resetting app state ({restart_label})...\n")
         reset = (
-            self.bridge.restart_app_hybrid(clear_state=True)
+            self.bridge.restart_app_hybrid(clear_state=True, preflight=True)
             if self.hybrid_restart
-            else self.bridge.restart_app(clear_state=True)
+            else self.bridge.restart_app(clear_state=True, preflight=True)
         )
         # If Maestro-hybrid restart failed (e.g. 90s timeout, JVM hang, transient
         # CLI issue), fall back to the native agent-device restart before aborting
@@ -145,14 +197,60 @@ class AgentDeviceEvaluator:
             print(f"  ⚠️  maestro restart failed: {fallback_err}")
             print(f"  → falling back to agent-device native restart…")
             tracer.log("restart_fallback", primary_err=fallback_err)
-            reset = self.bridge.restart_app(clear_state=True)
+            reset = self.bridge.restart_app(clear_state=True, preflight=True)
+
+        for diagnostic in getattr(self.bridge, "last_restart_diagnostics", []):
+            tracer.log("preflight_system_alert", **diagnostic)
+
         if not reset.success:
             err = reset.error or reset.output or "(no error detail)"
             print(f"\n  ❌ restart_app failed: {err}")
-            tracer.log("plan_aborted", reason="restart_app_failed", error=err)
+            screenshot_path, screenshot_error = self._capture_evidence_screenshot(
+                tracer,
+                Path("screenshots") / "preflight-final.png",
+            )
+            tracer.log(
+                "plan_aborted",
+                reason="restart_app_failed_before_model_session",
+                error=err,
+                abort_scope="suite",
+                screenshot=screenshot_path,
+                screenshot_error=screenshot_error,
+            )
             result.status = "evaluator_error"
             result.error_stage = "restart"
             result.error_reason = err
+            result.abort_scope = "suite"
+            result.terminal_evidence.append(
+                TerminalEvidence(
+                    step_number=None,
+                    step_name="pre-plan readiness",
+                    evidence_kind="preflight",
+                    screenshot_path=screenshot_path,
+                    screenshot_error=screenshot_error,
+                )
+            )
+            tracer.write_summary({
+                "plan": test_plan_path.name,
+                "run_index": run_index,
+                "platform": self.platform,
+                "driver": "agent-device",
+                "status": "evaluator_error",
+                "error_stage": "restart",
+                "error_reason": err,
+                "abort_scope": "suite",
+                "score": None,
+                "full_points": None,
+                "total_usage": UsageAccumulator().snapshot(),
+                "steps": [],
+                "terminal_evidence": [{
+                    "evidence_kind": "preflight",
+                    "step_number": None,
+                    "step_name": "pre-plan readiness",
+                    "screenshot": screenshot_path,
+                    "screenshot_error": screenshot_error,
+                }],
+            })
             return result
 
         # Build the SDK options. Tools are an MCP server; hooks track per-tool durations.
@@ -174,7 +272,9 @@ class AgentDeviceEvaluator:
             hooks=build_hooks(tool_timing),
             include_hook_events=False,
             max_turns=max(self.seed_iterations, self.max_iterations),
-            max_thinking_tokens=1024,
+            model=self.model,
+            effort=self.reasoning_effort,
+            thinking={"type": "adaptive"},
         )
 
         agg_usage = UsageAccumulator()
@@ -207,7 +307,12 @@ class AgentDeviceEvaluator:
                 )
 
                 await client.query(_seed_prompt(seeding_clean, self.seed_iterations, self.prd_text))
-                await self._receive_phase_response(client, state, turn_agg, agg_usage)
+                provider_failure = await self._receive_phase_response(
+                    client,
+                    state,
+                    turn_agg,
+                    agg_usage,
+                )
 
                 turn_agg.flush(reason="seed_end")
                 tracer.log(
@@ -218,6 +323,35 @@ class AgentDeviceEvaluator:
                     n_soft_assertions=len(state.soft_assertions),
                 )
                 prd_already_injected = bool(self.prd_text.strip())
+
+                if provider_failure is not None:
+                    result.status = "evaluator_error"
+                    result.error_stage = "seed"
+                    result.error_reason = provider_failure
+                    result.abort_scope = "suite"
+                    tracer.log(
+                        "plan_aborted",
+                        reason="provider_quota",
+                        category="evaluator_infrastructure",
+                        error=provider_failure,
+                        abort_scope="suite",
+                    )
+                    tracer.write_summary({
+                        "plan": test_plan_path.name,
+                        "run_index": run_index,
+                        "platform": self.platform,
+                        "driver": "agent-device",
+                        "status": "evaluator_error",
+                        "error_stage": "seed",
+                        "error_reason": provider_failure,
+                        "abort_scope": "suite",
+                        "score": None,
+                        "full_points": None,
+                        "total_usage": agg_usage.snapshot(),
+                        "steps": [],
+                        "terminal_evidence": [],
+                    })
+                    return result
 
                 if state.aborted:
                     result.status = "evaluator_error"
@@ -302,35 +436,88 @@ class AgentDeviceEvaluator:
                 # (see above) and persist in the SDK session's context, so step
                 # prompts no longer re-inject them.
                 await client.query(_step_prompt(i, len(plan["steps"]), step, self.max_iterations))
-                await self._receive_phase_response(client, state, turn_agg, agg_usage)
+                provider_failure = await self._receive_phase_response(
+                    client,
+                    state,
+                    turn_agg,
+                    agg_usage,
+                )
 
                 turn_agg.flush(reason="step_end")
 
-                if state.aborted or not state.completed:
+                if provider_failure is not None or state.aborted or not state.completed:
+                    screenshot_path, screenshot_error = self._capture_terminal_screenshot(
+                        tracer,
+                        i,
+                    )
                     result.status = "evaluator_error"
                     result.error_stage = f"step_{i}"
-                    if state.aborted:
+                    if provider_failure is not None:
+                        result.error_reason = provider_failure
+                        result.abort_scope = "suite"
+                        abort_reason = "provider_quota"
+                        abort_category = "evaluator_infrastructure"
+                    elif state.aborted:
                         result.error_reason = (
                             f"{state.abort_category}: {state.abort_reason}"
                             if state.abort_category
                             else state.abort_reason
                         )
                         abort_reason = "agent_aborted_step"
+                        abort_category = state.abort_category
                     else:
                         result.error_reason = (
                             "step response ended without complete_step or abort_step"
                         )
                         abort_reason = "step_ended_without_terminal_tool"
+                        abort_category = state.abort_category
                     tracer.log(
                         "plan_aborted",
                         reason=abort_reason,
                         step_number=i,
-                        category=state.abort_category,
+                        category=abort_category,
                         error=result.error_reason,
+                        abort_scope=result.abort_scope,
+                        screenshot=screenshot_path,
+                        screenshot_error=screenshot_error,
                     )
+                    terminal_evidence = TerminalEvidence(
+                        step_number=i,
+                        step_name=step["name"],
+                        screenshot_path=screenshot_path,
+                        screenshot_error=screenshot_error,
+                    )
+                    result.terminal_evidence.append(terminal_evidence)
+                    summary = {
+                        "plan": test_plan_path.name,
+                        "run_index": run_index,
+                        "platform": self.platform,
+                        "driver": "agent-device",
+                        "status": "evaluator_error",
+                        "error_stage": result.error_stage,
+                        "error_reason": result.error_reason,
+                        "score": None,
+                        "full_points": None,
+                        "total_usage": agg_usage.snapshot(),
+                        "steps": [],
+                        "terminal_evidence": [{
+                            "evidence_kind": terminal_evidence.evidence_kind,
+                            "step_number": terminal_evidence.step_number,
+                            "step_name": terminal_evidence.step_name,
+                            "screenshot": terminal_evidence.screenshot_path,
+                            "screenshot_error": terminal_evidence.screenshot_error,
+                        }],
+                    }
+                    if provider_failure is not None:
+                        summary["abort_scope"] = "suite"
+                    tracer.write_summary(summary)
                     return result
 
                 step_result = score_step(step, state.assertions, state.soft_assertions, state.completed, state.turns_used)
+                (
+                    step_result.screenshot_path,
+                    step_result.screenshot_error,
+                ) = self._capture_terminal_screenshot(tracer, i)
                 result.steps.append(step_result)
                 result.score += step_result.earned_points
 
@@ -352,6 +539,8 @@ class AgentDeviceEvaluator:
                     n_soft_assertions=len(state.soft_assertions),
                     step_usage=turn_agg.step_usage.snapshot(),
                     sdk_result=turn_agg.sdk_result,
+                    screenshot=step_result.screenshot_path,
+                    screenshot_error=step_result.screenshot_error,
                 )
 
         print(f"\n{'━'*60}")
@@ -361,6 +550,7 @@ class AgentDeviceEvaluator:
 
         tracer.write_summary({
             "plan": test_plan_path.name,
+            "run_index": run_index,
             "platform": self.platform,
             "driver": "agent-device",
             "score": result.score,
@@ -376,11 +566,36 @@ class AgentDeviceEvaluator:
                     "completed_by_llm": s.completed_by_llm,
                     "n_assertions": len(s.assertions),
                     "n_soft_assertions": len(s.soft_assertions),
+                    "screenshot": s.screenshot_path,
+                    "screenshot_error": s.screenshot_error,
                 }
                 for s in result.steps
             ],
         })
         return result
+
+    def _capture_terminal_screenshot(
+        self,
+        tracer: Tracer,
+        step_number: int,
+    ) -> tuple[str | None, str | None]:
+        """Best-effort human evidence capture, independent of step scoring."""
+        relative = Path("screenshots") / f"step-{step_number:02d}-final.png"
+        return self._capture_evidence_screenshot(tracer, relative)
+
+    def _capture_evidence_screenshot(
+        self,
+        tracer: Tracer,
+        relative: Path,
+    ) -> tuple[str | None, str | None]:
+        """Capture one named human-evidence frame without changing scoring."""
+        try:
+            screenshot = self.bridge.capture_screenshot(str(tracer.root / relative))
+        except Exception as exc:
+            return None, str(exc)
+        if screenshot.success:
+            return relative.as_posix(), None
+        return None, screenshot.error or screenshot.output or "screenshot capture failed"
 
     # ----- Message processing -----
 
@@ -390,7 +605,7 @@ class AgentDeviceEvaluator:
         state: StepState,
         turn_agg: TurnAggregator,
         agg_usage: UsageAccumulator,
-    ) -> None:
+    ) -> str | None:
         """Process one SDK response and stop model work at a terminal tool call.
 
         MCP tools mutate ``state`` before their tool-result UserMessage reaches
@@ -399,17 +614,27 @@ class AgentDeviceEvaluator:
         the SDK is ready for the next query, but ignore post-terminal model work.
         """
         interrupted = False
+        provider_failure = None
         async for message in client.receive_response():
-            if interrupted and not isinstance(message, ResultMessage):
+            if (
+                (interrupted or provider_failure is not None)
+                and not isinstance(message, ResultMessage)
+            ):
                 continue
 
             self._process_message(message, turn_agg, agg_usage)
             if isinstance(message, ResultMessage):
                 break
 
+            if isinstance(message, AssistantMessage):
+                provider_failure = _provider_quota_reason(message)
+                if provider_failure is not None:
+                    continue
+
             if (state.completed or state.aborted) and not interrupted:
                 await client.interrupt()
                 interrupted = True
+        return provider_failure
 
     def _process_message(
         self,

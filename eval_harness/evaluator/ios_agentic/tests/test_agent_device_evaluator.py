@@ -10,17 +10,33 @@ from mcp import types as mcp_types
 from eval_harness.evaluator.ios_agentic.agent_device.bridge import AgentDeviceResult
 from eval_harness.evaluator.ios_agentic.agent_device.evaluator import AgentDeviceEvaluator
 from eval_harness.evaluator.ios_agentic.agent_device.tools import build_tools
+from eval_harness.evaluator.ios_agentic.core.scoring import AssertionResult
 from eval_harness.evaluator.ios_agentic.core.tool_state import StepState, ToolContext
 from eval_harness.evaluator.ios_agentic.core.turn_aggregator import UsageAccumulator
+from eval_harness.evaluator.ios_agentic.prompts.prompt_agent import build_system_prompt
 
 
 class FailedRestartBridge:
-    def restart_app(self, clear_state: bool = False) -> AgentDeviceResult:
+    def __init__(self) -> None:
+        self.restart_calls: list[tuple[bool, bool]] = []
+        self.last_restart_diagnostics: list[dict] = []
+        self.screenshot_paths: list[str] = []
+
+    def restart_app(
+        self,
+        clear_state: bool = False,
+        preflight: bool = False,
+    ) -> AgentDeviceResult:
+        self.restart_calls.append((clear_state, preflight))
         return AgentDeviceResult(
             success=False,
             output="",
             error="development client launcher never reached authored app",
         )
+
+    def capture_screenshot(self, path: str | None = None) -> AgentDeviceResult:
+        self.screenshot_paths.append(path or "")
+        return AgentDeviceResult(success=True, output=path or "")
 
 
 class RecordingTracer:
@@ -30,8 +46,10 @@ class RecordingTracer:
         type(self).latest = self
         self.root = Path("/tmp/test-ios-evaluator-trace")
         self.events: list[tuple[str, dict]] = []
+        self.records: list[dict] = []
         self.close_calls = 0
         self.start_time = 0.0
+        self.summary = None
 
     def capture_console(self) -> None:
         return None
@@ -39,8 +57,14 @@ class RecordingTracer:
     def log(self, event: str, **fields) -> None:
         self.events.append((event, fields))
 
+    def log_record(self, record: dict) -> None:
+        self.records.append(record)
+
     def close(self) -> None:
         self.close_calls += 1
+
+    def write_summary(self, summary: dict) -> None:
+        self.summary = summary
 
 
 class RecordingTurnAggregator:
@@ -92,8 +116,89 @@ class CompletionStreamClient:
 
 
 class SuccessfulRestartBridge(FailedRestartBridge):
-    def restart_app(self, clear_state: bool = False) -> AgentDeviceResult:
+    def restart_app(
+        self,
+        clear_state: bool = False,
+        preflight: bool = False,
+    ) -> AgentDeviceResult:
+        self.restart_calls.append((clear_state, preflight))
         return AgentDeviceResult(success=True, output="ready")
+
+
+class RecordingScreenshotBridge(SuccessfulRestartBridge):
+    def __init__(self, screenshot_result: AgentDeviceResult) -> None:
+        super().__init__()
+        self.screenshot_result = screenshot_result
+        self.screenshot_paths: list[str] = []
+
+    def capture_screenshot(self, path: str | None = None) -> AgentDeviceResult:
+        self.screenshot_paths.append(path or "")
+        return self.screenshot_result
+
+
+class PassiveSdkClient:
+    def __init__(self, *args, **kwargs) -> None:
+        self.queries: list[str] = []
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, traceback) -> None:
+        return None
+
+    async def query(self, prompt: str) -> None:
+        self.queries.append(prompt)
+
+
+SESSION_LIMIT_TEXT = (
+    "You've hit your session limit · resets 3:30am (America/Los_Angeles)"
+)
+SESSION_LIMIT_REASON = (
+    "provider_quota: Claude session limit reached; "
+    "resets 3:30am (America/Los_Angeles)"
+)
+
+
+class SyntheticSessionLimitClient(PassiveSdkClient):
+    latest = None
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        type(self).latest = self
+
+    async def receive_response(self):
+        yield AssistantMessage(
+            content=[TextBlock(text=SESSION_LIMIT_TEXT)],
+            model="<synthetic>",
+            usage={
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+            },
+        )
+        yield sdk_result()
+
+
+class OrdinaryUnterminatedClient(PassiveSdkClient):
+    latest = None
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        type(self).latest = self
+
+    async def receive_response(self):
+        yield AssistantMessage(
+            content=[TextBlock(text=SESSION_LIMIT_TEXT)],
+            model="claude-opus-4-8",
+            usage={
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+            },
+        )
+        yield sdk_result()
 
 
 class SuccessfulDevClientRestartBridge(SuccessfulRestartBridge):
@@ -127,6 +232,384 @@ async def call_mcp_tool(server: dict, name: str, arguments: dict):
 
 
 class AgentDeviceEvaluatorOutcomeTests(unittest.TestCase):
+    @staticmethod
+    def _formal_step_evaluator(bridge) -> AgentDeviceEvaluator:
+        evaluator = AgentDeviceEvaluator.__new__(AgentDeviceEvaluator)
+        evaluator.platform = "ios"
+        evaluator.hybrid_restart = False
+        evaluator.bridge = bridge
+        evaluator.prd_text = ""
+        evaluator.seed_iterations = 100
+        evaluator.max_iterations = 50
+        evaluator.verbose = False
+        evaluator.model = "claude-opus-4-8"
+        evaluator.reasoning_effort = "high"
+        return evaluator
+
+    def test_spec_completed_step_captures_deterministic_final_screenshot(self) -> None:
+        """Specification: terminal formal steps carry durable screenshot evidence.
+
+        Oracle: step one always maps to screenshots/step-01-final.png.
+        Catches: discretionary-only captures or random final-state filenames.
+        """
+        bridge = RecordingScreenshotBridge(AgentDeviceResult(success=True, output="saved"))
+        evaluator = self._formal_step_evaluator(bridge)
+
+        async def complete_phase(_self, _client, state, _turn_agg, _agg_usage) -> None:
+            state.completed = True
+            state.turns_used = 2
+            state.assertions.append(
+                AssertionResult("assert_visible: note-title", fatal=True, passed=True)
+            )
+
+        with (
+            patch(
+                "eval_harness.evaluator.ios_agentic.agent_device.evaluator.parse_test_plan",
+                return_value={
+                    "full_points": 3,
+                    "steps": [{"name": "show note", "description": "", "points": 3}],
+                    "seeding": "",
+                },
+            ),
+            patch(
+                "eval_harness.evaluator.ios_agentic.agent_device.evaluator.Tracer",
+                RecordingTracer,
+            ),
+            patch(
+                "eval_harness.evaluator.ios_agentic.agent_device.evaluator.ClaudeSDKClient",
+                PassiveSdkClient,
+            ),
+            patch.object(AgentDeviceEvaluator, "_receive_phase_response", complete_phase),
+        ):
+            result = asyncio.run(evaluator._evaluate_test_plan_async(Path("test_insert.txt")))
+
+        step = result.steps[0]
+        self.assertEqual(step.screenshot_path, "screenshots/step-01-final.png")
+        self.assertIsNone(step.screenshot_error)
+        self.assertEqual(
+            bridge.screenshot_paths,
+            ["/tmp/test-ios-evaluator-trace/screenshots/step-01-final.png"],
+        )
+        step_event = next(fields for event, fields in RecordingTracer.latest.events if event == "step_complete")
+        self.assertEqual(step_event["screenshot"], "screenshots/step-01-final.png")
+        self.assertIsNone(step_event["screenshot_error"])
+
+    def test_provider_session_limit_in_seed_aborts_suite_unscored(self) -> None:
+        """The exact zero-token synthetic quota response is infrastructure.
+
+        Catches: reporting a seed protocol failure and continuing later plans.
+        """
+        bridge = SuccessfulRestartBridge()
+        evaluator = self._formal_step_evaluator(bridge)
+
+        with (
+            patch(
+                "eval_harness.evaluator.ios_agentic.agent_device.evaluator.parse_test_plan",
+                return_value={
+                    "full_points": 6,
+                    "steps": [
+                        {"name": "first", "description": "", "points": 3},
+                        {"name": "second", "description": "", "points": 3},
+                    ],
+                    "seeding": "Create a note before evaluation.",
+                },
+            ),
+            patch(
+                "eval_harness.evaluator.ios_agentic.agent_device.evaluator.Tracer",
+                RecordingTracer,
+            ),
+            patch(
+                "eval_harness.evaluator.ios_agentic.agent_device.evaluator.ClaudeSDKClient",
+                SyntheticSessionLimitClient,
+            ),
+        ):
+            result = asyncio.run(
+                evaluator._evaluate_test_plan_async(Path("test_insert.txt"))
+            )
+
+        self.assertEqual(len(SyntheticSessionLimitClient.latest.queries), 1)
+        self.assertEqual(result.status, "evaluator_error")
+        self.assertEqual(result.error_stage, "seed")
+        self.assertEqual(result.error_reason, SESSION_LIMIT_REASON)
+        self.assertEqual(result.abort_scope, "suite")
+        self.assertEqual(result.steps, [])
+        aborted = next(
+            fields
+            for event, fields in RecordingTracer.latest.events
+            if event == "plan_aborted"
+        )
+        self.assertEqual(aborted["reason"], "provider_quota")
+        self.assertEqual(aborted["category"], "evaluator_infrastructure")
+        self.assertEqual(RecordingTracer.latest.summary["score"], None)
+        self.assertEqual(RecordingTracer.latest.summary["abort_scope"], "suite")
+
+    def test_provider_session_limit_in_formal_step_aborts_suite_unscored(self) -> None:
+        """Formal-phase quota exhaustion stops before any later scored step.
+
+        Catches: recording a model/app zero and querying the next formal phase.
+        """
+        bridge = SuccessfulRestartBridge()
+        evaluator = self._formal_step_evaluator(bridge)
+
+        with (
+            patch(
+                "eval_harness.evaluator.ios_agentic.agent_device.evaluator.parse_test_plan",
+                return_value={
+                    "full_points": 6,
+                    "steps": [
+                        {"name": "first", "description": "", "points": 3},
+                        {"name": "second", "description": "", "points": 3},
+                    ],
+                    "seeding": "",
+                },
+            ),
+            patch(
+                "eval_harness.evaluator.ios_agentic.agent_device.evaluator.Tracer",
+                RecordingTracer,
+            ),
+            patch(
+                "eval_harness.evaluator.ios_agentic.agent_device.evaluator.ClaudeSDKClient",
+                SyntheticSessionLimitClient,
+            ),
+        ):
+            result = asyncio.run(
+                evaluator._evaluate_test_plan_async(Path("test_insert.txt"))
+            )
+
+        self.assertEqual(len(SyntheticSessionLimitClient.latest.queries), 1)
+        self.assertEqual(result.status, "evaluator_error")
+        self.assertEqual(result.error_stage, "step_1")
+        self.assertEqual(result.error_reason, SESSION_LIMIT_REASON)
+        self.assertEqual(result.abort_scope, "suite")
+        self.assertEqual(result.steps, [])
+        self.assertEqual(len(result.terminal_evidence), 1)
+        self.assertEqual(RecordingTracer.latest.summary["score"], None)
+        self.assertEqual(RecordingTracer.latest.summary["abort_scope"], "suite")
+
+    def test_nonquota_unterminated_response_keeps_generic_protocol_error(self) -> None:
+        """Matching text from a real model is not provider quota evidence.
+
+        Catches: broad text-only matching that changes ordinary protocol handling.
+        """
+        bridge = SuccessfulRestartBridge()
+        evaluator = self._formal_step_evaluator(bridge)
+
+        with (
+            patch(
+                "eval_harness.evaluator.ios_agentic.agent_device.evaluator.parse_test_plan",
+                return_value={
+                    "full_points": 3,
+                    "steps": [{"name": "first", "description": "", "points": 3}],
+                    "seeding": "",
+                },
+            ),
+            patch(
+                "eval_harness.evaluator.ios_agentic.agent_device.evaluator.Tracer",
+                RecordingTracer,
+            ),
+            patch(
+                "eval_harness.evaluator.ios_agentic.agent_device.evaluator.ClaudeSDKClient",
+                OrdinaryUnterminatedClient,
+            ),
+        ):
+            result = asyncio.run(
+                evaluator._evaluate_test_plan_async(Path("test_insert.txt"))
+            )
+
+        self.assertEqual(len(OrdinaryUnterminatedClient.latest.queries), 1)
+        self.assertEqual(result.status, "evaluator_error")
+        self.assertEqual(result.error_stage, "step_1")
+        self.assertEqual(
+            result.error_reason,
+            "step response ended without complete_step or abort_step",
+        )
+        self.assertEqual(result.abort_scope, "plan")
+
+    def test_regression_screenshot_failure_does_not_change_step_score(self) -> None:
+        """Regression: screenshot diagnostics are independent of app scoring.
+
+        Oracle: one passing fatal assertion still earns all three points.
+        Catches: capture failure changing earned points or pass/fail state.
+        """
+        bridge = RecordingScreenshotBridge(
+            AgentDeviceResult(success=False, output="", error="simctl screenshot failed")
+        )
+        evaluator = self._formal_step_evaluator(bridge)
+
+        async def complete_phase(_self, _client, state, _turn_agg, _agg_usage) -> None:
+            state.completed = True
+            state.turns_used = 2
+            state.assertions.append(
+                AssertionResult("assert_visible: note-title", fatal=True, passed=True)
+            )
+
+        with (
+            patch(
+                "eval_harness.evaluator.ios_agentic.agent_device.evaluator.parse_test_plan",
+                return_value={
+                    "full_points": 3,
+                    "steps": [{"name": "show note", "description": "", "points": 3}],
+                    "seeding": "",
+                },
+            ),
+            patch(
+                "eval_harness.evaluator.ios_agentic.agent_device.evaluator.Tracer",
+                RecordingTracer,
+            ),
+            patch(
+                "eval_harness.evaluator.ios_agentic.agent_device.evaluator.ClaudeSDKClient",
+                PassiveSdkClient,
+            ),
+            patch.object(AgentDeviceEvaluator, "_receive_phase_response", complete_phase),
+        ):
+            result = asyncio.run(evaluator._evaluate_test_plan_async(Path("test_insert.txt")))
+
+        step = result.steps[0]
+        self.assertEqual(step.earned_points, 3)
+        self.assertTrue(step.passed)
+        self.assertIsNone(step.screenshot_path)
+        self.assertEqual(step.screenshot_error, "simctl screenshot failed")
+
+    def test_spec_aborted_formal_step_captures_final_screenshot_in_trace(self) -> None:
+        """Specification: evaluator aborts preserve the terminal UI for review.
+
+        Oracle: aborted formal step one uses the same deterministic filename.
+        Catches: returning before capture or leaving evidence only in JSONL.
+        """
+        bridge = RecordingScreenshotBridge(AgentDeviceResult(success=True, output="saved"))
+        evaluator = self._formal_step_evaluator(bridge)
+
+        async def abort_phase(_self, _client, state, _turn_agg, _agg_usage) -> None:
+            state.aborted = True
+            state.abort_category = "driver_error"
+            state.abort_reason = "screen unavailable"
+
+        with (
+            patch(
+                "eval_harness.evaluator.ios_agentic.agent_device.evaluator.parse_test_plan",
+                return_value={
+                    "full_points": 3,
+                    "steps": [{"name": "show note", "description": "", "points": 3}],
+                    "seeding": "",
+                },
+            ),
+            patch(
+                "eval_harness.evaluator.ios_agentic.agent_device.evaluator.Tracer",
+                RecordingTracer,
+            ),
+            patch(
+                "eval_harness.evaluator.ios_agentic.agent_device.evaluator.ClaudeSDKClient",
+                PassiveSdkClient,
+            ),
+            patch.object(AgentDeviceEvaluator, "_receive_phase_response", abort_phase),
+        ):
+            result = asyncio.run(
+                evaluator._evaluate_test_plan_async(Path("test_insert.txt"), run_index=2)
+            )
+
+        self.assertEqual(result.status, "evaluator_error")
+        self.assertEqual(result.steps, [])
+        self.assertEqual(len(result.terminal_evidence), 1)
+        evidence = result.terminal_evidence[0]
+        self.assertEqual(evidence.evidence_kind, "formal_step")
+        self.assertEqual(evidence.step_number, 1)
+        self.assertEqual(evidence.step_name, "show note")
+        self.assertEqual(evidence.screenshot_path, "screenshots/step-01-final.png")
+        self.assertIsNone(evidence.screenshot_error)
+        aborted = next(fields for event, fields in RecordingTracer.latest.events if event == "plan_aborted")
+        self.assertEqual(aborted["screenshot"], "screenshots/step-01-final.png")
+        self.assertIsNone(aborted["screenshot_error"])
+        self.assertEqual(
+            RecordingTracer.latest.summary,
+            {
+                "plan": "test_insert.txt",
+                "run_index": 2,
+                "platform": "ios",
+                "driver": "agent-device",
+                "status": "evaluator_error",
+                "error_stage": "step_1",
+                "error_reason": "driver_error: screen unavailable",
+                "score": None,
+                "full_points": None,
+                "total_usage": {
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "cache_creation_input_tokens": 0,
+                    "cache_read_input_tokens": 0,
+                    "total_cost_usd": 0.0,
+                    "n_responses": 0,
+                },
+                "steps": [],
+                "terminal_evidence": [
+                    {
+                        "evidence_kind": "formal_step",
+                        "step_number": 1,
+                        "step_name": "show note",
+                        "screenshot": "screenshots/step-01-final.png",
+                        "screenshot_error": None,
+                    }
+                ],
+            },
+        )
+
+    def test_spec_unterminated_formal_step_preserves_screenshot_failure(self) -> None:
+        """Specification: a turn-budget exit retains capture diagnostics.
+
+        Oracle: the unscored plan has null-score evidence for its formal step.
+        Catches: handling explicit aborts while dropping unterminated responses.
+        """
+        bridge = RecordingScreenshotBridge(
+            AgentDeviceResult(success=False, output="", error="simctl screenshot failed")
+        )
+        evaluator = self._formal_step_evaluator(bridge)
+
+        async def unterminated_phase(_self, _client, state, _turn_agg, _agg_usage) -> None:
+            state.turns_used = 50
+
+        with (
+            patch(
+                "eval_harness.evaluator.ios_agentic.agent_device.evaluator.parse_test_plan",
+                return_value={
+                    "full_points": 3,
+                    "steps": [{"name": "show note", "description": "", "points": 3}],
+                    "seeding": "",
+                },
+            ),
+            patch(
+                "eval_harness.evaluator.ios_agentic.agent_device.evaluator.Tracer",
+                RecordingTracer,
+            ),
+            patch(
+                "eval_harness.evaluator.ios_agentic.agent_device.evaluator.ClaudeSDKClient",
+                PassiveSdkClient,
+            ),
+            patch.object(
+                AgentDeviceEvaluator,
+                "_receive_phase_response",
+                unterminated_phase,
+            ),
+        ):
+            result = asyncio.run(
+                evaluator._evaluate_test_plan_async(Path("test_insert.txt"), run_index=3)
+            )
+
+        self.assertEqual(result.status, "evaluator_error")
+        self.assertEqual(result.error_stage, "step_1")
+        self.assertEqual(
+            result.error_reason,
+            "step response ended without complete_step or abort_step",
+        )
+        self.assertEqual(result.steps, [])
+        self.assertEqual(len(result.terminal_evidence), 1)
+        evidence = result.terminal_evidence[0]
+        self.assertIsNone(evidence.screenshot_path)
+        self.assertEqual(evidence.screenshot_error, "simctl screenshot failed")
+        self.assertEqual(RecordingTracer.latest.summary["run_index"], 3)
+        self.assertEqual(
+            RecordingTracer.latest.summary["terminal_evidence"][0]["screenshot_error"],
+            "simctl screenshot failed",
+        )
+
     def test_regression_restart_failure_is_an_evaluator_error(self) -> None:
         """Regression: a driver restart fault is not an app score of zero.
 
@@ -137,7 +620,8 @@ class AgentDeviceEvaluatorOutcomeTests(unittest.TestCase):
         evaluator = AgentDeviceEvaluator.__new__(AgentDeviceEvaluator)
         evaluator.platform = "ios"
         evaluator.hybrid_restart = False
-        evaluator.bridge = FailedRestartBridge()
+        bridge = FailedRestartBridge()
+        evaluator.bridge = bridge
 
         with (
             patch(
@@ -159,6 +643,83 @@ class AgentDeviceEvaluatorOutcomeTests(unittest.TestCase):
         )
         self.assertEqual(result.score, 0)
         self.assertEqual(result.steps, [])
+        self.assertEqual(result.abort_scope, "suite")
+        self.assertEqual(bridge.restart_calls, [(True, True)])
+        self.assertEqual(len(result.terminal_evidence), 1)
+        self.assertEqual(result.terminal_evidence[0].evidence_kind, "preflight")
+        self.assertIsNone(result.terminal_evidence[0].step_number)
+        self.assertEqual(
+            result.terminal_evidence[0].screenshot_path,
+            "screenshots/preflight-final.png",
+        )
+        self.assertEqual(
+            bridge.screenshot_paths,
+            ["/tmp/test-ios-evaluator-trace/screenshots/preflight-final.png"],
+        )
+        self.assertFalse(
+            any(event == "tool_call" and fields.get("tool") == "abort_step"
+                for event, fields in RecordingTracer.latest.events),
+        )
+        self.assertEqual(
+            RecordingTracer.latest.summary["error_reason"],
+            "development client launcher never reached authored app",
+        )
+        self.assertEqual(
+            RecordingTracer.latest.summary["terminal_evidence"],
+            [{
+                "evidence_kind": "preflight",
+                "step_number": None,
+                "step_name": "pre-plan readiness",
+                "screenshot": "screenshots/preflight-final.png",
+                "screenshot_error": None,
+            }],
+        )
+
+    def test_spec_preflight_alert_diagnostics_are_recorded_before_sdk_session(self) -> None:
+        """Specification: neutral lifecycle choices are reviewable trace evidence.
+
+        Oracle: the bridge is invoked in preflight mode and its exact diagnostic
+        is emitted before Claude SDK options or tools are needed.
+        Catches: silent permission-state mutation or in-session auto-dismissal.
+        """
+        bridge = SuccessfulRestartBridge()
+        bridge.last_restart_diagnostics = [
+            {
+                "kind": "permission_alert",
+                "phase": "preflight",
+                "alert": "“Pool” Would Like to Use Your Current Location",
+                "action": "dismissed",
+                "button": "Don’t Allow",
+            }
+        ]
+        evaluator = self._formal_step_evaluator(bridge)
+
+        with (
+            patch(
+                "eval_harness.evaluator.ios_agentic.agent_device.evaluator.parse_test_plan",
+                return_value={"full_points": 0, "steps": [], "seeding": ""},
+            ),
+            patch(
+                "eval_harness.evaluator.ios_agentic.agent_device.evaluator.Tracer",
+                RecordingTracer,
+            ),
+            patch(
+                "eval_harness.evaluator.ios_agentic.agent_device.evaluator.ClaudeSDKClient",
+                PassiveSdkClient,
+            ),
+        ):
+            result = asyncio.run(
+                evaluator._evaluate_test_plan_async(Path("test_empty.txt"))
+            )
+
+        self.assertEqual(result.status, "completed")
+        self.assertEqual(bridge.restart_calls, [(True, True)])
+        diagnostic_event = next(
+            fields
+            for event, fields in RecordingTracer.latest.events
+            if event == "preflight_system_alert"
+        )
+        self.assertEqual(diagnostic_event, bridge.last_restart_diagnostics[0])
 
     def test_regression_unexpected_sdk_exception_closes_plan_tracer(self) -> None:
         """Regression: plan-local tracing releases console ownership on errors.
@@ -174,6 +735,8 @@ class AgentDeviceEvaluatorOutcomeTests(unittest.TestCase):
         evaluator.seed_iterations = 200
         evaluator.max_iterations = 50
         evaluator.verbose = False
+        evaluator.model = "claude-opus-4-8"
+        evaluator.reasoning_effort = "high"
 
         with (
             patch(
@@ -195,8 +758,62 @@ class AgentDeviceEvaluatorOutcomeTests(unittest.TestCase):
         self.assertIsNotNone(RecordingTracer.latest)
         self.assertEqual(RecordingTracer.latest.close_calls, 1)
 
+    def test_uses_configured_model_and_adaptive_thinking(self) -> None:
+        evaluator = AgentDeviceEvaluator.__new__(AgentDeviceEvaluator)
+        evaluator.platform = "ios"
+        evaluator.hybrid_restart = False
+        evaluator.bridge = SuccessfulRestartBridge()
+        evaluator.prd_text = ""
+        evaluator.seed_iterations = 100
+        evaluator.max_iterations = 50
+        evaluator.verbose = False
+        evaluator.model = "claude-opus-4-8"
+        evaluator.reasoning_effort = "high"
+
+        with (
+            patch(
+                "eval_harness.evaluator.ios_agentic.agent_device.evaluator.parse_test_plan",
+                return_value={"full_points": 0, "steps": [], "seeding": ""},
+            ),
+            patch(
+                "eval_harness.evaluator.ios_agentic.agent_device.evaluator.Tracer",
+                RecordingTracer,
+            ),
+            patch(
+                "eval_harness.evaluator.ios_agentic.agent_device.evaluator.ClaudeAgentOptions",
+            ) as options_class,
+            patch(
+                "eval_harness.evaluator.ios_agentic.agent_device.evaluator.ClaudeSDKClient",
+                FailingSdkClient,
+            ),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "SDK connection failed"):
+                asyncio.run(evaluator._evaluate_test_plan_async(Path("test_empty.txt")))
+
+        options = options_class.call_args.kwargs
+        self.assertEqual(options["model"], "claude-opus-4-8")
+        self.assertEqual(options["effort"], "high")
+        self.assertEqual(options["thinking"], {"type": "adaptive"})
+
 
 class AgentDeviceEvaluatorLifecycleTests(unittest.TestCase):
+    def test_spec_prompt_keeps_screenshots_out_of_scoring(self) -> None:
+        """Specification: Claude is told screenshots are human-only evidence.
+
+        Oracle: the built prompt states the path-only limitation and AT basis.
+        Catches: inviting pixel-based judgments the evaluator cannot perform.
+        """
+        prompt = build_system_prompt("ios")
+
+        self.assertIn(
+            "capture_screenshot saves human-review evidence. It returns a path, not image pixels; "
+            "you cannot inspect the screenshot. Never use it to decide or score an assertion. "
+            "Base decisions on capture_screen and the structured assertion tools. You may capture "
+            "additional feature-relevant states for later human review; the harness also captures "
+            "each terminal formal-step state automatically.",
+            prompt,
+        )
+
     @patch.dict("os.environ", {}, clear=False)
     def test_regression_restart_tool_reports_preserved_dev_client_state(self) -> None:
         """Regression: Claude receives the actual restart semantics.

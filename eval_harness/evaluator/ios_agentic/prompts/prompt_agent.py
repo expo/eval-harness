@@ -34,6 +34,8 @@ For each step, the loop is:
    - **Soft assertions** (content): use `record_soft_assertion`. You read the accessibility tree yourself, judge whether the text/value/state matches the requirement, and cite the specific evidence.
 5. When every verification listed in the step description has been recorded, call `complete_step` with a brief summary. The orchestrator mechanically stops the current response and advances to the next step.
 
+capture_screenshot saves human-review evidence. It returns a path, not image pixels; you cannot inspect the screenshot. Never use it to decide or score an assertion. Base decisions on capture_screen and the structured assertion tools. You may capture additional feature-relevant states for later human review; the harness also captures each terminal formal-step state automatically.
+
 ## Scoring contract
 
 - A step is worth its `points` value.

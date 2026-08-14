@@ -1,7 +1,9 @@
 import { expect, test } from "bun:test";
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   symlinkSync,
@@ -139,6 +141,104 @@ function writeFixture(root: string): {
     JSON.stringify({ "expo-test": ["ready-file"] }),
   );
   return { authored, prdSkills, checksDir, app, bundle, trace, manifest };
+}
+
+function writeV2Fixture(root: string): {
+  authored: string;
+  evalArtifact: string;
+  prdSkills: string;
+  checksDir: string;
+} {
+  const authored = join(root, "authored-v2");
+  const app = join(authored, "author-agent-workspace", "run-1");
+  const traces = join(
+    authored,
+    "author-agent-metadata",
+    "run-1",
+    "telemetry",
+    "traces",
+  );
+  mkdirSync(app, { recursive: true });
+  mkdirSync(traces, { recursive: true });
+  writeFileSync(join(app, "package.json"), "{}");
+  writeFileSync(join(app, "ready"), "yes\n");
+  writeFileSync(
+    join(authored, "manifest.json"),
+    JSON.stringify({
+      schema_version: 2,
+      artifact_type: "authored-app",
+      run_id: "run-1",
+      prd: "dataset/prds/test-app/prd/mvp.txt",
+    }),
+  );
+  writeFileSync(
+    join(traces, "muse-code-authoring.json"),
+    JSON.stringify({
+      agent: "muse-code",
+      sessions: [{
+        turns: [{
+          steps: [{
+            tool_calls: [{ name: "Skill", args: { skill: "expo-test" } }],
+          }],
+        }],
+      }],
+    }),
+  );
+  const legacyBundle = join(authored, "bundle");
+  mkdirSync(join(legacyBundle, "app"), { recursive: true });
+  mkdirSync(join(legacyBundle, "telemetry", "traces"), { recursive: true });
+  writeFileSync(join(legacyBundle, "app", "package.json"), "{}");
+  writeFileSync(
+    join(legacyBundle, "telemetry", "traces", "claude-code-authoring.json"),
+    JSON.stringify({ agent: "claude-code", sessions: [] }),
+  );
+
+  const evalArtifact = join(root, "ios-eval-report");
+  mkdirSync(evalArtifact, { recursive: true });
+  writeFileSync(
+    join(evalArtifact, "manifest.json"),
+    JSON.stringify({
+      schema_version: 2,
+      artifact_type: "ios-eval-report",
+      run_id: "run-1",
+    }),
+  );
+  writeFileSync(
+    join(evalArtifact, "result.json"),
+    JSON.stringify({ status: "completed", macro_avg_pct: 87.5 }),
+  );
+  mkdirSync(join(evalArtifact, "bundle", "eval"), { recursive: true });
+  writeFileSync(
+    join(evalArtifact, "bundle", "eval", "result.json"),
+    JSON.stringify({ status: "completed", macro_avg_pct: 12.5 }),
+  );
+
+  const prdSkills = join(root, "prd_skills.json");
+  writeFileSync(prdSkills, JSON.stringify({ "test-app": ["expo-test"] }));
+  const checksDir = join(root, "checks");
+  mkdirSync(checksDir);
+  writeFileSync(
+    join(checksDir, "checks_data.json"),
+    JSON.stringify({
+      checks: [{
+        id: "ready-file",
+        category: "structural",
+        kind: "path_exists",
+        target: ["ready"],
+      }],
+    }),
+  );
+  writeFileSync(
+    join(checksDir, "skill_map.json"),
+    JSON.stringify({ "expo-test": ["ready-file"] }),
+  );
+  return { authored, evalArtifact, prdSkills, checksDir };
+}
+
+function scratchDirectories(parent: string): string[] {
+  return readdirSync(parent).filter((entry) =>
+    entry.startsWith("expo-skill-eval-")
+  );
 }
 
 const EXPECTED_HAPPY_REPORT = `<!doctype html>
@@ -400,6 +500,155 @@ test("[REGRESSION] artifact discovery and analysis preserve the metrics contract
       .toEqual(expectedPayload);
     expect(readFileSync(join(outDir, "report.html"), "utf8"))
       .toBe(EXPECTED_HAPPY_REPORT);
+  });
+});
+
+test("[REGRESSION] v2 artifact discovery wins over legacy layouts", async () => {
+  // Catches v2 artifacts being silently treated as the legacy stitched bundle.
+  await withTempDirAsync(async (root) => {
+    const fixture = writeV2Fixture(root);
+    const authorLayout = await discoverArtifactLayout(fixture.authored);
+    const evalLayout = await discoverArtifactLayout(fixture.evalArtifact);
+
+    expect(authorLayout.appDir).toEndWith(
+      join("author-agent-workspace", "run-1"),
+    );
+    expect(authorLayout.tracePath).toEndWith(
+      join(
+        "author-agent-metadata",
+        "run-1",
+        "telemetry",
+        "traces",
+        "muse-code-authoring.json",
+      ),
+    );
+    expect(evalLayout.resultPath).toEndWith(join("ios-eval-report", "result.json"));
+  });
+});
+
+test("[SECURITY] Braintrust refs retain only valid HTTPS reference URLs", async () => {
+  // Catches flattening arbitrary trace/manifest strings (including secrets and
+  // source) merely because they contain the word "braintrust".
+  await withTempDirAsync(async (root) => {
+    const fixture = writeV2Fixture(root);
+    const tracePath = join(
+      fixture.authored,
+      "author-agent-metadata",
+      "run-1",
+      "telemetry",
+      "traces",
+      "muse-code-authoring.json",
+    );
+    writeFileSync(
+      tracePath,
+      JSON.stringify({
+        agent: "muse-code",
+        sessions: [{
+          turns: [{
+            steps: [{
+              tool_calls: [{ name: "Skill", args: { skill: "expo-test" } }],
+              output: [
+                "See https://braintrust.dev/app/acme/p/demo/experiments/run-1.",
+                "https://www.braintrust.dev/app/acme/p/demo/experiments/run-2?view=full#row-3",
+                "duplicate https://braintrust.dev/app/acme/p/demo/experiments/run-1",
+                "BRAINTRUST_API_KEY=sk-raw-credential-must-not-survive",
+                "https://notbraintrust.dev/app/acme/p/demo/experiments/invalid",
+                "https://braintrust.dev.evil.example/phishing",
+                "https://user:secret@braintrust.dev/private",
+                "https://braintrust.dev/app/acme?token=secret-value",
+              ],
+            }],
+          }],
+        }],
+        "https://braintrust.dev/object-key-is-not-a-value": "not a reference",
+      }),
+    );
+
+    const authorManifestPath = join(fixture.authored, "manifest.json");
+    const authorManifest = JSON.parse(readFileSync(authorManifestPath, "utf8"));
+    authorManifest.telemetry = {
+      refs: [
+        "https://braintrust.dev/app/acme/p/demo/experiments/run-1",
+        "https://braintrust.dev/app/acme/p/demo/experiments/run-3",
+      ],
+      diagnostic: "braintrust request failed with BRAINTRUST_API_KEY=sk-secret",
+    };
+    writeFileSync(authorManifestPath, JSON.stringify(authorManifest));
+
+    const evalManifestPath = join(fixture.evalArtifact, "manifest.json");
+    const evalManifest = JSON.parse(readFileSync(evalManifestPath, "utf8"));
+    evalManifest.telemetry = {
+      refs: [
+        "https://www.braintrust.dev/app/acme/p/demo/experiments/run-2?view=full#row-3",
+        "https://www.braintrust.dev/app/acme/p/demo/experiments/run-4",
+      ],
+    };
+    writeFileSync(evalManifestPath, JSON.stringify(evalManifest));
+
+    const payload = await analyzeArtifacts({
+      authoredArtifact: fixture.authored,
+      evalArtifact: fixture.evalArtifact,
+      scenario: "skills_available_unmentioned",
+      outDir: join(root, "out"),
+      prdSkillsPath: fixture.prdSkills,
+      checksDir: fixture.checksDir,
+    });
+
+    expect(payload.braintrust_refs).toEqual([
+      "https://braintrust.dev/app/acme/p/demo/experiments/run-1",
+      "https://www.braintrust.dev/app/acme/p/demo/experiments/run-2?view=full#row-3",
+      "https://braintrust.dev/app/acme/p/demo/experiments/run-3",
+      "https://www.braintrust.dev/app/acme/p/demo/experiments/run-4",
+    ]);
+    const serialized = readFileSync(join(root, "out", "metrics.json"), "utf8");
+    expect(serialized).not.toContain("sk-raw-credential-must-not-survive");
+    expect(serialized).not.toContain("object-key-is-not-a-value");
+  });
+});
+
+test("[REGRESSION] Braintrust refs stay compact under Muse-sized trace output", async () => {
+  // Catches removing the URL-length/count bounds or retaining a huge tool
+  // output as one reference. The compact contract keeps the first 32 refs.
+  await withTempDirAsync(async (root) => {
+    const fixture = writeFixture(root);
+    const validRefs = Array.from(
+      { length: 40 },
+      (_, index) => `https://braintrust.dev/ref/${String(index).padStart(2, "0")}`,
+    );
+    const hugeMuseOutput =
+      `RAW_TOOL_OUTPUT braintrust ${"source-code-and-tool-output ".repeat(400_000)}`;
+    const overlongUrl = `https://braintrust.dev/${"x".repeat(2_100)}`;
+    writeFileSync(
+      fixture.trace,
+      JSON.stringify({
+        agent: "muse-code",
+        sessions: [{
+          turns: [{
+            steps: [{
+              tool_calls: [{ name: "Skill", args: { skill: "expo-test" } }],
+              output: hugeMuseOutput,
+              overlong_ref: overlongUrl,
+              refs: validRefs,
+            }],
+          }],
+        }],
+      }),
+    );
+    const outDir = join(root, "out");
+
+    const payload = await analyzeArtifacts({
+      authoredArtifact: fixture.authored,
+      evalArtifact: null,
+      scenario: "skills_available_unmentioned",
+      outDir,
+      prdSkillsPath: fixture.prdSkills,
+      checksDir: fixture.checksDir,
+    });
+
+    expect(payload.braintrust_refs).toEqual(validRefs.slice(0, 32));
+    const serialized = readFileSync(join(outDir, "metrics.json"));
+    expect(serialized.byteLength).toBeLessThan(100_000);
+    expect(serialized.toString("utf8")).not.toContain("RAW_TOOL_OUTPUT");
   });
 });
 
@@ -816,6 +1065,173 @@ test("[CHAR] Bun CLI writes reports and the stable console summary", () => {
   });
 });
 
+test("[REGRESSION] CLI discards extracted sources after analyzing a v2 archive", () => {
+  // Catches report artifacts shipping the authored source tree or scratch
+  // extraction directories after a successful CLI run.
+  withTempDir((root) => {
+    const fixture = writeV2Fixture(root);
+    const archive = join(root, "authored-v2.tar.gz");
+    const outDir = join(root, "skill-eval-report");
+    createArchive(
+      { file: archive, cwd: fixture.authored, gzip: true, sync: true },
+      ["."],
+    );
+
+    const spawned = Bun.spawnSync([
+      process.execPath,
+      CLI_PATH,
+      "analyze-artifacts",
+      "--authored-artifact",
+      archive,
+      "--scenario",
+      "skills_available_unmentioned",
+      "--out-dir",
+      outDir,
+      "--prd-skills",
+      fixture.prdSkills,
+      "--checks-dir",
+      fixture.checksDir,
+    ], { stdout: "pipe", stderr: "pipe" });
+
+    expect(spawned.exitCode).toBe(0);
+    expect(spawned.stderr.toString()).toBe("");
+    expect(readdirSync(outDir).sort()).toEqual([
+      "manifest.json",
+      "metrics.json",
+      "report.html",
+    ]);
+    expect(JSON.parse(readFileSync(join(outDir, "manifest.json"), "utf8")))
+      .toEqual({
+        schema_version: 2,
+        artifact_type: "skill-eval-report",
+        run_id: "run-1",
+        artifacts: {
+          metrics: "metrics.json",
+          report: "report.html",
+        },
+      });
+  });
+});
+
+test("[REGRESSION] absolute artifact provenance never records the temporary scratch path", () => {
+  // Catches metrics that point at an extracted archive after the CLI has
+  // already deleted it. The production change that should fail this test is
+  // omitting the original absolute archive input as the display root.
+  withTempDir((root) => {
+    const fixture = writeV2Fixture(root);
+    const archive = join(root, "authored-v2.tar.gz");
+    const evalArchive = join(root, "ios-eval-v2.tar.gz");
+    const outDir = join(root, "absolute-report");
+    const scratchParent = join(root, "controlled-tmp");
+    mkdirSync(scratchParent);
+    createArchive(
+      { file: archive, cwd: fixture.authored, gzip: true, sync: true },
+      ["."],
+    );
+    createArchive(
+      { file: evalArchive, cwd: fixture.evalArtifact, gzip: true, sync: true },
+      ["."],
+    );
+
+    const spawned = Bun.spawnSync([
+      process.execPath,
+      CLI_PATH,
+      "analyze-artifacts",
+      "--authored-artifact",
+      archive,
+      "--scenario",
+      "skills_available_unmentioned",
+      "--eval-artifact",
+      evalArchive,
+      "--out-dir",
+      outDir,
+      "--prd-skills",
+      fixture.prdSkills,
+      "--checks-dir",
+      fixture.checksDir,
+    ], {
+      env: { ...process.env, TMPDIR: scratchParent },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+
+    expect(spawned.exitCode).toBe(0);
+    expect(scratchDirectories(scratchParent)).toEqual([]);
+    const artifacts = JSON.parse(
+      readFileSync(join(outDir, "metrics.json"), "utf8"),
+    ).artifacts as Record<string, string | null>;
+    expect(artifacts.authored_root).toBe(archive);
+    expect(artifacts.eval_root).toBe(evalArchive);
+    expect(Object.values(artifacts).join("\n")).not.toContain(
+      "expo-skill-eval-",
+    );
+  });
+});
+
+test("[REGRESSION] directory inputs keep their own stable provenance", () => {
+  withTempDir((root) => {
+    const fixture = writeV2Fixture(root);
+    const outDir = join(root, "directory-report");
+    const spawned = Bun.spawnSync([
+      process.execPath,
+      CLI_PATH,
+      "analyze-artifacts",
+      "--authored-artifact",
+      fixture.authored,
+      "--scenario",
+      "skills_available_unmentioned",
+      "--out-dir",
+      outDir,
+      "--prd-skills",
+      fixture.prdSkills,
+      "--checks-dir",
+      fixture.checksDir,
+    ], { stdout: "pipe", stderr: "pipe" });
+
+    expect(spawned.exitCode).toBe(0);
+    const artifacts = JSON.parse(
+      readFileSync(join(outDir, "metrics.json"), "utf8"),
+    ).artifacts as Record<string, string | null>;
+    expect(artifacts.authored_root).toBe(fixture.authored);
+    expect(artifacts.app_dir).toBe(join(
+      fixture.authored,
+      "author-agent-workspace",
+      "run-1",
+    ));
+  });
+});
+
+test("[REGRESSION] failed archive analysis removes its controlled scratch directory", () => {
+  // Catches cleanup that only runs after a successful analysis. A malformed
+  // archive fails during extraction, after the scratch directory is created.
+  withTempDir((root) => {
+    const archive = join(root, "corrupt.tar.gz");
+    const outDir = join(root, "failed-report");
+    const scratchParent = join(root, "controlled-tmp");
+    mkdirSync(scratchParent);
+    writeFileSync(archive, "not an archive");
+
+    const spawned = Bun.spawnSync([
+      process.execPath,
+      CLI_PATH,
+      "analyze-artifacts",
+      "--authored-artifact",
+      archive,
+      "--scenario",
+      "skills_available_unmentioned",
+      "--out-dir",
+      outDir,
+    ], {
+      env: { ...process.env, TMPDIR: scratchParent },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+
+    expect(spawned.exitCode).not.toBe(0);
+    expect(scratchDirectories(scratchParent)).toEqual([]);
+  });
+});
+
 test("[CHAR] Bun CLI accepts Python's unique long-option abbreviations", () => {
   withTempDir((root) => {
     const fixture = writeFixture(root);
@@ -892,7 +1308,22 @@ test("[REGRESSION] shell entrypoint runs with Bun and no Python executable", () 
   // environment-to-CLI argument propagation.
   withTempDir((root) => {
     const fixture = writeFixture(root);
-    const outDir = join(root, "shell-out");
+    const workflowRoot = join(root, "workflow-root");
+    mkdirSync(workflowRoot);
+    symlinkSync(
+      join(REPO_ROOT, "eval_harness"),
+      join(workflowRoot, "eval_harness"),
+      "dir",
+    );
+    const outDir = join(workflowRoot, "skill-eval-report");
+    const shellEntrypoint = join(
+      workflowRoot,
+      "eval_harness",
+      "evaluator",
+      "skill_invocation",
+      "scripts",
+      "eval-skill-use.sh",
+    );
     const bin = join(root, "bin");
     mkdirSync(bin);
     const requiredCommands: Array<readonly [string, string]> = [
@@ -900,19 +1331,19 @@ test("[REGRESSION] shell entrypoint runs with Bun and no Python executable", () 
       ["dirname", "/usr/bin/dirname"],
       ["find", "/usr/bin/find"],
       ["mkdir", "/bin/mkdir"],
+      ["rm", "/bin/rm"],
       ["sort", "/usr/bin/sort"],
     ];
     for (const [name, target] of requiredCommands) {
       symlinkSync(target, join(bin, name));
     }
-    const spawned = Bun.spawnSync(["/bin/bash", SHELL_ENTRYPOINT], {
-      cwd: REPO_ROOT,
+    const spawned = Bun.spawnSync(["/bin/bash", shellEntrypoint], {
+      cwd: workflowRoot,
       env: {
         PATH: bin,
         AUTHORED_ARTIFACT: fixture.authored,
         EVAL_ARTIFACT: "",
         SCENARIO: "skills_available_unmentioned",
-        OUT_DIR: outDir,
         PRD_SKILLS: fixture.prdSkills,
         CHECKS_DIR: fixture.checksDir,
       },
@@ -925,5 +1356,46 @@ test("[REGRESSION] shell entrypoint runs with Bun and no Python executable", () 
     expect(spawned.stdout.toString()).toContain("app=test-app\n");
     expect(JSON.parse(readFileSync(join(outDir, "metrics.json"), "utf8")))
       .toMatchObject({ app: "test-app", expected_skills: ["expo-test"] });
+  });
+});
+
+test("[SECURITY] shell entrypoint rejects an unsafe output directory without touching it", () => {
+  // Catches recursive deletion of arbitrary OUT_DIR values by the workflow
+  // wrapper. The sentinel is outside the only allowed report location.
+  withTempDir((root) => {
+    const fixture = writeFixture(root);
+    const sentinel = join(root, "sentinel");
+    mkdirSync(sentinel);
+    writeFileSync(join(sentinel, "keep.txt"), "must remain");
+    const bin = join(root, "bin");
+    mkdirSync(bin);
+    const requiredCommands: Array<readonly [string, string]> = [
+      ["bun", process.execPath],
+      ["dirname", "/usr/bin/dirname"],
+      ["find", "/usr/bin/find"],
+      ["mkdir", "/bin/mkdir"],
+      ["rm", "/bin/rm"],
+      ["sort", "/usr/bin/sort"],
+    ];
+    for (const [name, target] of requiredCommands) {
+      symlinkSync(target, join(bin, name));
+    }
+
+    const spawned = Bun.spawnSync(["/bin/bash", SHELL_ENTRYPOINT], {
+      cwd: REPO_ROOT,
+      env: {
+        PATH: bin,
+        AUTHORED_ARTIFACT: fixture.authored,
+        OUT_DIR: sentinel,
+      },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+
+    expect(spawned.exitCode).toBe(2);
+    expect(spawned.stderr.toString()).toContain("OUT_DIR must resolve to");
+    expect(existsSync(join(sentinel, "keep.txt"))).toBe(true);
+    expect(readFileSync(join(sentinel, "keep.txt"), "utf8"))
+      .toBe("must remain");
   });
 });

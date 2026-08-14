@@ -23,6 +23,15 @@ on:
         default: ''
         required: false
         description: Optional model alias/name; defaults to sonnet (Claude Code), gpt-5-mini (Codex), or muse-spark-1.2 (Muse)
+      agent_reasoning_effort:
+        type: choice
+        options:
+          - low
+          - medium
+          - high
+        default: high
+        required: false
+        description: Reasoning effort for the selected coding agent
       prd:
         type: string
         default: dataset/prds/notes/prd/mvp.txt
@@ -51,7 +60,7 @@ on:
         required: false
         description: >-
           Authoring prompt variant id from dataset/prompts.json (e.g. baseline,
-          minimal). An unknown id fails the run immediately rather than
+          realistic, minimal). An unknown id fails the run immediately rather than
           authoring with an empty prompt.
 
 jobs:
@@ -61,6 +70,7 @@ jobs:
     env:
       AGENT: ${{ inputs.agent || 'claude-code' }}
       AGENT_MODEL: ${{ inputs.agent_model || '' }}
+      AGENT_REASONING_EFFORT: ${{ inputs.agent_reasoning_effort || 'high' }}
       PRD: ${{ inputs.prd || 'dataset/prds/notes/prd/mvp.txt' }}
       SCENARIO: ${{ inputs.skill_scenario || 'skills_available_unmentioned' }}
       SKILL_MENTION: ${{ inputs.skill_mention || '' }}
@@ -76,25 +86,7 @@ jobs:
 
       - name: Package authored app
         if: ${{ always() }}
-        run: |
-          tar \
-            --exclude 'agent-workspace/*/node_modules' \
-            --exclude 'agent-workspace/*/.expo' \
-            --exclude 'agent-workspace/*/ios/build' \
-            --exclude 'agent-workspace/*/android/.gradle' \
-            --exclude 'agent-workspace/*/android/build' \
-            --exclude 'agent-workspace/*/.mcp.json' \
-            --exclude 'agent-workspace/*/.eval-bundle-export-tmp' \
-            --exclude 'eval-out/*/codex-home/skills' \
-            --exclude 'eval-out/*/codex-home/.tmp' \
-            --exclude 'eval-out/*/codex-home/tmp' \
-            --exclude 'eval-out/*/codex-home/shell_snapshots' \
-            --exclude 'eval-out/*/codex-home/state_*.sqlite*' \
-            --exclude 'eval-out/*/codex-home/memories_*.sqlite*' \
-            --exclude 'eval-out/*/codex-home/goals_*.sqlite*' \
-            --exclude 'eval-out/*/muse-xdg-data' \
-            --exclude 'eval-out/*/muse-bin' \
-            -czf authored-app.tar.gz agent-workspace eval-out
+        run: bash eval_harness/utils/artifacts/package_artifact.sh authored-app authored-app.tar.gz '${{ workflow.id }}/authored-app.tar.gz'
 
       - name: Upload authored app
         if: ${{ always() }}

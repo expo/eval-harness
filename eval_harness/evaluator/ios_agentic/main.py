@@ -32,7 +32,7 @@ from pathlib import Path
 warnings.filterwarnings("ignore", message="urllib3 v2 only supports OpenSSL")
 
 from .agent_device.evaluator import AgentDeviceEvaluator
-from .core.scoring import TestPlanResult
+from .core.scoring import StepResult, TestPlanResult
 from .report import write_html_report
 
 _PACKAGE_DIR = Path(__file__).resolve().parent
@@ -108,7 +108,7 @@ def _serialize_plan_result(
         }
 
     if result.status == "evaluator_error":
-        return {
+        record = {
             "test_plan": plan_path.name,
             "run_index": run_index,
             "status": "evaluator_error",
@@ -117,18 +117,21 @@ def _serialize_plan_result(
             "score": None,
             "full_points": None,
             "macro_pct": None,
-            "steps": [
+            "steps": [_serialize_step_result(step) for step in result.steps],
+            "terminal_evidence": [
                 {
-                    "description": f"{'PASSED' if step.passed else 'FAILED'}: {step.name}",
-                    "points": step.earned_points,
-                    "max_points": step.max_points,
-                    "iterations": step.iterations_used,
-                    "hard_assertions": len(step.assertions),
-                    "soft_assertions": len(step.soft_assertions),
+                    "evidence_kind": evidence.evidence_kind,
+                    "step_number": evidence.step_number,
+                    "step_name": evidence.step_name,
+                    "screenshot": evidence.screenshot_path,
+                    "screenshot_error": evidence.screenshot_error,
                 }
-                for step in result.steps
+                for evidence in result.terminal_evidence
             ],
         }
+        if result.abort_scope == "suite":
+            record["abort_scope"] = "suite"
+        return record
 
     if result.status != "completed":
         return {
@@ -159,17 +162,40 @@ def _serialize_plan_result(
         "score": result.score,
         "full_points": result.full_points,
         "macro_pct": round(test_macro_pct * 100, 2),
-        "steps": [
-            {
-                "description": f"{'PASSED' if step.passed else 'FAILED'}: {step.name}",
-                "points": step.earned_points,
-                "max_points": step.max_points,
-                "iterations": step.iterations_used,
-                "hard_assertions": len(step.assertions),
-                "soft_assertions": len(step.soft_assertions),
-            }
-            for step in result.steps
-        ],
+        "steps": [_serialize_step_result(step) for step in result.steps],
+    }
+
+
+def _serialize_step_result(step: StepResult) -> dict:
+    """Preserve assertion-level evidence plus explicit compatibility counts."""
+    hard_assertions = [
+        {
+            "command": assertion.yaml_cmd,
+            "fatal": assertion.fatal,
+            "passed": assertion.passed,
+        }
+        for assertion in step.assertions
+    ]
+    soft_assertions = [
+        {
+            "check": assertion.check,
+            "fatal": assertion.fatal,
+            "passed": assertion.passed,
+            "evidence": assertion.evidence,
+        }
+        for assertion in step.soft_assertions
+    ]
+    return {
+        "description": f"{'PASSED' if step.passed else 'FAILED'}: {step.name}",
+        "points": step.earned_points,
+        "max_points": step.max_points,
+        "iterations": step.iterations_used,
+        "hard_assertions": hard_assertions,
+        "soft_assertions": soft_assertions,
+        "hard_assertion_count": len(hard_assertions),
+        "soft_assertion_count": len(soft_assertions),
+        "screenshot": step.screenshot_path,
+        "screenshot_error": step.screenshot_error,
     }
 
 
@@ -184,17 +210,24 @@ def _build_suite_output(
     not_applicable = [
         plan for plan in plan_results if plan.get("status") == "not_applicable"
     ]
-    plan_errors = [
-        {
+    plan_errors = []
+    for plan in plan_results:
+        if plan.get("status") != "evaluator_error":
+            continue
+        error = {
             "test_plan": plan.get("test_plan"),
             "run_index": plan.get("run_index"),
             "stage": plan.get("error_stage"),
             "reason": plan.get("error_reason"),
         }
-        for plan in plan_results
-        if plan.get("status") == "evaluator_error"
-    ]
+        if plan.get("abort_scope") == "suite":
+            error["scope"] = "suite"
+        plan_errors.append(error)
     evaluator_errors = plan_errors + suite_errors
+    provider_quota_failure = any(
+        str(error.get("reason") or "").startswith("provider_quota:")
+        for error in evaluator_errors
+    )
     terminal_statuses = {"completed", "not_applicable", "evaluator_error"}
     terminal_plan_count = sum(
         1 for plan in plan_results if plan.get("status") in terminal_statuses
@@ -225,19 +258,35 @@ def _build_suite_output(
 
     na_suffix = f", {len(not_applicable)} N/A" if not_applicable else ""
     error_suffix = f", {len(evaluator_errors)} evaluator error(s)" if evaluator_errors else ""
+    if provider_quota_failure:
+        test_overview = (
+            f"Adaptive evaluation ({status}): {len(plan_results)}/{expected_plan_count} "
+            f"test plan(s){na_suffix}{error_suffix}, "
+            "unscored due evaluator infrastructure (provider quota)"
+        )
+        output_score = None
+        output_full_points = None
+        output_macro_avg = None
+        output_micro_pct = None
+    else:
+        test_overview = (
+            f"Adaptive evaluation ({status}): {len(plan_results)}/{expected_plan_count} "
+            f"test plan(s){na_suffix}{error_suffix}, macro avg {suite_macro_avg}% "
+            f"(micro {suite_micro_pct}%, {total_score}/{total_full} points)"
+        )
+        output_score = total_score
+        output_full_points = total_full
+        output_macro_avg = suite_macro_avg
+        output_micro_pct = suite_micro_pct
     return {
         "status": status,
         "expected_plan_count": expected_plan_count,
         "terminal_plan_count": terminal_plan_count,
-        "test_overview": (
-            f"Adaptive evaluation ({status}): {len(plan_results)}/{expected_plan_count} "
-            f"test plan(s){na_suffix}{error_suffix}, macro avg {suite_macro_avg}% "
-            f"(micro {suite_micro_pct}%, {total_score}/{total_full} points)"
-        ),
-        "score": total_score,
-        "full_points": total_full,
-        "macro_avg_pct": suite_macro_avg,
-        "micro_pct": suite_micro_pct,
+        "test_overview": test_overview,
+        "score": output_score,
+        "full_points": output_full_points,
+        "macro_avg_pct": output_macro_avg,
+        "micro_pct": output_micro_pct,
         "n_not_applicable": len(not_applicable),
         "evaluator_errors": evaluator_errors,
         "test_plans": plan_results,
@@ -275,6 +324,7 @@ def _run_suite(
     _write_checkpoint(output_path, output)
 
     try:
+        abort_suite = False
         for plan_path in test_plans:
             for run_index in range(1, repeat + 1):
                 print(f"\n{'#'*60}")
@@ -285,7 +335,7 @@ def _run_suite(
                 print(f"{'#'*60}")
 
                 try:
-                    result = evaluator.evaluate_test_plan(plan_path)
+                    result = evaluator.evaluate_test_plan(plan_path, run_index=run_index)
                     record = _serialize_plan_result(plan_path, run_index, result)
                 except Exception as exc:
                     record = {
@@ -306,6 +356,11 @@ def _run_suite(
                     suite_errors,
                 )
                 _write_checkpoint(output_path, output)
+                if record.get("abort_scope") == "suite":
+                    abort_suite = True
+                    break
+            if abort_suite:
+                break
     finally:
         try:
             evaluator.bridge.cleanup()
@@ -352,6 +407,13 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Device automation driver (Maestro remains available only as the optional restart fallback)",
     )
     parser.add_argument("--max-iterations", type=int, default=50, help="Max turns per formal (scored) step")
+    parser.add_argument("--model", default="claude-opus-4-8", help="Claude model for evaluation")
+    parser.add_argument(
+        "--reasoning-effort",
+        choices=["low", "medium", "high"],
+        default="high",
+        help="Claude reasoning effort for evaluation",
+    )
     parser.add_argument("--seed-iterations", type=int, default=100,
                         help="Max turns for the pre-flight seed phase that runs the test plan's "
                              "<seeding_and_precondition> instructions BEFORE the formal scored steps. "
@@ -404,6 +466,8 @@ def main() -> int:
         max_iterations=args.max_iterations,
         timeout=args.timeout,
         verbose=args.verbose,
+        model=args.model,
+        reasoning_effort=args.reasoning_effort,
     )
     evaluator = AgentDeviceEvaluator(
         **evaluator_kwargs,

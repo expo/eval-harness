@@ -1,0 +1,62 @@
+{
+  "status": "completed",
+  "expected_plan_count": 1,
+  "terminal_plan_count": 1,
+  "macro_avg_pct": 82.5,
+  "evaluator_errors": [],
+  "test_plans": [
+    {
+      "test_plan": "test_insert.txt",
+      "run_index": 1,
+      "status": "completed",
+      "score": 1,
+      "full_points": 2,
+      "macro_pct": 50,
+      "steps": [
+        {
+          "description": "PASSED: Insert a note",
+          "points": 1,
+          "max_points": 1,
+          "iterations": 3,
+          "hard_assertions": [
+            {
+              "command": "assertVisible: note-row",
+              "fatal": false,
+              "passed": true
+            }
+          ],
+          "soft_assertions": [
+            {
+              "check": "The saved note is visible",
+              "fatal": false,
+              "passed": true,
+              "evidence": "accessibility tree"
+            }
+          ],
+          "hard_assertion_count": 1,
+          "soft_assertion_count": 1,
+          "screenshot": null,
+          "screenshot_error": null
+        },
+        {
+          "description": "FAILED: Persist the note",
+          "points": 0,
+          "max_points": 1,
+          "iterations": 2,
+          "hard_assertions": [
+            {
+              "command": "assertVisible: persisted-note",
+              "fatal": true,
+              "passed": false
+            }
+          ],
+          "soft_assertions": [],
+          "hard_assertion_count": 1,
+          "soft_assertion_count": 0,
+          "screenshot": null,
+          "screenshot_error": "capture unavailable"
+        }
+      ]
+    }
+  ]
+}
