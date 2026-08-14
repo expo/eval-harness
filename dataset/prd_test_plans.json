@@ -64,5 +64,19 @@
     "test_modal_present.txt",
     "test_modal_dismiss.txt",
     "test_keyboard_handling.txt"
+  ],
+  "twilight": [
+    "test_insert.txt",
+    "test_delete.txt",
+    "test_update.txt",
+    "test_select_by_id.txt",
+    "test_tab_navigation.txt",
+    "test_modal_present.txt",
+    "test_modal_dismiss.txt",
+    "test_gesture_recognition.txt",
+    "test_empty_state.txt",
+    "test_native_form_sheet.txt",
+    "test_theme_selection.txt",
+    "test_button_states.txt"
   ]
 }

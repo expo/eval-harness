@@ -4,5 +4,6 @@
   "wiki_reader": ["expo-project-structure", "expo-router", "expo-data-fetching", "expo-native-ui", "expo-ui"],
   "pool": ["expo-project-structure", "expo-router", "expo-native-ui"],
   "nourish": ["expo-project-structure", "expo-router", "expo-native-ui"],
-  "nova": ["expo-project-structure", "expo-router", "expo-native-ui"]
+  "nova": ["expo-project-structure", "expo-router", "expo-native-ui"],
+  "twilight": ["expo-project-structure", "expo-router", "expo-native-ui", "expo-ui"]
 }
