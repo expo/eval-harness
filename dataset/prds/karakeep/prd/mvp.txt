@@ -1,0 +1,61 @@
+Karakeep — Bookmark And Knowledge Inbox (MVP)
+
+## Overview
+
+Karakeep is a personal knowledge inbox for saving links and notes, organizing
+them with tags and lists, and finding them later. It begins with at least 24
+bookmarks spanning articles, videos, products, and plain notes. Each seeded
+bookmark has stable metadata and a unique identifier.
+
+The app must work on iOS and Android with Expo SDK 57.x. Bookmarks and local
+organization persist across cold restarts. Link metadata is fetched with
+standard `fetch` when possible and falls back to the entered URL and title;
+failure must never prevent saving.
+
+## Navigation And Collection
+
+A bottom tab bar contains `Bookmarks`, `Lists`, `Tags`, and `Settings`.
+Bookmarks shows newest items first with title, domain or note type, excerpt,
+thumbnail when available, created date, favorite state, archive state, and
+tags.
+
+Search matches title, URL, excerpt, note text, and tags case-insensitively.
+Filters for `All`, `Favorites`, `Unsorted`, and `Archived` compose with selected
+tags. Clearing restores the complete newest-first collection. No matches show
+`No bookmarks found` with an appropriate clear action.
+
+Tapping a bookmark opens its detail screen with all metadata and actions for
+favorite, archive, edit, share, and delete. Back returns to the previous query,
+filters, and scroll position. Sharing opens the native share sheet.
+
+## Add, Edit, And Delete
+
+`Add bookmark` presents a sheet with `Link` and `Note` types. A link requires a
+valid HTTP or HTTPS URL and may include a custom title and tags. While metadata
+loads, show `Fetching details`; the user can still save. A note requires
+non-whitespace text and may have a title and tags. Save is disabled until the
+selected type is valid and creates exactly one record.
+
+Edit prepopulates the selected bookmark and updates only it. Delete requires a
+confirmation naming the bookmark; Cancel changes nothing and Delete removes it
+from bookmarks, lists, and tag counts permanently.
+
+## Lists And Tags
+
+Lists are named collections. Users can create, rename, and delete lists, and
+add or remove any bookmark through a multi-select sheet. A bookmark may belong
+to multiple lists. Deleting a list never deletes its bookmarks.
+
+Tags shows every tag with its bookmark count. Selecting one shows its matching
+bookmarks. Users can rename a tag across all bookmarks or delete it after
+confirmation; deleting a tag never deletes bookmarks.
+
+## Settings, Accessibility, And Out Of Scope
+
+Settings provides default view (`Cards` or `Compact`) and appearance (`System`,
+`Light`, or `Dark`). Changes apply immediately and persist.
+
+- Favorite, archived, list membership, tag selection, loading, validation, and
+  errors expose accessible text and state.
+- Out of scope: accounts, multi-user sharing, browser extensions, OCR, AI tags
+  or summaries, full-page archival, and server synchronization.

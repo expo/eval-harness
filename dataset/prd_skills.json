@@ -5,5 +5,20 @@
   "pool": ["expo-project-structure", "expo-router", "expo-native-ui"],
   "nourish": ["expo-project-structure", "expo-router", "expo-native-ui"],
   "nova": ["expo-project-structure", "expo-router", "expo-native-ui"],
-  "twilight": ["expo-project-structure", "expo-router", "expo-native-ui", "expo-ui"]
+  "twilight": ["expo-project-structure", "expo-router", "expo-native-ui", "expo-ui"],
+  "lichess": ["expo-project-structure", "expo-router", "expo-native-ui"],
+  "bluesky": ["expo-project-structure", "expo-router", "expo-native-ui"],
+  "immich": ["expo-project-structure", "expo-router", "expo-native-ui"],
+  "cashew": ["expo-project-structure", "expo-router", "expo-native-ui", "expo-ui"],
+  "folo": ["expo-project-structure", "expo-router", "expo-data-fetching", "expo-native-ui"],
+  "karakeep": ["expo-project-structure", "expo-router", "expo-data-fetching", "expo-native-ui"],
+  "pocket_casts": ["expo-project-structure", "expo-router", "expo-data-fetching", "expo-native-ui"],
+  "bitwarden": ["expo-project-structure", "expo-router", "expo-native-ui"],
+  "finch": ["expo-project-structure", "expo-router", "expo-native-ui"],
+  "expensify": ["expo-project-structure", "expo-router", "expo-native-ui", "expo-ui"],
+  "pizza_hut": ["expo-project-structure", "expo-router", "expo-native-ui"],
+  "shop": ["expo-project-structure", "expo-router", "expo-data-fetching", "expo-native-ui"],
+  "eventbrite": ["expo-project-structure", "expo-router", "expo-native-ui"],
+  "hello_aurora": ["expo-project-structure", "expo-router", "expo-data-fetching", "expo-native-ui", "expo-ui"],
+  "duolingo": ["expo-project-structure", "expo-router", "expo-native-ui"]
 }

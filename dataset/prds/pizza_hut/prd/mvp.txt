@@ -1,0 +1,63 @@
+Pizza Hut — Pizza Ordering (MVP)
+
+## Overview
+
+Pizza Hut is a mobile ordering app for choosing a nearby restaurant, browsing
+the menu, customizing food, and placing a pickup or delivery order. It contains
+three stable restaurants, a menu of at least 24 items, current deals, and one
+past order. Prices and availability are fixed and work offline.
+
+The app must work on iOS and Android with Expo SDK 57.x. Restaurant, cart,
+rewards, and order history persist locally. Checkout creates a simulated order;
+there is no account, payment processor, live restaurant system, or driver.
+
+## Start And Navigation
+
+On first launch the user chooses `Delivery` or `Pickup` and selects a restaurant.
+They may search the seeded addresses or use `Use current location`, which asks
+for location permission only then. Denial keeps address search available.
+
+A bottom tab bar contains `Menu`, `Deals`, `Orders`, and `Account`. The header
+shows the current service mode, restaurant, and cart item count.
+
+## Menu And Customization
+
+Menu groups items into Pizza, Sides, Wings, Desserts, and Drinks. Search matches
+item name and description case-insensitively. Category and dietary filters
+compose with search. No results show `No menu items found` and a clear action.
+
+Tapping an item opens its image, name, description, base price, calories, and
+customization. The `Classic Pepperoni` pizza requires size and crust, permits
+sauce, cheese, and topping changes, and displays the recalculated price.
+`Add to cart` is disabled until required choices are selected. Adding inserts
+one configured item; identical additions remain separate cart lines.
+
+Deals describe eligibility. Applying a valid deal updates the cart discount
+once. An ineligible deal explains the missing requirement and does not alter
+the cart.
+
+## Cart And Checkout
+
+Cart lists each configured line, quantity, price, subtotal, discount, tax,
+delivery fee when applicable, and total. Users can edit customization, change
+quantity, or remove a line; totals update immediately. Empty cart shows `Your
+cart is empty` with `Browse menu`.
+
+Checkout collects name, phone, service address for delivery, fulfillment time
+(`ASAP` or a fixed future slot), and payment choice `Pay at restaurant`.
+Required-field and phone validation is inline, and `Place order` remains
+disabled until valid. Placing an order creates exactly one confirmation with a
+stable order number, restaurant, item summary, total, and status `Received`,
+then clears the cart.
+
+## Orders, Rewards, And Accessibility
+
+Orders lists current and past orders. The new order advances through `Received`,
+`Preparing`, and `Ready` using a labelled `Advance demo status` action. `Order
+again` restores its available items to the cart without placing an order.
+Account shows a seeded rewards balance and adds points once per placed order.
+
+- Prices, choices, deal eligibility, cart totals, validation, and order status
+  are accessible without relying on color or imagery.
+- Out of scope: real payment, authentication, live delivery tracking, coupons
+  not included in the app, push notifications, and contacting a restaurant.

@@ -1,0 +1,68 @@
+Duolingo — Spanish Lesson Path (MVP)
+
+## Overview
+
+Duolingo is a gamified language-learning app with short Spanish lessons,
+immediate feedback, and persistent progress. It begins with one unit containing
+six lessons, a five-heart balance, zero XP, zero gems, and no streak. Lesson
+content and accepted answers are bundled and available offline.
+
+The app must work on iOS and Android with Expo SDK 57.x. Progress, hearts, XP,
+gems, streak, and settings persist locally. There are no accounts, ads,
+subscriptions, leaderboards, AI conversations, or server dependencies.
+
+## Navigation And Learning Path
+
+A bottom tab bar contains `Learn`, `Practice`, `Quests`, and `Profile`. Learn
+shows the ordered lesson path with title, skill, completion state, score, and
+lock state. Lesson 1 is available initially; completing a lesson unlocks the
+next exactly once. Tapping a locked lesson explains its prerequisite.
+
+The header always exposes current hearts, streak, gems, and XP as labelled text.
+
+## Lesson Session
+
+Each lesson has exactly five exercises drawn from:
+
+- select the correct translation from three choices;
+- arrange a provided word bank into a sentence using tap-to-add and tap-to-remove;
+- type a short translation;
+- match three Spanish words to three English words using labelled selections.
+
+Every exercise shows progress such as `Question 2 of 5`, the prompt, answer
+controls, and `Check`. Check is disabled until an answer is present. A correct
+answer shows `Correct`, a short explanation, and `Continue`. An incorrect answer
+shows `Not quite`, the accepted answer, and Continue, then removes exactly one
+heart. Feedback must be text and state, not color or sound alone.
+
+Leaving an unfinished lesson opens a confirmation. `Keep learning` resumes the
+same question; `End session` returns to the path without XP or completion and
+retains the resulting heart balance.
+
+Finishing with at least one heart awards 10 XP, 5 gems, and one lesson
+completion. Replaying an already completed lesson awards XP but does not unlock
+another lesson or duplicate completion. Reaching zero hearts ends the lesson
+with `Out of hearts` and offers Practice.
+
+## Practice, Quests, And Profile
+
+Practice contains three review questions. Completing them restores one heart,
+up to the maximum of five, and awards no lesson completion. The restored heart
+persists.
+
+Quests shows three deterministic goals: complete one lesson, answer three
+questions correctly, and earn 10 XP. Progress updates immediately. Claiming a
+completed quest awards its listed gems once; incomplete quests have Claim
+disabled with remaining progress visible.
+
+Profile shows lessons completed, total XP, current streak, best streak, hearts,
+gems, and accuracy. Appearance (`System`, `Light`, or `Dark`) is editable and
+persists. A reset-progress action requires confirmation and restores the exact
+initial learning state while retaining appearance.
+
+## Accessibility And Out Of Scope
+
+- Word-bank order, match selection, answer feedback, hearts, rewards, lock
+  state, quest progress, and disabled actions are accessible semantically.
+- Out of scope: speech recognition, listening exercises, handwriting, friends,
+  leagues, push reminders, live streak dates, and additional courses.

@@ -1,0 +1,59 @@
+Immich — Photo Library And Albums (MVP)
+
+## Overview
+
+Immich is a private mobile photo library for browsing a timeline, searching
+memories, and organizing photos into albums. It contains at least 36 bundled
+photos with stable dates, locations, people labels, and descriptions. Album and
+favorite state persists locally across cold restarts.
+
+The app must work on iOS and Android with Expo SDK 57.x. It may import a photo
+from the device library after contextual permission, but cloud backup, accounts,
+and servers are not part of this version.
+
+## Navigation And Timeline
+
+A bottom tab bar contains `Photos`, `Search`, `Albums`, and `Library`. Photos is
+selected initially. The Photos tab displays a scrollable three-column grid,
+newest first, grouped under accessible date headings. Scrolling progressively
+reveals the whole library without losing earlier items.
+
+Tapping a thumbnail opens that exact asset in a detail screen. The detail view
+shows the image, date, description, location when present, favorite state, and
+actions for `Favorite`, `Add to album`, `Share`, and `Delete`. Next/previous
+gestures may be offered, but labelled controls must provide the same behavior.
+
+Favoriting updates the asset everywhere and persists. Sharing opens the native
+share surface. Delete requires confirmation, with Cancel leaving every view
+unchanged and Delete removing only that asset from the timeline and albums.
+
+## Search And Albums
+
+Search performs a case-insensitive substring match over description, location,
+person labels, and year. Filter chips for `Favorites`, `Photos`, and `Imported`
+compose with the query. No matches show `No photos found` with a clear action.
+
+Albums lists seeded albums plus user-created albums. `New album` opens a form
+with a required unique name and multi-select photo grid. Save is disabled until
+the name is valid and at least one photo is selected. Saving creates exactly
+one album. Users can open an album, rename it, add or remove photos, or delete
+the album after confirmation. Deleting an album never deletes its photos.
+
+`Add to album` from photo detail presents a sheet of albums. Selecting an album
+adds the photo once, updates its item count, and dismisses the sheet.
+
+## Library And Photo Import
+
+Library shows accessible counts for all photos, favorites, albums, and imported
+photos. `Import photo` requests photo-library permission only when selected.
+Denial leaves the bundled library fully usable and explains how to try again.
+Granting permission allows one asset to be selected and inserts it once at the
+top of the timeline with an `Imported` label.
+
+## Accessibility And Out Of Scope
+
+- Every thumbnail has a stable accessible label containing its description and
+  date; selection, favorite, filters, and album membership expose state.
+- Counts and metadata are text, not only visual overlays.
+- Out of scope: automatic backup, face recognition, video playback, map view,
+  partner sharing, account administration, and remote-device synchronization.
