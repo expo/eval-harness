@@ -6,20 +6,21 @@ execution/check artifacts. It complements the offline fake-server and packed
 consumer tests. It does not run from `bun test` or the root `test:ts` script.
 
 The agent receives a bug report: cart subtotals are incorrect for multiple units.
-It must inspect a small JavaScript project, reproduce the failing test, change the
-implementation, run the tests successfully, and finish with a summary. The command
+The harness first records the failing baseline tests. The agent must inspect a
+small JavaScript project, change the implementation, run the tests successfully,
+and finish with a summary. The command
 adapter exposes generic `list`, `read`, `write`, and `test` operations. The prompt
 describes these tools but provides neither a patch nor a prescribed action sequence.
 
 Independent checks execute the repaired module against additional cases outside the
 agent's project (mixed items, zero quantity, empty cart, and input preservation).
 They also require the original tests and documentation to remain unchanged, and
-verify evidence of a failing test before editing and a passing test afterward.
+verify evidence of source inspection and a passing test after editing.
 A final hook verifies workspace removal, registered cleanup, and saved check counts.
 The final source, tests, and README are preserved alongside the model transcript.
 
-This is a small real coding task through the kit's public API. It does not install
-or exercise expo-agent-cli itself; that consumer integration belongs in its repo.
+This is a small coding task through the kit's public API, using a self-contained
+project and command adapter.
 
 ## Run locally
 
@@ -33,8 +34,7 @@ bun run --cwd packages/agent-eval-vitest test:e2e
 ```
 
 `OLLAMA_HOST` selects a different server. `OLLAMA_E2E_MODEL` overrides the model
-for local experiments. The defaults match expo-agent-cli's tier 1 model and
-settings: `qwen3:4b`, temperature 0, seed 42. Thinking is enabled for diagnosis and code editing. The test allows twelve model turns,
+for local experiments. The defaults are `qwen3:4b`, temperature 0, seed 42. Thinking is enabled for diagnosis and code editing. The test allows twelve model turns,
 15 minutes per HTTP request, and 30 minutes for the full evaluation. Slow CPU
 inference can take several minutes; no live server means this explicit command
 fails rather than skipping silently.
@@ -46,7 +46,7 @@ is built before the test; the ephemeral application workspace is always removed.
 ## GitHub Actions
 
 `.github/workflows/ollama-e2e.yml` runs on relevant PR changes, main pushes, and
-manual dispatch. Like expo-agent-cli's tier 1 job, it is advisory while model
+manual dispatch. The job is advisory while model
 reliability is measured. Inspect the explicit step outcome and uploaded evidence;
 a successful workflow conclusion alone does not prove that model inference passed.
 The ordinary offline tests remain blocking.

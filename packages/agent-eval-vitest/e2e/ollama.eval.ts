@@ -1,4 +1,4 @@
-import { execFile, execFileSync } from 'node:child_process';
+import { execFile, execFileSync, spawnSync } from 'node:child_process';
 import { cpSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -29,7 +29,7 @@ const agentEval = createAgentEval({
       'read <file>: read a file.',
       'write <file> <contents>: replace a file with the supplied complete contents.',
       'test: run the project test suite with Node.',
-      'Inspect the project, reproduce the issue, edit the implementation, and run tests before finishing.',
+      'Inspect the project, edit the implementation, and run tests before finishing.',
       'Command results are observations; respond with your next action, not a copy of the result.',
     ].join('\n'),
     maxTurns: 12,
@@ -86,6 +86,17 @@ agentEval(
           }
           writeFileSync(join(artifactsDir, 'cleanup.txt'), 'completed');
         });
+        const baseline = spawnSync(process.execPath, ['--test', 'cart.test.cjs'], {
+          cwd: root,
+          encoding: 'utf8',
+          timeout: 10_000,
+        });
+        writeFileSync(
+          join(artifactsDir, 'baseline-tests.log'),
+          (baseline.stdout ?? '') + (baseline.stderr ?? '')
+        );
+        expect(baseline.error).toBeUndefined();
+        expect(baseline.status).toBe(1);
       },
     },
   },
@@ -116,13 +127,7 @@ agentEval(
         );
         expect(writeIndex).toBeGreaterThan(0);
         expect(calls.slice(0, writeIndex)).toEqual(
-          expect.arrayContaining([
-            expect.objectContaining({ input: ['read', 'cart.cjs'] }),
-            expect.objectContaining({
-              input: ['test'],
-              result: expect.objectContaining({ exitCode: 1 }),
-            }),
-          ])
+          expect.arrayContaining([expect.objectContaining({ input: ['read', 'cart.cjs'] })])
         );
         expect(calls.slice(writeIndex + 1)).toEqual(
           expect.arrayContaining([

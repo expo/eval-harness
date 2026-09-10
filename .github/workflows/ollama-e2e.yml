@@ -24,7 +24,7 @@ jobs:
   ollama:
     name: Real Ollama evaluation (advisory)
     runs-on: ubuntu-24.04
-    # Like expo-agent-cli's tier 1 job, report model variability without blocking merges.
+    # Report model variability without blocking merges.
     continue-on-error: true
     timeout-minutes: 45
     env:
