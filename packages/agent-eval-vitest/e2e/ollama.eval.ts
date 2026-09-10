@@ -3,6 +3,7 @@ import { cpSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll } from 'vitest';
+import { actionSchema } from './action-schema.ts';
 import { createAgentEval, expect } from '@expo/agent-eval-vitest';
 import { ollamaRunner, type OllamaCommandResult } from '@expo/agent-eval-vitest/ollama';
 
@@ -17,11 +18,11 @@ let caseArtifacts: string | undefined;
 
 const agentEval = createAgentEval({
   artifactsDir: resolve('.eval-results/ollama-e2e'),
-  timeoutMs: 30 * 60_000,
+  timeoutMs: 10 * 60_000,
   keepWorkspace: false,
   dryRun: false,
   runner: ollamaRunner({
-    model: process.env.OLLAMA_E2E_MODEL ?? 'qwen3:4b',
+    model: process.env.OLLAMA_E2E_MODEL ?? 'qwen3:8b',
     systemPrompt: [
       'You are a coding agent working in a small JavaScript project.',
       'Tools are invoked with one JSON object. Available tools and exact argument counts:',
@@ -34,11 +35,12 @@ const agentEval = createAgentEval({
       'Command results are observations; choose your next action instead of copying the result.',
       'Keep reasoning concise. Use tool results to resolve uncertainty instead of guessing.',
     ].join('\n'),
+    actionSchema,
     maxTurns: 12,
     maxOutputChars: 4000,
-    requestTimeoutMs: 15 * 60_000,
-    think: true,
-    temperature: 0.6,
+    requestTimeoutMs: 3 * 60_000,
+    think: false,
+    temperature: 0.7,
     seed: 42,
     runCommand(args, { root, signal }) {
       return new Promise<OllamaCommandResult>((resolve, reject) => {

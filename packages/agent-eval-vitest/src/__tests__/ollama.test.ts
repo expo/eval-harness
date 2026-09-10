@@ -244,3 +244,13 @@ test('forwards an explicit thinking preference', async () => {
   await runner({ think: false })(context);
   expect(requests[0]).toMatchObject({ think: false });
 });
+
+test('forwards a caller-supplied action schema for structured generation', async () => {
+  const actionSchema = {
+    type: 'object',
+    properties: { done: { const: true } },
+    required: ['done'],
+  };
+  await runner({ actionSchema })(context);
+  expect(requests[0]).toMatchObject({ format: actionSchema });
+});

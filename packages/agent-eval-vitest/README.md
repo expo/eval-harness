@@ -151,6 +151,10 @@ const agentEval = createAgentEval({ runner, timeoutMs: 20 * 60_000 });
 forward cancellation, and capture stdout/stderr. Describe available commands in the
 system prompt; the runner adds JSON action instructions. Put grading in Vitest checks.
 
+Supply `actionSchema` to constrain generation with an Ollama JSON Schema matching
+your command interface. It must retain the runner's `run`/`done` action shapes.
+Runtime action parsing and command-handler validation still apply.
+
 The host defaults to `OLLAMA_HOST` or `http://127.0.0.1:11434`; `host` overrides it.
 The model is always explicit. The runner does not start Ollama or pull models.
 Use `think: false` to disable thinking for supported models; when omitted, the

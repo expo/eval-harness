@@ -26,10 +26,10 @@ jobs:
     runs-on: ubuntu-24.04
     # Report model variability without blocking merges.
     continue-on-error: true
-    timeout-minutes: 45
+    timeout-minutes: 20
     env:
       OLLAMA_HOST: http://127.0.0.1:11434
-      OLLAMA_E2E_MODEL: qwen3:4b
+      OLLAMA_E2E_MODEL: qwen3:8b
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
