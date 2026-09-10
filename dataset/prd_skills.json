@@ -1,6 +1,68 @@
 {
-  "notes": ["expo-project-structure", "expo-router"],
-  "hot_chocolate": ["expo-project-structure", "expo-router", "expo-native-ui", "expo-ui"],
-  "wiki_reader": ["expo-project-structure", "expo-router", "expo-data-fetching", "expo-native-ui", "expo-ui"],
-  "pool": ["expo-project-structure", "expo-router", "expo-native-ui"]
+  "notes": {
+    "required": [
+      "expo-overview",
+      "expo-project-structure",
+      "expo-router"
+    ],
+    "optional": [
+      "expo-design-system",
+      "expo-animation",
+      "expo-examples",
+      "eas-app-stores"
+    ],
+    "forbidden": [],
+    "unlisted": "observe"
+  },
+  "hot_chocolate": {
+    "required": [
+      "expo-overview",
+      "expo-project-structure",
+      "expo-router",
+      "expo-native-ui",
+      "expo-ui"
+    ],
+    "optional": [
+      "expo-design-system",
+      "expo-animation",
+      "expo-examples",
+      "eas-app-stores"
+    ],
+    "forbidden": [],
+    "unlisted": "observe"
+  },
+  "wiki_reader": {
+    "required": [
+      "expo-overview",
+      "expo-project-structure",
+      "expo-router",
+      "expo-data-fetching",
+      "expo-native-ui",
+      "expo-ui"
+    ],
+    "optional": [
+      "expo-design-system",
+      "expo-animation",
+      "expo-examples",
+      "eas-app-stores"
+    ],
+    "forbidden": [],
+    "unlisted": "observe"
+  },
+  "pool": {
+    "required": [
+      "expo-overview",
+      "expo-project-structure",
+      "expo-router",
+      "expo-native-ui"
+    ],
+    "optional": [
+      "expo-design-system",
+      "expo-animation",
+      "expo-examples",
+      "eas-app-stores"
+    ],
+    "forbidden": [],
+    "unlisted": "observe"
+  }
 }

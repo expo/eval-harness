@@ -364,3 +364,11 @@ Validate EAS workflows:
 ```bash
 node /Users/adityashukla/.codex/plugins/cache/openai-curated-remote/expo/1.0.2/skills/expo-cicd-workflows/scripts/validate.js .eas/workflows/*.yml
 ```
+
+## Focused skill cases
+
+For small existing-app tasks and neighboring negative cases, see the
+[focused skill evaluator](eval_harness/evaluator/skill_invocation/focused/README.md).
+Its Claude runner executes only in CI; local validation and comparison are model-free.
+The Expo skills repository provides the EAS workflow that compares main and candidate
+plugin checkouts. These source/routing cases complement the native app evaluator above.

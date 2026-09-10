@@ -1,0 +1,10 @@
+{
+  "expo": {
+    "name": "Settings Fixture",
+    "slug": "settings-fixture",
+    "scheme": "settings-fixture",
+    "ios": {
+      "bundleIdentifier": "dev.expo.skills.settingsfixture"
+    }
+  }
+}

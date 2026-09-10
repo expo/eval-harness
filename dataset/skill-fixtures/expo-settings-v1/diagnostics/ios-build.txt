@@ -1,0 +1,5 @@
+Synthetic build diagnostic for evaluation; no real account or project.
+Command: eas build --platform ios --profile preview
+Error: Provisioning profile does not include the selected signing certificate.
+Bundle identifier: dev.expo.skills.settingsfixture
+Last change: the distribution certificate was rotated; the existing profile was reused.

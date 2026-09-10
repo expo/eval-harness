@@ -1,0 +1,441 @@
+[
+  {
+    "id": "native-settings",
+    "family": "native-controls",
+    "split": "development",
+    "fixture": "expo-settings-v1",
+    "prompt": "Make App.tsx feel like an iPhone settings screen. Keep the display-name field, notification toggle, and save confirmation working. Keep the installed SDK.",
+    "expect": {
+      "required": [
+        "expo-overview",
+        "expo-native-ui",
+        "expo-ui"
+      ],
+      "optional": [
+        "expo-design-system"
+      ],
+      "forbidden": [
+        "eas-app-stores"
+      ],
+      "unlisted": "observe"
+    },
+    "before_edit": true,
+    "unchanged": [
+      "src/actions.ts"
+    ],
+    "review": [
+      "Existing controls and save confirmation still work.",
+      "Components are compatible with the installed SDK; native behavior needs simulator verification."
+    ]
+  },
+  {
+    "id": "native-toggle",
+    "family": "native-controls",
+    "split": "development",
+    "fixture": "expo-settings-v1",
+    "prompt": "Replace the notification toggle in this Expo app with a native platform control. Preserve the state and accessible label; keep the installed SDK.",
+    "expect": {
+      "required": [
+        "expo-overview",
+        "expo-ui"
+      ],
+      "optional": [
+        "expo-native-ui"
+      ],
+      "forbidden": [
+        "expo-router",
+        "eas-app-stores"
+      ],
+      "unlisted": "observe"
+    },
+    "before_edit": true,
+    "unchanged": [
+      "src/actions.ts"
+    ],
+    "review": [
+      "The toggle updates the same state and retains an accessible name."
+    ]
+  },
+  {
+    "id": "native-form-advice",
+    "family": "native-controls",
+    "split": "development",
+    "fixture": "expo-settings-v1",
+    "prompt": "Inspect this Expo settings form and explain which native controls fit the installed SDK. Do not edit files.",
+    "expect": {
+      "required": [
+        "expo-overview",
+        "expo-ui"
+      ],
+      "optional": [
+        "expo-native-ui"
+      ],
+      "forbidden": [
+        "eas-app-stores"
+      ],
+      "unlisted": "observe"
+    },
+    "before_edit": false,
+    "unchanged": [
+      "App.tsx",
+      "package.json",
+      "src/actions.ts"
+    ],
+    "review": [
+      "Advice distinguishes SDK-compatible controls from APIs requiring an upgrade."
+    ]
+  },
+  {
+    "id": "add-navigation",
+    "family": "navigation",
+    "split": "development",
+    "fixture": "expo-settings-v1",
+    "prompt": "Add a second About screen and navigation between it and the settings screen in this Expo app. Keep the settings behavior.",
+    "expect": {
+      "required": [
+        "expo-overview",
+        "expo-router"
+      ],
+      "optional": [
+        "expo-native-ui",
+        "expo-ui"
+      ],
+      "forbidden": [
+        "eas-app-stores"
+      ],
+      "unlisted": "observe"
+    },
+    "before_edit": true,
+    "unchanged": [
+      "src/actions.ts"
+    ],
+    "review": [
+      "Both screens are reachable and returning preserves settings state."
+    ]
+  },
+  {
+    "id": "explicit-router",
+    "family": "navigation",
+    "split": "development",
+    "fixture": "expo-settings-v1",
+    "prompt": "Use the expo-router skill to explain how to add native tabs to this existing Expo app. Do not change files.",
+    "expect": {
+      "required": [
+        "expo-router"
+      ],
+      "optional": [
+        "expo-overview"
+      ],
+      "forbidden": [
+        "eas-app-stores"
+      ],
+      "unlisted": "observe"
+    },
+    "before_edit": false,
+    "unchanged": [
+      "App.tsx",
+      "package.json"
+    ],
+    "review": [
+      "Advice follows the explicitly requested skill and fits the installed SDK."
+    ]
+  },
+  {
+    "id": "apply-theme",
+    "family": "design-tokens",
+    "split": "development",
+    "fixture": "expo-settings-v1",
+    "prompt": "Use the existing src/theme.ts tokens to make spacing and colors in App.tsx consistent. Preserve the controls and their behavior.",
+    "expect": {
+      "required": [
+        "expo-overview",
+        "expo-design-system"
+      ],
+      "optional": [
+        "expo-native-ui",
+        "expo-ui"
+      ],
+      "forbidden": [
+        "eas-app-stores"
+      ],
+      "unlisted": "observe"
+    },
+    "before_edit": true,
+    "unchanged": [
+      "src/actions.ts"
+    ],
+    "review": [
+      "Relevant styling uses existing tokens and avoids a competing theme."
+    ]
+  },
+  {
+    "id": "theme-audit",
+    "family": "design-tokens",
+    "split": "development",
+    "fixture": "expo-settings-v1",
+    "prompt": "Audit this Expo screen for design-token drift against src/theme.ts. Give concrete findings; do not edit.",
+    "expect": {
+      "required": [
+        "expo-overview",
+        "expo-design-system"
+      ],
+      "optional": [
+        "expo-native-ui"
+      ],
+      "forbidden": [
+        "eas-app-stores"
+      ],
+      "unlisted": "observe"
+    },
+    "before_edit": false,
+    "unchanged": [
+      "App.tsx",
+      "src/theme.ts"
+    ],
+    "review": [
+      "Findings reference actual deviations from existing tokens."
+    ]
+  },
+  {
+    "id": "signing-diagnosis",
+    "family": "build-signing",
+    "split": "development",
+    "fixture": "expo-settings-v1",
+    "prompt": "Diagnose diagnostics/ios-build.txt and explain the next steps to fix the signing failure. Do not edit the UI or contact any external service.",
+    "expect": {
+      "required": [
+        "expo-overview",
+        "eas-app-stores"
+      ],
+      "optional": [],
+      "forbidden": [
+        "expo-native-ui",
+        "expo-ui",
+        "expo-design-system"
+      ],
+      "unlisted": "observe"
+    },
+    "before_edit": false,
+    "unchanged": [
+      "App.tsx",
+      "package.json",
+      "src/actions.ts"
+    ],
+    "review": [
+      "Diagnosis connects the rotated certificate to the stale provisioning profile without claiming a build was run."
+    ]
+  },
+  {
+    "id": "sdk-advice",
+    "family": "sdk-maintenance",
+    "split": "development",
+    "fixture": "expo-settings-v1",
+    "prompt": "Inspect this Expo app and explain how to plan an SDK upgrade. Do not install anything or modify files.",
+    "expect": {
+      "required": [
+        "expo-overview",
+        "expo-upgrade"
+      ],
+      "optional": [],
+      "forbidden": [
+        "expo-native-ui",
+        "eas-app-stores"
+      ],
+      "unlisted": "observe"
+    },
+    "before_edit": false,
+    "unchanged": [
+      "App.tsx",
+      "package.json"
+    ],
+    "review": [
+      "Advice starts from the installed SDK and reports unverified compatibility honestly."
+    ]
+  },
+  {
+    "id": "fetch-error",
+    "family": "network-errors",
+    "split": "validation",
+    "fixture": "expo-settings-v1",
+    "prompt": "src/load-items.ts parses error responses as successful data. Fix it so a non-successful HTTP response throws before parsing JSON.",
+    "expect": {
+      "required": [
+        "expo-overview",
+        "expo-data-fetching"
+      ],
+      "optional": [],
+      "forbidden": [
+        "expo-native-ui",
+        "expo-ui",
+        "eas-app-stores"
+      ],
+      "unlisted": "observe"
+    },
+    "before_edit": true,
+    "unchanged": [
+      "src/actions.ts"
+    ],
+    "review": [
+      "A non-2xx response rejects without calling response.json; a successful response still returns parsed data."
+    ]
+  },
+  {
+    "id": "fetch-diagnosis",
+    "family": "network-errors",
+    "split": "validation",
+    "fixture": "expo-settings-v1",
+    "prompt": "Review src/load-items.ts for HTTP error handling. Explain the failure mode without editing anything.",
+    "expect": {
+      "required": [
+        "expo-overview",
+        "expo-data-fetching"
+      ],
+      "optional": [],
+      "forbidden": [
+        "expo-native-ui",
+        "eas-app-stores"
+      ],
+      "unlisted": "observe"
+    },
+    "before_edit": false,
+    "unchanged": [
+      "src/load-items.ts",
+      "App.tsx"
+    ],
+    "review": [
+      "The answer distinguishes rejected network requests from HTTP error responses."
+    ]
+  },
+  {
+    "id": "press-feedback",
+    "family": "motion",
+    "split": "validation",
+    "fixture": "expo-settings-v1",
+    "prompt": "Add subtle animated press feedback to the Save settings action in this Expo app. Preserve saving and respect reduced-motion preferences.",
+    "expect": {
+      "required": [
+        "expo-overview",
+        "expo-animation"
+      ],
+      "optional": [
+        "expo-native-ui",
+        "expo-ui"
+      ],
+      "forbidden": [
+        "eas-app-stores"
+      ],
+      "unlisted": "observe"
+    },
+    "before_edit": true,
+    "unchanged": [
+      "src/actions.ts"
+    ],
+    "review": [
+      "Saving remains functional and the animation respects reduced motion; device behavior needs verification."
+    ]
+  },
+  {
+    "id": "web-native-look",
+    "family": "web-only",
+    "split": "holdout",
+    "fixture": "web-settings-v1",
+    "prompt": "Make this browser-only React settings page look more like an iPhone settings page. Keep it a website; do not add Expo or React Native.",
+    "expect": {
+      "required": [],
+      "optional": [],
+      "forbidden": [
+        "expo-overview",
+        "expo-native-ui",
+        "expo-ui",
+        "expo-router",
+        "expo-web-to-native",
+        "eas-app-stores"
+      ],
+      "unlisted": "observe"
+    },
+    "before_edit": true,
+    "unchanged": [
+      "package.json"
+    ],
+    "review": [
+      "The result remains a browser UI with no native dependencies."
+    ]
+  },
+  {
+    "id": "web-form-accessibility",
+    "family": "web-only",
+    "split": "holdout",
+    "fixture": "web-settings-v1",
+    "prompt": "Review the accessibility of this web form. Explain concrete improvements without editing files.",
+    "expect": {
+      "required": [],
+      "optional": [],
+      "forbidden": [
+        "expo-overview",
+        "expo-native-ui",
+        "expo-ui",
+        "expo-router"
+      ],
+      "unlisted": "observe"
+    },
+    "before_edit": false,
+    "unchanged": [
+      "package.json",
+      "src/main.tsx"
+    ],
+    "review": [
+      "Advice uses web accessibility semantics."
+    ]
+  },
+  {
+    "id": "bare-native-style",
+    "family": "bare-native",
+    "split": "holdout",
+    "fixture": "bare-native-v1",
+    "prompt": "Improve the spacing and typography of this React Native screen. Keep this project free of Expo dependencies and EAS services.",
+    "expect": {
+      "required": [],
+      "optional": [],
+      "forbidden": [
+        "expo-overview",
+        "expo-native-ui",
+        "expo-ui",
+        "eas-app-stores"
+      ],
+      "unlisted": "observe"
+    },
+    "before_edit": true,
+    "unchanged": [
+      "package.json"
+    ],
+    "review": [
+      "The screen remains plain React Native and package dependencies are unchanged."
+    ]
+  },
+  {
+    "id": "bare-native-explain",
+    "family": "bare-native",
+    "split": "holdout",
+    "fixture": "bare-native-v1",
+    "prompt": "Explain what App.tsx renders in this bare React Native project. Do not edit files or introduce Expo.",
+    "expect": {
+      "required": [],
+      "optional": [],
+      "forbidden": [
+        "expo-overview",
+        "expo-native-ui",
+        "expo-ui",
+        "expo-router"
+      ],
+      "unlisted": "observe"
+    },
+    "before_edit": false,
+    "unchanged": [
+      "package.json",
+      "App.tsx"
+    ],
+    "review": [
+      "The explanation describes the existing screen only."
+    ]
+  }
+]

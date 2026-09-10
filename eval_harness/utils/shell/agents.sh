@@ -345,7 +345,13 @@ eval::run_coding_agent() { # agent root workspace prd_file out_dir [model] [muse
           echo "Expo MCP not configured: set EXPO_MCP_BEARER_TOKEN to enable it"
         fi
         codex mcp list --json || true
-        ( cd "$workspace" && npx -y skills add expo/skills --yes )
+        if [ -n "${SKILL_PLUGIN_DIR:-}" ]; then
+          [ -d "$SKILL_PLUGIN_DIR/skills" ] || { echo "Missing local skills directory"; return 1; }
+          mkdir -p "$workspace/.agents/skills"
+          cp -R "$SKILL_PLUGIN_DIR/skills/." "$workspace/.agents/skills/"
+        else
+          ( cd "$workspace" && npx -y skills add expo/skills --yes )
+        fi
       } >"$out/c-plugin.log" 2>&1 || \
         echo "  ⚠️  npx skills add expo/skills failed (continuing; see c-plugin.log)"
     else

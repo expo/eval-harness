@@ -157,6 +157,8 @@ const EXPECTED_HAPPY_REPORT = `<!doctype html>
   <h1>Expo Skill Eval</h1>
   <p>Skill eval artifact analysis for test-app</p>
   <p class="note">Initial v0 signal: trace trigger detection, static code uptake checks, and optional evaluator score. No LLM judge or screenshot evidence is used.</p>
+  <p class="note">Legacy trigger metrics measure requests, not verified delivery. Optional and unlisted observed skills do not lower precision. Missing traces have no trigger score.</p>
+  <ul></ul>
   <table>
     <thead><tr><th>App</th><th>Scenario</th><th>Expected</th><th>Detected</th><th>Exact match</th><th>Recall</th><th>Precision</th><th>Uptake (pooled, legacy)</th><th>Evaluator</th></tr></thead>
     <tbody><tr><td>test-app</td><td>skills_available_unmentioned</td><td>expo-test</td><td>expo-test</td><td>True</td><td>100.0%</td><td>100.0%</td><td>100.0%</td><td>n/a</td></tr></tbody>
@@ -394,6 +396,8 @@ test("[REGRESSION] artifact discovery and analysis preserve the metrics contract
         eval_manifest: null,
       },
       braintrust_refs: [],
+      routing_expectations: { required: ["expo-test"], optional: [], forbidden: [], unlisted: "forbid" },
+      trigger_evidence: "requests_only",
     } satisfies SkillEvalPayload;
     expect(payload).toEqual(expectedPayload);
     expect(JSON.parse(readFileSync(join(outDir, "metrics.json"), "utf8")))
@@ -573,7 +577,10 @@ test("[REGRESSION] a missing author trace degrades to warnings", async () => {
     });
 
     expect(payload.warnings).toContain("author trace not found");
-    expect(payload.runs[0]?.trigger_recall).toBe(0);
+    expect(payload.runs[0]?.trigger_recall).toBeNull();
+    expect(payload.runs[0]?.trigger_precision).toBeNull();
+    expect(payload.runs[0]?.trigger_exact_match).toBeNull();
+    expect(payload.skills["expo-test"]?.trigger_status).toBe("unavailable");
     expect(payload.runs[0]?.uptake_rate).toBeNull();
   });
 });
@@ -925,5 +932,21 @@ test("[REGRESSION] shell entrypoint runs with Bun and no Python executable", () 
     expect(spawned.stdout.toString()).toContain("app=test-app\n");
     expect(JSON.parse(readFileSync(join(outDir, "metrics.json"), "utf8")))
       .toMatchObject({ app: "test-app", expected_skills: ["expo-test"] });
+  });
+});
+
+test("missing trigger evidence stays unavailable through aggregation", () => {
+  const result = aggregateSkillResults([{ skill_id: "expo-router", scenario: "skills_available_unmentioned", trigger_recall: null, trigger_precision: null, trigger_exact_match: null }]);
+  expect(result["expo-router"]).toMatchObject({ trigger_recall: null, trigger_precision: null, trigger_accuracy: null });
+});
+
+test("unavailable skills still receive the same artifact checks", async () => {
+  await withTempDirAsync(async (root) => {
+    const fixture = writeFixture(root);
+    const args = { authoredArtifact: fixture.authored, evalArtifact: null, prdSkillsPath: fixture.prdSkills, checksDir: fixture.checksDir };
+    const baseline = await analyzeArtifacts({ ...args, scenario: "skills_unavailable", outDir: join(root, "baseline") });
+    const candidate = await analyzeArtifacts({ ...args, scenario: "skills_available_unmentioned", outDir: join(root, "candidate") });
+    expect(baseline.static_checks).toEqual(candidate.static_checks);
+    expect(baseline.static_checks.length).toBeGreaterThan(0);
   });
 });

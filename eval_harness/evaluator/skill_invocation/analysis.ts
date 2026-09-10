@@ -1,6 +1,8 @@
 import { mkdir, readdir } from "node:fs/promises";
 import path from "node:path";
 
+import { parseExpectations, type Expectations } from "./expectations.ts";
+
 import {
   readBundleResult,
   type BundleResult,
@@ -31,7 +33,6 @@ import {
   compareUnicodeCodePoints,
   dedupe,
   flattenStrings,
-  loadPrdSkillsAsync,
   readJsonAsync,
   roundFloat,
   writeJsonAsync,
@@ -89,7 +90,7 @@ type CheckJson = {
 export type SkillResult = {
   expected: true;
   triggered: boolean;
-  trigger_status: "observed" | "not_observed";
+  trigger_status: "observed" | "not_observed" | "unavailable";
   uptake_status:
     | "unsupported"
     | "missing_app"
@@ -106,9 +107,9 @@ export type SkillRun = {
   app: string | null;
   scenario: string;
   skill_id: string;
-  trigger_recall: number;
-  trigger_precision: number;
-  trigger_exact_match: boolean;
+  trigger_recall: number | null;
+  trigger_precision: number | null;
+  trigger_exact_match: boolean | null;
   detected_skills: string[];
   uptake_rate: number | null;
   evaluator_pct: number | null;
@@ -154,12 +155,12 @@ export async function analyzeArtifacts(args: {
   ]);
   const warnings: string[] = [];
   const scenario = await resolveScenario(args.scenario, authorLayout, warnings);
-  const { appName, expectedSkills: appExpectedSkills } =
+  const { appName, expectations: appExpectations } =
     await resolveAppExpectedSkills(authorLayout, args.prdSkillsPath, warnings);
-  const expectedSkills = UNAVAILABLE_SCENARIOS.has(scenario)
-    ? []
-    : appExpectedSkills;
-  const pooled = resolveChecksForSkills(expectedSkills, args.checksDir);
+  const appExpectedSkills = appExpectations.required;
+  const expectations = UNAVAILABLE_SCENARIOS.has(scenario) ? parseExpectations([]) : appExpectations;
+  const expectedSkills = expectations.required;
+  const pooled = resolveChecksForSkills(appExpectedSkills, args.checksDir);
   warnings.push(...pooled.warnings);
   const perSkill = resolveChecksBySkill(expectedSkills, args.checksDir);
   warnings.push(...perSkill.warnings);
@@ -205,6 +206,7 @@ export async function analyzeArtifacts(args: {
     checksBySkill: perSkill.checksBySkill,
     resultsById,
     appDirMissing: authorLayout.appDir === null,
+    traceAvailable: authorLayout.tracePath !== null,
   });
   const resultPath = evalLayout?.resultPath ?? null;
   const evaluatorPct = resultPath === null
@@ -218,6 +220,8 @@ export async function analyzeArtifacts(args: {
     staticTotal,
     evaluatorPct,
     buildSuccess,
+    expectations,
+    traceAvailable: authorLayout.tracePath !== null,
   });
   const run: SkillRun = {
     app: appName,
@@ -226,7 +230,7 @@ export async function analyzeArtifacts(args: {
     trigger_recall: score.triggerQuality.recall,
     trigger_precision: score.triggerQuality.precision,
     trigger_exact_match:
-      setsEqual(new Set(score.triggerQuality.triggeredSkills), new Set(expectedSkills)),
+      authorLayout.tracePath === null ? null : score.triggerQuality.missingSkills.length === 0 && score.triggerQuality.extraSkills.length === 0,
     detected_skills: score.triggerQuality.triggeredSkills,
     uptake_rate: score.contextUptake.uptakeRate,
     evaluator_pct: evaluatorPct,
@@ -237,6 +241,8 @@ export async function analyzeArtifacts(args: {
     summary: `Skill eval artifact analysis for ${appName ?? "unknown app"}`,
     app: appName,
     expected_skills: expectedSkills,
+    routing_expectations: expectations,
+    trigger_evidence: authorLayout.tracePath === null ? "unavailable" : "requests_only",
     scenario,
     outcome_status: evaluatorPct === null ? "pending" : "complete",
     warnings,
@@ -268,7 +274,7 @@ async function resolveAppExpectedSkills(
   layout: ArtifactLayout,
   prdSkillsPath: string,
   warnings: string[],
-): Promise<{ appName: string | null; expectedSkills: string[] }> {
+): Promise<{ appName: string | null; expectations: Expectations }> {
   let prd: unknown = null;
   if (
     layout.manifestPath !== null &&
@@ -279,20 +285,20 @@ async function resolveAppExpectedSkills(
   const appName = typeof prd === "string" ? appNameFromPrd(prd) : null;
   if (appName === null) {
     warnings.push(`could not derive app name from manifest prd=${pythonRepr(prd)}`);
-    return { appName, expectedSkills: [] };
+    return { appName, expectations: parseExpectations([]) };
   }
   if (!await Bun.file(prdSkillsPath).exists()) {
     warnings.push(`prd_skills map not found at ${prdSkillsPath}`);
-    return { appName, expectedSkills: [] };
+    return { appName, expectations: parseExpectations([]) };
   }
-  const expectedSkills = (await loadPrdSkillsAsync(prdSkillsPath))[appName];
+  const expectedSkills = (await readJsonAsync<Record<string, unknown>>(prdSkillsPath))[appName];
   if (expectedSkills === undefined) {
     warnings.push(
       `no ground-truth skill set for app '${appName}' in ${prdSkillsPath}`,
     );
-    return { appName, expectedSkills: [] };
+    return { appName, expectations: parseExpectations([]) };
   }
-  return { appName, expectedSkills };
+  return { appName, expectations: parseExpectations(expectedSkills) };
 }
 
 async function resolveScenario(
@@ -345,10 +351,14 @@ export function scoreCaseRun(args: {
   staticTotal: number;
   evaluatorPct: number | null;
   buildSuccess: boolean | null;
+  expectations?: Expectations;
+  traceAvailable?: boolean;
 }): CaseRunScore {
   const triggerQuality = scoreTriggerQuality(
     args.expectedSkills,
     args.triggeredSkills,
+    args.expectations,
+    args.traceAvailable ?? true,
   );
   const relevantTriggered = triggerQuality.matchedSkills.length > 0;
   const contextUptake: ContextUptake = relevantTriggered
@@ -382,6 +392,7 @@ export function computeSkillResults(args: {
   checksBySkill: Record<string, Check[] | null>;
   resultsById: Map<string, CheckResult>;
   appDirMissing: boolean;
+  traceAvailable?: boolean;
 }): Record<string, SkillResult> {
   const triggered = new Set(args.triggeredSkills);
   const skills: Record<string, SkillResult> = {};
@@ -390,7 +401,7 @@ export function computeSkillResults(args: {
     const common = {
       expected: true as const,
       triggered: isTriggered,
-      trigger_status: isTriggered ? "observed" as const : "not_observed" as const,
+      trigger_status: args.traceAvailable === false ? "unavailable" as const : isTriggered ? "observed" as const : "not_observed" as const,
     };
     const checks = args.checksBySkill[skillId];
     if (checks === null || checks === undefined) {
@@ -473,10 +484,10 @@ export function aggregateSkillResults(
     );
     const baselineEval = average(values(baseline, "evaluator_pct"));
     const skillEval = average(values(skillRows, "evaluator_pct"));
-    const recall = average(values(skillRows, "trigger_recall")) ?? 0;
-    const precision = average(values(skillRows, "trigger_precision")) ?? 0;
+    const recall = average(values(skillRows, "trigger_recall"));
+    const precision = average(values(skillRows, "trigger_precision"));
     const exactMatch = average(
-      skillRows.map((row) => row.trigger_exact_match ? 1 : 0),
+      skillRows.flatMap((row) => typeof row.trigger_exact_match === "boolean" ? [row.trigger_exact_match ? 1 : 0] : []),
     );
     const uptake = average(values(skillRows, "uptake_rate"));
     const buildSuccess = average(
@@ -489,8 +500,8 @@ export function aggregateSkillResults(
       outcome_delta: baselineEval === null || skillEval === null
         ? null
         : roundFloat(skillEval - baselineEval),
-      trigger_recall: roundFloat(recall),
-      trigger_precision: roundFloat(precision),
+      trigger_recall: recall === null ? null : roundFloat(recall),
+      trigger_precision: precision === null ? null : roundFloat(precision),
       trigger_accuracy: exactMatch === null ? null : roundFloat(exactMatch),
       uptake_rate: uptake === null ? null : roundFloat(uptake),
       build_success_rate: roundFloat(buildSuccess),
@@ -586,6 +597,8 @@ export async function writeHtmlReport(
   <h1>Expo Skill Eval</h1>
   <p>${escapeHtml(payload.summary ?? "")}</p>
   <p class="note">Initial v0 signal: trace trigger detection, static code uptake checks, and optional evaluator score. No LLM judge or screenshot evidence is used.</p>
+  <p class="note">Legacy trigger metrics measure requests, not verified delivery. Optional and unlisted observed skills do not lower precision. Missing traces have no trigger score.</p>
+  <ul>${(Array.isArray(payload.warnings) ? payload.warnings : []).map((warning) => `<li>${escapeHtml(warning)}</li>`).join("")}</ul>
   <table>
     <thead><tr><th>App</th><th>Scenario</th><th>Expected</th><th>Detected</th><th>Exact match</th><th>Recall</th><th>Precision</th><th>Uptake (pooled, legacy)</th><th>Evaluator</th></tr></thead>
     <tbody>${rows.join("")}</tbody>
@@ -784,10 +797,6 @@ function scoreToJson(score: CaseRunScore): Record<string, unknown> {
       build_success: score.outcomeDelta.buildSuccess,
     },
   };
-}
-
-function setsEqual(left: Set<string>, right: Set<string>): boolean {
-  return left.size === right.size && [...left].every((item) => right.has(item));
 }
 
 function percent(value: unknown): string {

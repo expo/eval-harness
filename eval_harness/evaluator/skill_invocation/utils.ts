@@ -1,3 +1,4 @@
+import { parseExpectations } from "./expectations.ts";
 import {
   existsSync,
   lstatSync,
@@ -103,7 +104,7 @@ function normalizePrdSkills(
   return Object.fromEntries(
     Object.entries(raw).map(([key, value]) => [
       String(key),
-      Array.isArray(value) ? value.map(String) : [],
+      parseExpectations(value).required,
     ]),
   );
 }
