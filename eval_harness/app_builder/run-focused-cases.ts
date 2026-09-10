@@ -80,6 +80,7 @@ export async function runFocusedCases(args: {
       filter: (source) => ![".git", "node_modules"].includes(basename(source)),
     });
     const pluginHash = hashTree(plugin);
+    cpSync(plugin, join(args.out, "catalog"), { recursive: true });
     const bodies: Record<string, string> = {};
     for (const entry of readdirSync(join(plugin, "skills"), {
       withFileTypes: true,
@@ -101,6 +102,8 @@ export async function runFocusedCases(args: {
         mkdirSync(out, { recursive: true });
         const home = mkdtempSync(join(root, "attempt-"));
         const workspace = join(home, "workspace");
+        const attemptPlugin = join(home, "plugin");
+        cpSync(plugin, attemptPlugin, { recursive: true });
         cpSync(fixture, workspace, {
           recursive: true,
           filter: (source) =>
@@ -144,7 +147,7 @@ export async function runFocusedCases(args: {
           "--mcp-config",
           '{"mcpServers":{}}',
           "--plugin-dir",
-          plugin,
+          attemptPlugin,
         ];
         const manifest = {
           ...config,

@@ -40,7 +40,7 @@ bun eval_harness/evaluator/skill_invocation/focused/main.ts run \
 ```
 
 `run` requires `CI` and `SKILL_EVAL_REMOTE=1`. Authentication comes from the CI environment.
-Every attempt gets a fresh workspace and Claude config directory. The source plugin is
+Every attempt gets a fresh workspace, plugin copy and Claude config directory. The source plugin is
 frozen once, tool/MCP/hook settings are explicit, and attempts are sequential. No user
 configuration or credentials are copied into artifacts. Parent catalog visibility is
 recorded as unverified: installation alone does not prove descriptions were exposed.
@@ -61,6 +61,8 @@ It ignores assistant claims and child-agent messages. An acknowledgement such as
 "Launching skill" never proves delivery. The full-body detector is intentionally
 conservative; transformed or partially read skill text can yield `unobservable`.
 Raw JSONL makes that limitation inspectable without another model call.
+Each report also retains the frozen plugin under `catalog/`, so hashes can be traced
+back to the exact source files even when a skill was never loaded.
 
 The HTML report shows routing counts, each expectation, trace-line links, source checks,
 review assertions, timing and final responses. Manifests record runtime, requested model,

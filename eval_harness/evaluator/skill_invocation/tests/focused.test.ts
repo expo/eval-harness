@@ -383,6 +383,9 @@ test("offline mocked CLI verifies attempt isolation and artifact capture without
     expect(firstHome).not.toBe(secondHome);
     expect(existsSync(firstHome)).toBe(false);
     expect(existsSync(join(out, "tiny/1/raw.jsonl"))).toBe(true);
+    expect(
+      readFileSync(join(out, "catalog/skills/expo-native-ui/SKILL.md"), "utf8"),
+    ).toContain(body);
     expect(existsSync(join(out, "tiny/1/app/manifest.json"))).toBe(false);
   } finally {
     for (const [key, value] of Object.entries(old)) {
