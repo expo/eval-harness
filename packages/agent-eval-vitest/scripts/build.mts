@@ -7,7 +7,7 @@ import { dts } from 'rollup-plugin-dts';
 rmSync('build', { recursive: true, force: true });
 execFileSync('tsc', ['-p', 'tsconfig.build.json'], { stdio: 'inherit' });
 
-const entrypoints = ['index', 'claude'];
+const entrypoints = ['index', 'claude', 'ollama'];
 const result = await Bun.build({
   entrypoints: entrypoints.map((name) => `./src/${name}.ts`),
   outdir: './build',

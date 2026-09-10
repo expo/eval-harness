@@ -21,6 +21,10 @@
     "./claude": {
       "types": "./build/claude.d.ts",
       "default": "./build/claude.js"
+    },
+    "./ollama": {
+      "types": "./build/ollama.d.ts",
+      "default": "./build/ollama.js"
     }
   },
   "main": "./build/index.js",
