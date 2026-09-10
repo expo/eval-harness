@@ -65,6 +65,13 @@ eval::default_author_model() { # agent
   eval::resolve_authoring_model "$1" ""
 }
 
+eval::resolve_reasoning_effort() {
+  case "${1:-high}" in
+    low|medium|high) printf '%s\n' "${1:-high}" ;;
+    *) echo "unsupported reasoning effort: $1 (expected low, medium, or high)" >&2; return 2 ;;
+  esac
+}
+
 # Authoring credentials are deliberately provider-specific. In particular,
 # do not run Claude Code's OAuth check for Codex or Muse: the downstream iOS
 # evaluator retains its own Claude auth check in eval-ios-app.sh.
@@ -238,11 +245,12 @@ EOF
 
 # Writes Codex's user-level config.toml (model_provider routed through the
 # logging proxy + [otel] pointed at the OTLP receiver).
-eval::_write_codex_config() { # codex_home model openai_proxy_port otlp_port
-  local codex_home="$1" model="$2" oport="$3" otlp="$4"
+eval::_write_codex_config() { # codex_home model reasoning_effort openai_proxy_port otlp_port
+  local codex_home="$1" model="$2" reasoning_effort="$3" oport="$4" otlp="$5"
   mkdir -p "$codex_home"
   cat > "$codex_home/config.toml" <<EOF
 model = "$model"
+model_reasoning_effort = "$reasoning_effort"
 model_provider = "proxy"
 approval_policy = "never"
 sandbox_mode = "danger-full-access"
@@ -289,12 +297,12 @@ EOF
 # PROMPT_FILE: base authoring prompt, relative to repo root. Normally resolved
 # from PROMPT_VARIANT by resolve_prompt.sh (see author-app.sh); defaulted here
 # only so this function stays callable on its own.
-eval::run_coding_agent() { # agent root workspace prd_file out_dir [model] [muse_api_key]
-  local agent="$1" root="$2" workspace="$3" prd_file="$4" out="$5" model="${6:-}"
+eval::run_coding_agent() { # agent root workspace prd_file out_dir [model] [reasoning_effort] [muse_api_key]
+  local agent="$1" root="$2" workspace="$3" prd_file="$4" out="$5" model="${6:-}" reasoning_effort="${7:-high}"
   agent="$(eval::normalize_authoring_agent "$agent")" || return $?
   local muse_api_key=""
   if [ "$agent" = "muse-code" ]; then
-    muse_api_key="${7:-${MUSE_API_KEY:-${META_API_KEY:-}}}"
+    muse_api_key="${8:-${MUSE_API_KEY:-${META_API_KEY:-}}}"
     unset META_API_KEY
     export -n muse_api_key
   fi
@@ -331,7 +339,7 @@ eval::run_coding_agent() { # agent root workspace prd_file out_dir [model] [muse
     export CODEX_HOME="${CODEX_HOME:-$out/codex-home}"
     local codex_bearer="${EXPO_MCP_BEARER_TOKEN:-}"
     [ "$skills_enabled" = 1 ] || codex_bearer=""
-    EXPO_MCP_BEARER_TOKEN="$codex_bearer" eval::_write_codex_config "$CODEX_HOME" "${model:-${CODEX_MODEL:-gpt-5-mini}}" \
+    EXPO_MCP_BEARER_TOKEN="$codex_bearer" eval::_write_codex_config "$CODEX_HOME" "${model:-${CODEX_MODEL:-gpt-5-mini}}" "$reasoning_effort" \
       "${OPENAI_PROXY_PORT:-8082}" "${OTLP_PORT:-4318}"
     if [ "$skills_enabled" = 1 ]; then
       # Install Expo skills into the authored workspace. A fresh CI CODEX_HOME
@@ -396,14 +404,14 @@ eval::run_coding_agent() { # agent root workspace prd_file out_dir [model] [muse
       ( cd "$workspace" && printf '%s\n' "$muse_api_key" | ( eval::_scrub_muse_agent_credentials; unset muse_api_key; \
           XDG_CONFIG_HOME="$muse_settings_root" XDG_DATA_HOME="$muse_data_root" \
           MUSE_NO_AUTO_UPDATE=1 $TO muse exec --json --api-key-stdin --provider meta \
-            --model "${model:-muse-spark-1.2}" --workspace "$workspace" --yolo \
+            --model "${model:-muse-spark-1.2}" --reasoning-effort "$reasoning_effort" --workspace "$workspace" --yolo \
             --no-foreign-personal-context "$prompt" ) ) \
         2>&1 | tee "$out/c-agent.log"
       rc=${PIPESTATUS[0]}
     else
       ( cd "$workspace" && printf '%s\n' "$muse_api_key" | ( eval::_scrub_muse_agent_credentials; unset muse_api_key; \
           MUSE_NO_AUTO_UPDATE=1 $TO muse exec --json --api-key-stdin --provider meta \
-            --model "${model:-muse-spark-1.2}" --workspace "$workspace" --yolo \
+            --model "${model:-muse-spark-1.2}" --reasoning-effort "$reasoning_effort" --workspace "$workspace" --yolo \
             --no-foreign-personal-context "$prompt" ) ) \
         2>&1 | tee "$out/c-agent.log"
       rc=${PIPESTATUS[0]}
@@ -446,17 +454,9 @@ eval::run_coding_agent() { # agent root workspace prd_file out_dir [model] [muse
     else
       echo "skills_unavailable scenario: skipping Expo plugin install and MCP wiring" >"$out/c-plugin.log"
     fi
-    # Branch on model rather than expanding a possibly-empty array — macOS ships
-    # bash 3.2, where "${arr[@]}" on an empty array trips `set -u`.
-    if [ -n "$model" ]; then
-      ( cd "$workspace" && $TO claude -p "$prompt" --model "$model" \
-          --dangerously-skip-permissions --add-dir "$workspace" $settings_arg $plugin_arg ) 2>&1 | tee "$out/c-agent.log"
-      local rc=${PIPESTATUS[0]}
-    else
-      ( cd "$workspace" && $TO claude -p "$prompt" \
-          --dangerously-skip-permissions --add-dir "$workspace" $settings_arg $plugin_arg ) 2>&1 | tee "$out/c-agent.log"
-      local rc=${PIPESTATUS[0]}
-    fi
+    ( cd "$workspace" && $TO claude -p "$prompt" --model "$model" --effort "$reasoning_effort" \
+        --dangerously-skip-permissions --add-dir "$workspace" $settings_arg $plugin_arg ) 2>&1 | tee "$out/c-agent.log"
+    local rc=${PIPESTATUS[0]}
     eval::reject_claude_quota_exhaustion "$out/c-agent.log"
     local quota_rc=$?
     [ "$quota_rc" = 0 ] || rc=$quota_rc

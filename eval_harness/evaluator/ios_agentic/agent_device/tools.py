@@ -66,10 +66,12 @@ def build_tools(ctx: ToolContext):
 
     @tool(
         "capture_screenshot",
-        "Capture a PNG screenshot of the current simulator screen and return the "
-        "path on disk. Use this for visual evidence after navigating to a "
-        "feature-relevant screen. The harness saves screenshots under the "
-        "current evaluator trace directory when available.",
+        "Save a PNG of the current simulator screen as optional human-review "
+        "evidence and return its path on disk. The result contains no image "
+        "pixels, so you cannot inspect it and must never use it to decide or "
+        "score an assertion. Use capture_screen and structured assertion tools "
+        "for evaluation decisions. Screenshots are saved under the current "
+        "evaluator trace directory.",
         {},
     )
     async def capture_screenshot(args: dict) -> dict:

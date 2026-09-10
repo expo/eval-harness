@@ -21,10 +21,10 @@ simulator boot).
      if a previous Maestro run left it running on the same simulator)
   3. (clear_state) rm -rf Expo Go's Documents/Library/tmp
   4. simctl openurl exp://localhost:8081
-  5. Option B app-readiness polling: every ~1.5s, snapshot; if "Bottom Sheet"
-     visible, blind-tap top-of-screen to dismiss; otherwise check that the
-     snapshot has > 2 nodes (Expo Go's bare shell is 2 nodes — anything more
-     means the JS bundle has rendered). Timeout 30s.
+  5. App-readiness polling: dismiss known Expo launcher surfaces; during the
+     evaluator-owned preflight only, choose the neutral deny/not-now response
+     for recognized iOS permission prompts; then require app-owned accessible UI.
+     Unknown alerts abort with their title instead of being blindly dismissed.
 
 iOS-only. Android raises NotImplementedError for now.
 """
@@ -36,6 +36,7 @@ import shutil
 import subprocess
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 
@@ -61,6 +62,13 @@ _TYPE_TOKEN = {
     "TabBar": "tab-bar",
     "Toolbar": "toolbar",
 }
+_SAFE_SNAPSHOT_TYPES = frozenset({
+    *_TYPE_TOKEN,
+    "Alert",
+    "Link",
+    "SearchField",
+    "TextView",
+})
 
 
 def _type_token(t: str | None) -> str:
@@ -129,10 +137,18 @@ class AgentDeviceBridge:
         if deep_link:
             cfg["deep_link"] = deep_link
         self.config = cfg
+        selected_simulator = os.environ.get("EVAL_DEV_UDID")
+        self.simulator = selected_simulator or "booted"
         if verbose:
             print(f"  [bridge] app_id={cfg['app_id']} deep_link={cfg['deep_link']}")
         # Common flags appended to every agent-device call.
         self._common_args = ["--session", session, "--platform", platform]
+        if selected_simulator:
+            self._common_args.extend(["--udid", selected_simulator])
+        # A restart may make a neutral evaluator-owned choice before the model
+        # exists. Keep those choices reviewable without coupling this bridge to
+        # the plan tracer. The evaluator copies each entry into its trace.
+        self.last_restart_diagnostics: list[dict[str, str]] = []
 
     # ----- subprocess helpers -----
 
@@ -194,20 +210,49 @@ class AgentDeviceBridge:
         """
         Capture a PNG screenshot of the current simulator screen.
 
-        If `path` is provided, the screenshot is written there. Otherwise a
-        temporary file path is generated. Returns an AgentDeviceResult whose
-        `output` is the path to the captured PNG on disk.
-
-        Intentionally NOT yet exposed as an LLM-visible tool — building the
-        bridge primitive only so we can wire it into a `capture_screenshot`
-        tool later without changing the bridge surface. Callers (the eval
-        harness, a future MCP tool, or diagnostic scripts) can use it
-        directly via this method.
+        EVAL_SCREENSHOT_DIR defines the active plan's evidence root. If `path`
+        is omitted, a unique filename is allocated beneath that root. Explicit
+        paths must also resolve beneath it. On success, `output` is the durable
+        screenshot path on disk.
         """
         import tempfile
+
+        configured_root = os.environ.get("EVAL_SCREENSHOT_DIR")
+        if not configured_root:
+            return AgentDeviceResult(
+                success=False,
+                output="",
+                error="EVAL_SCREENSHOT_DIR is required for screenshot capture",
+            )
+
+        root = Path(configured_root).expanduser()
+        root.mkdir(parents=True, exist_ok=True)
+        resolved_root = root.resolve()
         if path is None:
-            path = tempfile.NamedTemporaryFile(suffix=".png", delete=False).name
-        return self._run_cmd(["screenshot", path])
+            with tempfile.NamedTemporaryFile(
+                prefix="evidence-",
+                suffix=".png",
+                dir=root,
+                delete=False,
+            ) as screenshot_file:
+                target = Path(screenshot_file.name)
+        else:
+            target = Path(path).expanduser()
+            if not target.resolve().is_relative_to(resolved_root):
+                return AgentDeviceResult(
+                    success=False,
+                    output="",
+                    error=(
+                        f"screenshot path is outside EVAL_SCREENSHOT_DIR: "
+                        f"{target.resolve()} (root: {resolved_root})"
+                    ),
+                )
+            target.parent.mkdir(parents=True, exist_ok=True)
+
+        result = self._run_cmd(["screenshot", str(target)])
+        if not result.success:
+            return result
+        return AgentDeviceResult(success=True, output=str(target), error=result.error)
 
     def capture_hierarchy(self) -> str:
         """
@@ -276,10 +321,394 @@ class AgentDeviceBridge:
         return False
 
     @staticmethod
-    def _has_target_app_content(nodes: list[dict]) -> bool:
-        """True when React Native has rendered app-owned, testID-addressable UI."""
-        content_types = {"StaticText", "Button", "Image", "SecureTextField", "TextField", "Other"}
-        return any(n.get("type") in content_types and n.get("identifier") for n in nodes)
+    def _ios_snapshot_tree_rejection(nodes: list[dict]) -> str | None:
+        """Return the exact violated iOS agent-device 0.17.6 tree invariant."""
+        if not nodes:
+            return "snapshot_empty"
+        if any(not isinstance(node, dict) for node in nodes):
+            return "snapshot_node_not_object"
+
+        nodes_by_index: dict[int, dict] = {}
+        for node in nodes:
+            index = node.get("index")
+            depth = node.get("depth")
+            if (
+                not isinstance(index, int)
+                or isinstance(index, bool)
+                or index < 0
+            ):
+                return "node_index_invalid"
+            if index in nodes_by_index:
+                return "node_index_duplicate"
+            if (
+                not isinstance(depth, int)
+                or isinstance(depth, bool)
+                or depth < 0
+            ):
+                return "node_depth_invalid"
+            nodes_by_index[index] = node
+
+        root = nodes[0]
+        if (
+            root.get("type") != "Application"
+            or root.get("index") != 0
+            or root.get("depth") != 0
+            or root.get("parentIndex") is not None
+        ):
+            return "application_root_invalid"
+
+        for index, node in nodes_by_index.items():
+            if index == 0:
+                continue
+            parent_index = node.get("parentIndex")
+            if (
+                not isinstance(parent_index, int)
+                or isinstance(parent_index, bool)
+                or parent_index < 0
+            ):
+                return "node_parent_index_invalid"
+            if parent_index not in nodes_by_index:
+                return "node_parent_missing"
+
+        for index in nodes_by_index:
+            if index == 0:
+                continue
+            seen: set[int] = set()
+            cursor = index
+            while cursor != 0:
+                if cursor in seen:
+                    return "node_parent_cycle"
+                seen.add(cursor)
+                cursor = nodes_by_index[cursor]["parentIndex"]
+
+        for index, node in nodes_by_index.items():
+            if index == 0:
+                continue
+            parent_index = node["parentIndex"]
+            if parent_index >= index:
+                return "node_parent_not_preceding_child"
+            parent = nodes_by_index[parent_index]
+            # `snapshot -i --raw` filters intermediary AX nodes and reparents
+            # descendants while retaining their original accessibility depth.
+            if node["depth"] <= parent["depth"]:
+                return "node_depth_not_increasing"
+        return None
+
+    @classmethod
+    def _has_valid_ios_snapshot_tree(cls, nodes: list[dict]) -> bool:
+        """Validate the structural fields emitted by iOS agent-device 0.17.6."""
+        return cls._ios_snapshot_tree_rejection(nodes) is None
+
+    @staticmethod
+    def _snapshot_schema_summary(nodes: list[dict], max_nodes: int = 8) -> dict:
+        """Bounded raw-node shape only; never app-owned accessibility text."""
+        summarized: list[dict] = []
+        for raw_node in nodes[:max_nodes]:
+            node_is_object = isinstance(raw_node, dict)
+            node = raw_node if node_is_object else {}
+            raw_type = node.get("type")
+            safe_type = (
+                raw_type
+                if isinstance(raw_type, str) and raw_type in _SAFE_SNAPSHOT_TYPES
+                else None
+            )
+            rect_present = "rect" in node
+            rect = node.get("rect")
+            rect_is_object = isinstance(rect, dict)
+            width = rect.get("width") if rect_is_object else None
+            height = rect.get("height") if rect_is_object else None
+            width_is_number = (
+                isinstance(width, (int, float)) and not isinstance(width, bool)
+            )
+            height_is_number = (
+                isinstance(height, (int, float)) and not isinstance(height, bool)
+            )
+            hittable = node.get("hittable")
+            summarized.append({
+                "node_is_object": node_is_object,
+                "type": safe_type,
+                "index": (
+                    node.get("index")
+                    if isinstance(node.get("index"), int)
+                    and not isinstance(node.get("index"), bool)
+                    else None
+                ),
+                "depth": (
+                    node.get("depth")
+                    if isinstance(node.get("depth"), int)
+                    and not isinstance(node.get("depth"), bool)
+                    else None
+                ),
+                "parentIndex": (
+                    node.get("parentIndex")
+                    if isinstance(node.get("parentIndex"), int)
+                    and not isinstance(node.get("parentIndex"), bool)
+                    else None
+                ),
+                "rect_present": rect_present,
+                "rect_is_object": rect_is_object,
+                "rect_width_is_number": width_is_number,
+                "rect_height_is_number": height_is_number,
+                "rect_positive_size": (
+                    width_is_number and height_is_number and width > 0 and height > 0
+                ),
+                "hittable_present": "hittable" in node,
+                "hittable_is_boolean": isinstance(hittable, bool),
+                "hittable_true": hittable is True,
+            })
+        return {
+            "node_count": len(nodes),
+            "nodes_truncated": len(nodes) > max_nodes,
+            "nodes": summarized,
+        }
+
+    @staticmethod
+    def _has_positive_rect(node: dict) -> bool:
+        rect = node.get("rect")
+        if not isinstance(rect, dict):
+            return False
+        width = rect.get("width")
+        height = rect.get("height")
+        return (
+            isinstance(width, (int, float))
+            and not isinstance(width, bool)
+            and width > 0
+            and isinstance(height, (int, float))
+            and not isinstance(height, bool)
+            and height > 0
+        )
+
+    def _target_app_content_rejection(self, nodes: list[dict]) -> str | None:
+        """Return why the bound target session is not yet useful app UI.
+
+        On pinned agent-device 0.17.6, iOS SnapshotNode does not contain a
+        bundle id, process id, or visibleToUser field. Ownership comes from the
+        configured agent-device session: the lifecycle path binds that session
+        to ``app_id``, and readiness explicitly detects/rebinds runner takeover
+        before calling this predicate. This predicate therefore validates only
+        evidence the iOS raw snapshot actually supplies: a well-formed
+        Application-rooted tree plus meaningful, rendered or hittable content.
+        """
+        structural_rejection = self._ios_snapshot_tree_rejection(nodes)
+        if structural_rejection is not None:
+            return structural_rejection
+        app = nodes[0]
+        if app.get("label") == "AgentDeviceRunner":
+            return "agent_device_runner"
+        if any(node.get("type") == "Alert" for node in nodes):
+            return "system_alert_visible"
+        if self._blocking_app_shell_error(nodes) is not None:
+            return "app_shell_error"
+
+        tree_text = " ".join(
+            str(node.get(field) or "")
+            for node in nodes
+            for field in ("label", "value", "identifier")
+        )
+        if "Bundling " in tree_text or "Loading JavaScript bundle" in tree_text:
+            return "expo_bundle_loading_shell"
+        if "Open in" in tree_text and "Open" in tree_text:
+            return "expo_open_dialog_shell"
+        if "Continue" in tree_text and (
+            "Expo Go" in tree_text or "Open this project" in tree_text
+        ):
+            return "expo_continue_shell"
+        if any(marker in tree_text for marker in (
+            "Runtime version:",
+            "Source code explorer",
+            "Open DevTools",
+            "Toggle performance monitor",
+            "dev-tools",
+        )):
+            return "expo_dev_tools_shell"
+        if "OK" in tree_text and any(marker in tree_text for marker in (
+            "Could not connect",
+            "Unable to connect",
+            "Something went wrong",
+            "No compatible apps",
+        )):
+            return "expo_reconnect_shell"
+        if any(marker in tree_text for marker in (
+            "Recently opened",
+            "Development servers",
+            "Enter URL manually",
+            "Scan QR code",
+        )):
+            return "expo_launcher_shell"
+        if "Bottom Sheet" in tree_text:
+            return "expo_bottom_sheet_shell"
+
+        content_types = {
+            "StaticText",
+            "Button",
+            "Image",
+            "SecureTextField",
+            "TextField",
+            "TextView",
+            "SearchField",
+            "Switch",
+            "Cell",
+            "Link",
+            "Other",
+        }
+        generic_content = {
+            "app",
+            "application",
+            "window",
+            "root",
+            "root view",
+            "content",
+            "content view",
+            "main",
+            "main view",
+            "view",
+            "screen",
+            "container",
+        }
+        content_nodes = [
+            node for node in nodes if node.get("type") in content_types
+        ]
+        if not content_nodes:
+            return "no_supported_content_nodes"
+        rendered_nodes = [
+            node for node in content_nodes
+            if node.get("hittable") is True or self._has_positive_rect(node)
+        ]
+        if not rendered_nodes:
+            return "content_not_rendered_or_hittable"
+        for node in rendered_nodes:
+            signals = [
+                str(node.get(field) or "").strip()
+                for field in ("label", "value", "identifier")
+            ]
+            if any(signal and signal.lower() not in generic_content for signal in signals):
+                return None
+        return "content_signal_missing_or_generic"
+
+    def _has_target_app_content(self, nodes: list[dict]) -> bool:
+        """True when the bound target session exposes useful, non-shell UI."""
+        return self._target_app_content_rejection(nodes) is None
+
+    @staticmethod
+    def _visible_alert_title(nodes: list[dict]) -> str | None:
+        """Return the visible iOS alert title only when the tree identifies an alert."""
+        alerts = [n for n in nodes if n.get("type") == "Alert"]
+        if not alerts:
+            return None
+        for node in alerts:
+            label = node.get("label")
+            if (
+                isinstance(label, str)
+                and label.strip()
+                and label.strip().lower() not in {"alert", "system alert"}
+            ):
+                return label.strip()
+        for node in nodes:
+            if node.get("type") != "StaticText":
+                continue
+            label = node.get("label")
+            if isinstance(label, str) and label.strip():
+                return label.strip()
+        return "unlabelled alert"
+
+    @staticmethod
+    def _neutral_permission_button(
+        nodes: list[dict],
+        alert_title: str,
+    ) -> tuple[str, str | None] | None:
+        """Return the exact deny/not-now label and snapshot ref for a permission prompt."""
+        labels = [
+            str(node.get("label") or "").strip()
+            for node in nodes
+            if node.get("type") in {"Alert", "StaticText"}
+        ]
+        prompt_text = " ".join([alert_title, *labels])
+        permission_prompt = re.search(
+            r"would like .*?(?:access|use|send|find|connect|track|paste|record)|"
+            r"allow .+ to (?:use|access|send|find|connect|track|paste|record)",
+            prompt_text,
+            re.I,
+        )
+        if not permission_prompt:
+            return None
+
+        for node in nodes:
+            if node.get("type") != "Button":
+                continue
+            label = str(node.get("label") or "").strip()
+            normalized = (
+                label.lower()
+                .replace("’", "'")
+                .replace("‘", "'")
+                .replace("“", '"')
+                .replace("”", '"')
+            )
+            if (
+                normalized.startswith("don't allow")
+                or normalized == "deny"
+                or normalized == "not now"
+                or (normalized.startswith("ask ") and normalized.endswith(" not to track"))
+            ):
+                ref = node.get("ref")
+                return label, str(ref) if ref else None
+        return None
+
+    def _handle_visible_alert(
+        self,
+        nodes: list[dict],
+        *,
+        preflight: bool,
+    ) -> AgentDeviceResult | None:
+        """Handle an alert during readiness, or preserve it for an active evaluator."""
+        alert_title = self._visible_alert_title(nodes)
+        if alert_title is None:
+            return None
+
+        if not preflight:
+            return AgentDeviceResult(
+                success=True,
+                output="ready (system alert preserved for evaluator)",
+            )
+
+        neutral_button = self._neutral_permission_button(nodes, alert_title)
+        if neutral_button is None:
+            return AgentDeviceResult(
+                success=False,
+                output="",
+                error=(
+                    "restart_app: blocked by unrecognized iOS system alert: "
+                    f'"{alert_title}"'
+                ),
+            )
+
+        neutral_label, neutral_ref = neutral_button
+        if neutral_ref:
+            selector = neutral_ref if neutral_ref.startswith("@") else f"@{neutral_ref}"
+        else:
+            safe_label = neutral_label.replace('"', '\\"')
+            selector = f'label="{safe_label}"'
+        dismissed = self._run_cmd(["press", selector])
+        if not dismissed.success:
+            detail = dismissed.error or dismissed.output or "no error detail"
+            return AgentDeviceResult(
+                success=False,
+                output="",
+                error=(
+                    f'restart_app: failed to choose neutral permission response '
+                    f'"{neutral_label}" for "{alert_title}": {detail}'
+                ),
+            )
+
+        self.last_restart_diagnostics.append(
+            {
+                "kind": "permission_alert",
+                "phase": "preflight",
+                "alert": alert_title,
+                "action": "dismissed",
+                "button": neutral_label,
+            }
+        )
+        return None
 
     @staticmethod
     def _blocking_app_shell_error(nodes: list[dict]) -> str | None:
@@ -894,7 +1323,11 @@ class AgentDeviceBridge:
 
     # ----- App lifecycle -----
 
-    def restart_app_hybrid(self, clear_state: bool = False) -> AgentDeviceResult:
+    def restart_app_hybrid(
+        self,
+        clear_state: bool = False,
+        preflight: bool = False,
+    ) -> AgentDeviceResult:
         """
         Diagnostic / fallback restart_app that uses a MAESTRO HYBRID approach:
 
@@ -911,6 +1344,8 @@ class AgentDeviceBridge:
         in the evaluator (or in agent_device_tools.py for the LLM-facing
         restart tool).
         """
+        self.last_restart_diagnostics = []
+
         # Lazily instantiate MaestroBridge so the import cost is paid only
         # if/when restart_app is actually called.
         if not hasattr(self, "_maestro"):
@@ -934,32 +1369,47 @@ class AgentDeviceBridge:
                 error=f"maestro restart_app failed: {m.error or m.output[:200]}",
             )
 
-        # No explicit re-bind: Maestro's restart left the simulator in a
-        # known good state with the app foregrounded. An explicit
-        # `agent-device open <bundle>` here triggers an XCTest session
-        # rebuild that wipes focused-field state mid-flight, breaking the
-        # first fill→tap sequence after restart. The `capture_hierarchy`
-        # path already detects and recovers from runner-takeover if it
-        # actually happens later.
+        # Formal restarts do not re-bind here: `agent-device open <bundle>`
+        # can rebuild the XCTest session and wipe focused-field state between
+        # evaluator actions. Preflight readiness binds the exact configured
+        # app below, before the model begins; later runner takeover remains a
+        # detect-and-recover case in `capture_hierarchy`.
 
+        if preflight:
+            return self._wait_for_target_app_content(
+                is_dev_client=is_dev_client,
+                deep_link=self.config["deep_link"],
+                preflight=True,
+            )
         return AgentDeviceResult(success=True, output="ready (maestro lifecycle + agent-device interactions)")
 
-    def restart_app(self, clear_state: bool = False) -> AgentDeviceResult:
+    def restart_app(
+        self,
+        clear_state: bool = False,
+        preflight: bool = False,
+    ) -> AgentDeviceResult:
         """Default restart_app: pure agent-device + simctl, no Maestro.
 
         Delegates to the simctl + polling-loop implementation below. The polling
-        loop handles BOTH the Expo dev-tools Bottom Sheet AND the Expo Go
-        "Continue" dialog — matching the surface area the legacy Maestro hybrid
-        path covered.
+        loop handles Expo launcher surfaces and, only when ``preflight=True``,
+        recognized iOS permission prompts. In-session restarts preserve alerts
+        for the evaluator tools instead of deciding them automatically.
 
         If this method ever proves unreliable in practice, callers can swap to
         `restart_app_hybrid()` for the Maestro-fallback path. The CLI flag
         `--native-restart` is retained as a vestigial no-op for the same reason.
         """
-        return self._restart_app_simctl_only(clear_state=clear_state)
+        return self._restart_app_simctl_only(
+            clear_state=clear_state,
+            preflight=preflight,
+        )
 
     # ----- Legacy: original simctl-only restart_app, kept for diagnostic / fallback use -----
-    def _restart_app_simctl_only(self, clear_state: bool = False) -> AgentDeviceResult:
+    def _restart_app_simctl_only(
+        self,
+        clear_state: bool = False,
+        preflight: bool = False,
+    ) -> AgentDeviceResult:
         """Original simctl-based restart_app. Handles Expo Go's Continue dialog
         and Bottom Sheet backdrop in the polling loop; used directly by
         `restart_app_native` and reachable for diagnostic / fallback runs."""
@@ -967,6 +1417,7 @@ class AgentDeviceBridge:
         deep_link = self.config["deep_link"]
         is_dev_client = "expo-development-client" in deep_link
         use_simctl_launch = os.environ.get("EVAL_APP_USE_SIMCTL_LAUNCH") == "1"
+        self.last_restart_diagnostics = []
 
         # 1: terminate Expo Go via Apple's API.
         # NOTE: do NOT also terminate `com.facebook.WebDriverAgentRunner.xctrunner`
@@ -975,7 +1426,7 @@ class AgentDeviceBridge:
         # state, causing a 15-20s session-rebuild that breaks the first 1-2
         # interactions with the target app. Leave it alone.
 
-        self._simctl(["terminate", "booted", app_id])
+        self._simctl(["terminate", self.simulator, app_id])
 
         # 2: clearState equivalent — wipe app data subdirs. Historically we
         # preserved dev-client data because its launcher state also lived in the
@@ -988,7 +1439,10 @@ class AgentDeviceBridge:
         elif clear_state:
             if self.verbose and is_dev_client:
                 print("  [bridge] clearing dev-client container state during restart")
-            info = self._simctl(["get_app_container", "booted", app_id, "data"], timeout=10)
+            info = self._simctl(
+                ["get_app_container", self.simulator, app_id, "data"],
+                timeout=10,
+            )
             if info.success and info.output:
                 data_path = info.output
                 for sub in ("Documents", "Library", "tmp"):
@@ -1002,36 +1456,69 @@ class AgentDeviceBridge:
         # can replay stale LAN URLs after a process restart, while the captured
         # URL is the current Metro endpoint for this workflow run.
         if use_simctl_launch:
-            self._simctl(["launch", "booted", app_id], timeout=30)
+            self._simctl(["launch", self.simulator, app_id], timeout=30)
         elif is_dev_client:
-            self._simctl(["openurl", "booted", deep_link], timeout=30)
+            self._simctl(["openurl", self.simulator, deep_link], timeout=30)
         else:
-            self._simctl(["openurl", "booted", deep_link])
+            self._simctl(["openurl", self.simulator, deep_link])
         # Brief settle: let Expo Go's process come up before any agent-device
         # interaction. Without this, our first snapshot can race the JS
         # bundle load and trigger an unnecessary session rebuild.
         time.sleep(3)
 
-        # NOTE: do NOT call `agent-device open host.exp.Exponent` here to
-        # "re-bind" the session. That call appears to trigger an agent-device
-        # session rebuild that clears focused-field state (so a password
-        # filled into the gate gets wiped before tap_element button-unlock
-        # delivers). The detect-and-recover path inside `capture_hierarchy`
-        # handles runner takeover if it occurs.
+        # Formal restarts do not re-bind here because rebuilding the XCTest
+        # session can clear focused-field state between evaluator actions.
+        # Preflight readiness intentionally binds the exact configured app in
+        # `_wait_for_target_app_content` before the model begins; later runner
+        # takeover remains a detect-and-recover case in `capture_hierarchy`.
 
-        # 4: Option B app-readiness polling. Uses _snapshot_raw + node-level
+        return self._wait_for_target_app_content(
+            is_dev_client=is_dev_client,
+            deep_link=deep_link,
+            preflight=preflight,
+        )
+
+    def _wait_for_target_app_content(
+        self,
+        *,
+        is_dev_client: bool,
+        deep_link: str,
+        preflight: bool,
+    ) -> AgentDeviceResult:
+        # Option B app-readiness polling. Uses _snapshot_raw + node-level
         # checks (not the rendered text) so we can distinguish "target app
         # rendered content" from "agent-device's helper runner has text on
         # screen" — the runner has its own [StaticText] nodes that would
         # falsely trigger a text-based readiness heuristic.
+        if preflight:
+            bound = self._rebind_session()
+            if not bound.success:
+                detail = bound.error or bound.output or "no error detail"
+                return AgentDeviceResult(
+                    success=False,
+                    output="",
+                    error=(
+                        "restart_app: failed to bind agent-device session to "
+                        f'"{self.config["app_id"]}" before preflight readiness: '
+                        f"{detail}"
+                    ),
+                )
+
         ready_timeout = float(os.environ.get("EVAL_APP_READY_TIMEOUT_SEC", "30"))
         deadline = time.time() + ready_timeout
         dismiss_attempts = 0
+        last_readiness_rejection = "snapshot_unavailable"
+        last_snapshot_summary = self._snapshot_schema_summary([])
         while time.time() < deadline:
             nodes = self._snapshot_raw()
             if nodes is None:
+                last_readiness_rejection = "snapshot_unavailable"
+                last_snapshot_summary = self._snapshot_schema_summary([])
                 time.sleep(1.5)
                 continue
+
+            last_readiness_rejection = self._target_app_content_rejection(nodes)
+            last_snapshot_summary = self._snapshot_schema_summary(nodes)
 
             # If agent-device's session is showing its own runner, re-bind to
             # the target app and try again on the next iteration.
@@ -1045,6 +1532,7 @@ class AgentDeviceBridge:
             # or alongside the Bottom Sheet; check it first so the Bottom
             # Sheet branch isn't masked by a Continue overlay above it.
             labels = " ".join((n.get("label") or "") for n in nodes)
+
             if "Bundling " in labels or "Loading JavaScript bundle" in labels:
                 if self.verbose:
                     print(f"  [bridge] app still bundling/loading: {self._debug_node_summary(nodes)}")
@@ -1064,7 +1552,9 @@ class AgentDeviceBridge:
                     )
                 continue
 
-            if "Continue" in labels:
+            if "Continue" in labels and (
+                "Expo Go" in labels or "Open this project" in labels
+            ):
                 if self.verbose:
                     print(f"  [bridge] dismissing Continue dialog: {self._debug_node_summary(nodes)}")
                 self._run_cmd(["press", 'label="Continue"'])
@@ -1113,7 +1603,7 @@ class AgentDeviceBridge:
                     print(f"  [bridge] dismissing reconnect alert: {self._debug_node_summary(nodes)}")
                 self._run_cmd(["press", 'label="OK"'])
                 if is_dev_client:
-                    self._simctl(["openurl", "booted", deep_link], timeout=30)
+                    self._simctl(["openurl", self.simulator, deep_link], timeout=30)
                 dismiss_attempts += 1
                 time.sleep(2.0)
                 if dismiss_attempts > 9:
@@ -1136,9 +1626,9 @@ class AgentDeviceBridge:
                 if self.verbose:
                     print(f"  [bridge] dev-client launcher visible: {self._debug_node_summary(nodes)}")
                 if is_dev_client:
-                    self._simctl(["openurl", "booted", deep_link], timeout=30)
+                    self._simctl(["openurl", self.simulator, deep_link], timeout=30)
                 else:
-                    self._simctl(["openurl", "booted", deep_link])
+                    self._simctl(["openurl", self.simulator, deep_link])
                 dismiss_attempts += 1
                 time.sleep(2.0)
                 if dismiss_attempts > 9:
@@ -1161,20 +1651,38 @@ class AgentDeviceBridge:
                     )
                 continue
 
+            # Launcher/dev-tool alerts above have existing deterministic
+            # handlers. Only after those are ruled out do we classify an iOS
+            # system alert as a permission prompt or an unknown blocker.
+            diagnostic_count = len(self.last_restart_diagnostics)
+            alert_outcome = self._handle_visible_alert(nodes, preflight=preflight)
+            if alert_outcome is not None:
+                return alert_outcome
+            if len(self.last_restart_diagnostics) > diagnostic_count:
+                # A recognized permission alert was dismissed. Wait for the
+                # app-owned accessibility tree rather than treating the alert
+                # as readiness evidence.
+                time.sleep(1.0)
+                continue
+
             blocking_error = self._blocking_app_shell_error(nodes)
             if blocking_error:
                 return AgentDeviceResult(
                     success=False,
                     output="",
-                    error=f"restart_app: app shell error visible: {blocking_error}; {self._debug_node_summary(nodes)}",
+                    error=(
+                        "restart_app: app shell error visible: "
+                        f"{blocking_error}; readiness_rejection=app_shell_error; "
+                        "snapshot_schema="
+                        f"{json.dumps(last_snapshot_summary, sort_keys=True, separators=(',', ':'))}"
+                    ),
                 )
 
-            # Ready when the target app has rendered a node that BOTH has a
-            # content type AND a React Native testID (accessibilityIdentifier).
-            # The stricter "has identifier" requirement filters out Expo Go's
-            # chrome (welcome dialog, dev menu, splash) which has text nodes
-            # but no testIDs. Only the actual app's components have testIDs.
-            if self._has_target_app_content(nodes):
+            # Ready when the already target-bound agent-device session exposes
+            # useful accessible UI. TestIDs are strong evidence when present
+            # but optional; the pinned iOS raw shape has structural/geometry
+            # fields rather than bundle/process/visibility metadata.
+            if last_readiness_rejection is None:
                 if self.verbose:
                     print(f"  [bridge] target app content ready: {self._debug_node_summary(nodes)}")
                 return AgentDeviceResult(success=True, output="ready")
@@ -1183,7 +1691,12 @@ class AgentDeviceBridge:
 
         return AgentDeviceResult(
             success=False, output="",
-            error=f"restart_app: app did not become ready within {ready_timeout:g}s",
+            error=(
+                f"restart_app: app did not become ready within {ready_timeout:g}s; "
+                f"final_readiness_rejection={last_readiness_rejection}; "
+                "snapshot_schema="
+                f"{json.dumps(last_snapshot_summary, sort_keys=True, separators=(',', ':'))}"
+            ),
         )
 
     def cleanup(self) -> None:

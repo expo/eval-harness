@@ -1,0 +1,9 @@
+{
+  "schema_version": 2,
+  "artifact_type": "skill-eval-report",
+  "run_id": "run-fixture-1",
+  "artifacts": {
+    "metrics": "metrics.json",
+    "report": "report.html"
+  }
+}

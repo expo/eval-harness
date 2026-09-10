@@ -9,6 +9,10 @@
       "file": "prompts/minimal.md",
       "formerly": "eval_harness/app_builder/prompts/author_app_2.md",
       "description": "Role and task only, with none of baseline's verification instructions. Isolates how much the harness's explicit guardrails contribute versus the agent's own defaults."
+    },
+    "realistic": {
+      "file": "prompts/realistic.md",
+      "description": "A concise, conversational product request that asks for a complete, discoverable, polished Expo experience without baseline's technical build instructions."
     }
   }
 }

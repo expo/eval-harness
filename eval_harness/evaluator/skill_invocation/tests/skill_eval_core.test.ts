@@ -1110,7 +1110,7 @@ test("[REGRESSION] corrupt archives are not reported as security violations", ()
   });
 });
 
-test("[REGRESSION] directory artifacts prefer compressed archives before plain tar", () => {
+test("[SECURITY] directory artifacts reject competing transport archives", () => {
   withTempDir((root) => {
     const archiveDirectory = join(root, "archives");
     const source = join(root, "source");
@@ -1129,13 +1129,13 @@ test("[REGRESSION] directory artifacts prefer compressed archives before plain t
     );
     writeFileSync(join(archiveDirectory, "a-ignored.tar"), "not a tar");
 
-    expect(firstArchive(archiveDirectory)).toBe(
-      join(archiveDirectory, "z-selected.tar.gz"),
+    expect(() => firstArchive(archiveDirectory)).toThrow(
+      /ambiguous artifact archives/u,
     );
-    expect(unpackArtifact(archiveDirectory, destination)).toBe(destination);
-    expect(readFileSync(join(destination, "selected.txt"), "utf8")).toBe(
-      "compressed",
+    expect(() => unpackArtifact(archiveDirectory, destination)).toThrow(
+      /ambiguous artifact archives/u,
     );
+    expect(existsSync(destination)).toBe(false);
   });
 });
 

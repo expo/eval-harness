@@ -30,8 +30,12 @@ runner plus uploaded artifacts.
 
 ## Important Invariants
 
-- `eval-e2e.yml` is the front door. The smaller workflows are replay/debug
-  entrypoints, not the primary user journey.
+- `eval-e2e.yml` is the front door. One dispatch is one author harness/model ×
+  PRD × prompt × skill-scenario cell: `author_app` fans out to `eval_ios`
+  and `eval_skill`, then a failure-aware `report` job consolidates both terminal
+  states. The smaller workflows are replay/debug entrypoints, not the primary
+  user journey. EAS has no matrix here; cross-cell comparison requires separate
+  dispatches and external/future aggregation of their `summary.json` files.
 - The app evaluator CLI is `python -m eval_harness.evaluator.ios_agentic.main`.
 - The skill evaluator CLI is
   `bun eval_harness/evaluator/skill_invocation/main.ts`.
@@ -39,10 +43,29 @@ runner plus uploaded artifacts.
   proving harness changes):
   - PRD: `dataset/prds/notes/prd/mvp.txt`
   - plan: `dataset/test_plans/primitives/test_insert.txt`
-- Artifact bundles keep their index file named `manifest.json`.
-- Skill-eval report artifacts are named `skill-eval-report` and contain
-  `metrics.json` plus `report.html`.
-- `eval_harness/utils/artifacts/collect_artifacts.sh` is a helper called from shell traps, not a workflow job.
+- EAS artifact names are `authored-app`, `ios-eval-report`,
+  `skill-eval-report`, and final `eval-report`. Their transport archives use the
+  same names with `.tar.gz`; every extracted artifact keeps its root index named
+  `manifest.json`.
+- Every producer result has one authoritative location: author source under
+  `author-agent-workspace/<run-id>/`, iOS `result.json`, skill `metrics.json`,
+  and consolidated `summary.json`. Scratch roots, duplicated source/results/
+  logs, stitched duplicate trees, and nested per-run transport tars must not
+  enter new artifacts.
+- Author runtime metadata belongs under `author-agent-metadata/<run-id>/`.
+  Only `authored-app` carries source and the author trace. The iOS producer owns
+  its evaluator traces, telemetry, and logs; the skill producer owns only its
+  manifest, `metrics.json`, and standalone `report.html`.
+- `eval_harness/utils/artifacts/collect_author_artifact.sh` and
+  `collect_ios_artifact.sh` are phase-specific helpers called from shell traps,
+  not workflow jobs. The skill analyzer writes its own canonical artifact.
+- Model selection is configurable. Default author models are `sonnet`,
+  `gpt-5-mini`, and `muse-spark-1.2` for Claude Code, Codex, and Muse Code.
+  Author effort defaults to `high`. The iOS evaluator defaults to
+  `claude-opus-4-8`; the full E2E workflow fixes its effort at `high` and app
+  mode at `release` to stay within EAS's ten-input dispatch limit. The iOS
+  replay workflow retains both controls. Keep the judge fixed when comparing
+  author models unless the experiment explicitly varies it.
 - `eval_harness/legacy/` is archival. Do not wire new workflows or docs to files there.
 - Do not add new root-level folders unless there is a strong reason. Runtime
   code should live under `eval_harness/app_builder/`, `eval_harness/evaluator/`,
@@ -95,6 +118,13 @@ runner plus uploaded artifacts.
 - Prefer hard assertions with stable test IDs; use soft assertions only when driver tools cannot structurally check the claim.
 - Do not call `complete_step` before all verifications are recorded.
 - If a primitive does not apply, the seed phase should call `complete_step("N/A: ...")` so the plan is skipped rather than scored as a failure.
+- The evaluator scores from the accessibility tree and structured hard/soft
+  assertion tools. `capture_screenshot` returns a filesystem path, not image
+  pixels, and Claude file-reading is blocked; screenshots are human evidence
+  only and must never determine an assertion score.
+- The harness, not discretionary model behavior, captures one best-effort
+  deterministic `step-NN-final.png` after each formal scored step completes or
+  aborts. Capture failures are non-fatal and attach to the step as diagnostics.
 
 ## Workflow Guidance
 
@@ -106,6 +136,11 @@ runner plus uploaded artifacts.
 - Use `eval-ios-app.yml` to replay evaluator/build/restart changes against a
   prior authored app artifact.
 - Use `eval-skill-use.yml` to replay skill-use analysis against prior artifacts.
+- Replay workflows emit their canonical producer artifacts but no consolidated
+  `eval-report`; use `eval-e2e.yml` for the collaborator-facing offline report.
+- Use EAS `after` for the parallel evaluator/final-report topology so terminal
+  evaluator failures remain reportable. Pass actual job statuses into the
+  reporter and keep `always()` diagnostic packaging/upload steps.
 - Keep workflow logs compact; detailed logs belong in uploaded artifacts.
 - Validate workflow YAMLs with the Expo workflow validator after edits.
 
@@ -113,6 +148,22 @@ runner plus uploaded artifacts.
 
 - EAS generic artifacts are the primary download path. GCS mirroring is optional.
 - Keep the run index named `manifest.json`.
+- New artifact writers emit only the canonical layouts. Readers remain
+  compatible with prior layouts for replay, but compatibility paths are
+  read-only and must not leak back into workflow output names or documentation.
+- Materialize downloaded artifacts with
+  `eval_harness/utils/artifacts/materialize.ts`, never raw `tar -xzf`. It
+  handles EAS directories, direct archives, nested roots, and supported legacy
+  layouts through clean staging while rejecting traversal, escaping links,
+  unsafe file types, and ambiguous roots.
+- The final `eval-report` contains only `manifest.json`, offline `report.html`,
+  `summary.json`, exact consumed producer JSON under `data/`, normalized
+  `data/build-health.json`, and referenced PNGs under `evidence/screenshots/`.
+  It contains no app source, raw traces/logs, credentials/settings, or input
+  archives.
+- Build health is reduced from producer outcomes, not a generic pipeline event
+  recorder: app authored, dependency install, source syntax, Expo iOS export,
+  native iOS build, install/launch readiness, and evaluation completion.
 - Authoring traces should be named as Claude Code, Codex, or Muse Code authoring
   sessions.
 - Muse talks directly to its native Meta endpoint. Do not route it through the
@@ -126,13 +177,18 @@ runner plus uploaded artifacts.
 - Avoid enabling duplicate Braintrust pushes unless intentionally comparing two
   trace formats.
 - The skill evaluator is v0: trace trigger detection, static code uptake checks,
-  optional app-evaluator score, no LLM judge, and no screenshot evidence.
+  optional app-evaluator score, no LLM judge, and no screenshot evidence of its
+  own. The downstream consolidated report may pair its metrics with iOS
+  screenshot evidence without changing skill scoring.
 
 ## PRD And Prompt Guidance
 
 - PRDs should describe product behavior, not patch over framework mistakes.
   Framework-specific guardrails belong in `dataset/prompts/` only when they are
   part of the experimental condition.
+- The `realistic` prompt is the cross-platform middle ground: a three-line,
+  product-oriented request to build "as an Expo app" with no iPhone-only
+  wording or technical implementation directions.
 - Notes is the stable reference target. Use it first when proving harness changes.
 - Hot Chocolate and other richer PRDs are better for product realism, but expect
   authored-app defects to be part of the signal.

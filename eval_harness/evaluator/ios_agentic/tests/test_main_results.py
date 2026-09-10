@@ -3,8 +3,19 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from eval_harness.evaluator.ios_agentic.core.scoring import StepResult, TestPlanResult
-from eval_harness.evaluator.ios_agentic.main import _build_suite_output, _run_suite
+from eval_harness.evaluator.ios_agentic.core.scoring import (
+    AssertionResult,
+    SoftAssertionResult,
+    StepResult,
+    TerminalEvidence,
+    TestPlanResult,
+)
+from eval_harness.evaluator.ios_agentic.main import (
+    _build_parser,
+    _build_suite_output,
+    _run_suite,
+    _serialize_plan_result,
+)
 
 
 def completed_plan(score: int = 3, full_points: int = 3) -> TestPlanResult:
@@ -26,6 +37,148 @@ def completed_plan(score: int = 3, full_points: int = 3) -> TestPlanResult:
 
 
 class SuiteOutputTests(unittest.TestCase):
+    def test_spec_preflight_evidence_serializes_without_a_formal_step_number(self) -> None:
+        """Specification: pre-plan evidence remains explicitly unscored.
+
+        Oracle: the public plan record names the preflight lifecycle kind and
+        uses a null ordinal rather than inventing formal step zero or one.
+        Catches: producer/report schema drift for restart abort evidence.
+        """
+        result = TestPlanResult(
+            score=0,
+            full_points=3,
+            status="evaluator_error",
+            error_stage="restart",
+            error_reason="unknown blocking system dialog",
+            abort_scope="suite",
+            terminal_evidence=[
+                TerminalEvidence(
+                    evidence_kind="preflight",
+                    step_number=None,
+                    step_name="pre-plan readiness",
+                    screenshot_path="screenshots/preflight-final.png",
+                )
+            ],
+        )
+
+        record = _serialize_plan_result(Path("test_insert.txt"), 1, result)
+
+        self.assertEqual(record["steps"], [])
+        self.assertIsNone(record["score"])
+        self.assertEqual(record["abort_scope"], "suite")
+        self.assertEqual(
+            record["terminal_evidence"],
+            [{
+                "evidence_kind": "preflight",
+                "step_number": None,
+                "step_name": "pre-plan readiness",
+                "screenshot": "screenshots/preflight-final.png",
+                "screenshot_error": None,
+            }],
+        )
+
+    def test_spec_evaluator_error_serialization_preserves_unscored_terminal_evidence(self) -> None:
+        """Specification: abort evidence survives without becoming a scored step.
+
+        Oracle: evaluator-error scores stay null, scored steps stay empty, and
+        the terminal screenshot diagnostic is serialized at plan level.
+        Catches: dropping abort evidence or fabricating zero-point assertions.
+        """
+        result = TestPlanResult(
+            score=0,
+            full_points=3,
+            status="evaluator_error",
+            error_stage="step_1",
+            error_reason="driver_error: screen unavailable",
+        )
+        result.terminal_evidence = [
+            TerminalEvidence(
+                step_number=1,
+                step_name="show note",
+                screenshot_path=None,
+                screenshot_error="simctl screenshot failed",
+            )
+        ]
+
+        record = _serialize_plan_result(Path("test_insert.txt"), 2, result)
+
+        self.assertIsNone(record["score"])
+        self.assertIsNone(record["full_points"])
+        self.assertEqual(record["steps"], [])
+        self.assertEqual(
+            record["terminal_evidence"],
+            [
+                {
+                    "evidence_kind": "formal_step",
+                    "step_number": 1,
+                    "step_name": "show note",
+                    "screenshot": None,
+                    "screenshot_error": "simctl screenshot failed",
+                }
+            ],
+        )
+
+    def test_spec_plan_serialization_preserves_assertion_and_screenshot_evidence(self) -> None:
+        """Specification: public results retain evidence needed for postmortems.
+
+        Oracle: commands/checks, fatality, outcomes, soft evidence, screenshot,
+        and compatibility counts all survive serialization.
+        Catches: reducing assertions back to opaque integer counts.
+        """
+        result = TestPlanResult(
+            score=0,
+            full_points=3,
+            status="completed",
+            steps=[
+                StepResult(
+                    name="delete note",
+                    max_points=3,
+                    earned_points=0,
+                    passed=False,
+                    assertions=[
+                        AssertionResult(
+                            "assert_visible: note-title",
+                            fatal=True,
+                            passed=False,
+                        )
+                    ],
+                    soft_assertions=[
+                        SoftAssertionResult(
+                            "destructive action is clearly communicated",
+                            fatal=False,
+                            passed=False,
+                            evidence="Delete label absent from the latest accessibility tree",
+                        )
+                    ],
+                    screenshot_path="screenshots/step-01-final.png",
+                    screenshot_error=None,
+                )
+            ],
+        )
+
+        record = _serialize_plan_result(Path("test_delete.txt"), 1, result)
+        step = record["steps"][0]
+
+        self.assertEqual(
+            step["hard_assertions"],
+            [{"command": "assert_visible: note-title", "fatal": True, "passed": False}],
+        )
+        self.assertEqual(
+            step["soft_assertions"],
+            [
+                {
+                    "check": "destructive action is clearly communicated",
+                    "fatal": False,
+                    "passed": False,
+                    "evidence": "Delete label absent from the latest accessibility tree",
+                }
+            ],
+        )
+        self.assertEqual(step["hard_assertion_count"], 1)
+        self.assertEqual(step["soft_assertion_count"], 1)
+        self.assertEqual(step["screenshot"], "screenshots/step-01-final.png")
+        self.assertIsNone(step["screenshot_error"])
+
     def test_spec_completed_and_not_applicable_plans_complete_the_suite(self) -> None:
         """Specification: N/A is a legitimate terminal plan outcome.
 
@@ -113,6 +266,23 @@ class SuiteOutputTests(unittest.TestCase):
         )
 
 
+class CliArgumentTests(unittest.TestCase):
+    def test_parses_evaluator_model_and_reasoning_effort(self) -> None:
+        args = _build_parser().parse_args(
+            [
+                "--prd",
+                "dataset/prds/notes/prd/mvp.txt",
+                "--model",
+                "claude-opus-4-8",
+                "--reasoning-effort",
+                "high",
+            ]
+        )
+
+        self.assertEqual(args.model, "claude-opus-4-8")
+        self.assertEqual(args.reasoning_effort, "high")
+
+
 class RecordingBridge:
     def __init__(self) -> None:
         self.cleanup_calls = 0
@@ -126,14 +296,201 @@ class CompleteThenRaiseEvaluator:
         self.calls = 0
         self.bridge = RecordingBridge()
 
-    def evaluate_test_plan(self, plan_path: Path) -> TestPlanResult:
+    def evaluate_test_plan(self, plan_path: Path, run_index: int = 1) -> TestPlanResult:
         self.calls += 1
         if self.calls == 1:
             return completed_plan()
         raise RuntimeError("SDK stream disconnected")
 
 
+class SuiteBlockingRestartEvaluator:
+    def __init__(self) -> None:
+        self.calls = 0
+        self.bridge = RecordingBridge()
+
+    def evaluate_test_plan(self, plan_path: Path, run_index: int = 1) -> TestPlanResult:
+        self.calls += 1
+        return TestPlanResult(
+            score=0,
+            full_points=6,
+            status="evaluator_error",
+            error_stage="restart",
+            error_reason=(
+                'restart_app: blocked by unrecognized iOS system alert: '
+                '"Sign in to your Apple Account"'
+            ),
+            abort_scope="suite",
+        )
+
+
+class SuiteProviderQuotaEvaluator:
+    def __init__(self) -> None:
+        self.calls = 0
+        self.bridge = RecordingBridge()
+
+    def evaluate_test_plan(self, plan_path: Path, run_index: int = 1) -> TestPlanResult:
+        self.calls += 1
+        return TestPlanResult(
+            score=0,
+            full_points=6,
+            status="evaluator_error",
+            error_stage="seed",
+            error_reason=(
+                "provider_quota: Claude session limit reached; "
+                "resets 3:30am (America/Los_Angeles)"
+            ),
+            abort_scope="suite",
+        )
+
+
+class SuiteProviderQuotaAfterCompletedPlanEvaluator(SuiteProviderQuotaEvaluator):
+    def evaluate_test_plan(self, plan_path: Path, run_index: int = 1) -> TestPlanResult:
+        self.calls += 1
+        if self.calls == 1:
+            return completed_plan(score=3, full_points=3)
+        return TestPlanResult(
+            score=0,
+            full_points=6,
+            status="evaluator_error",
+            error_stage="step_1",
+            error_reason=(
+                "provider_quota: Claude session limit reached; "
+                "resets 3:30am (America/Los_Angeles)"
+            ),
+            abort_scope="suite",
+        )
+
+
 class SuiteCheckpointTests(unittest.TestCase):
+    def test_provider_quota_fails_fast_with_null_suite_score_and_truthful_report(self) -> None:
+        """Provider quota is one unscored infrastructure failure, not app zeroes.
+
+        Catches: evaluating every plan or rendering macro/micro 0 after quota.
+        """
+        evaluator = SuiteProviderQuotaEvaluator()
+
+        with tempfile.TemporaryDirectory() as td:
+            output_path = Path(td) / "result.json"
+            output, exit_code = _run_suite(
+                evaluator=evaluator,
+                test_plans=[
+                    Path("test_select.txt"),
+                    Path("test_search.txt"),
+                    Path("test_permission.txt"),
+                ],
+                repeat=1,
+                output_path=output_path,
+            )
+            on_disk = json.loads(output_path.read_text(encoding="utf-8"))
+            report = output_path.with_suffix(".html").read_text(encoding="utf-8")
+
+        self.assertEqual(exit_code, 1)
+        self.assertEqual(evaluator.calls, 1)
+        self.assertEqual(on_disk, output)
+        self.assertEqual(output["status"], "incomplete")
+        self.assertEqual(output["terminal_plan_count"], 1)
+        self.assertIsNone(output["score"])
+        self.assertIsNone(output["full_points"])
+        self.assertIsNone(output["macro_avg_pct"])
+        self.assertIsNone(output["micro_pct"])
+        self.assertEqual(output["test_plans"][0]["score"], None)
+        self.assertEqual(output["test_plans"][0]["abort_scope"], "suite")
+        self.assertEqual(
+            output["evaluator_errors"],
+            [{
+                "test_plan": "test_select.txt",
+                "run_index": 1,
+                "stage": "seed",
+                "reason": (
+                    "provider_quota: Claude session limit reached; "
+                    "resets 3:30am (America/Los_Angeles)"
+                ),
+                "scope": "suite",
+            }],
+        )
+        self.assertIn("unscored due evaluator infrastructure", report)
+        self.assertIn("provider_quota: Claude session limit reached", report)
+        self.assertNotIn("0/0 points", report)
+        self.assertNotIn("macro avg 0", report)
+        self.assertEqual(evaluator.bridge.cleanup_calls, 1)
+
+    def test_provider_quota_nulls_suite_score_after_prior_completed_plan(self) -> None:
+        """Earlier plan scores remain diagnostic, never a partial suite score."""
+        evaluator = SuiteProviderQuotaAfterCompletedPlanEvaluator()
+
+        with tempfile.TemporaryDirectory() as td:
+            output, exit_code = _run_suite(
+                evaluator=evaluator,
+                test_plans=[
+                    Path("test_select.txt"),
+                    Path("test_search.txt"),
+                    Path("test_permission.txt"),
+                ],
+                repeat=1,
+                output_path=Path(td) / "result.json",
+            )
+
+        self.assertEqual(exit_code, 1)
+        self.assertEqual(evaluator.calls, 2)
+        self.assertEqual(output["status"], "incomplete")
+        self.assertIsNone(output["score"])
+        self.assertIsNone(output["full_points"])
+        self.assertIsNone(output["macro_avg_pct"])
+        self.assertIsNone(output["micro_pct"])
+        self.assertEqual(output["test_plans"][0]["status"], "completed")
+        self.assertEqual(output["test_plans"][0]["score"], 3)
+        self.assertEqual(output["test_plans"][1]["status"], "evaluator_error")
+        self.assertEqual(output["test_plans"][1]["abort_scope"], "suite")
+
+    def test_spec_pre_session_restart_block_aborts_suite_after_one_plan(self) -> None:
+        """Specification: one systematic readiness block cannot consume every plan.
+
+        Oracle: a suite-scoped pre-session abort records the first affected plan,
+        leaves remaining plans absent/unscored, and stops invoking the evaluator.
+        Catches: eleven identical readiness waits and fabricated score zeros.
+        """
+        evaluator = SuiteBlockingRestartEvaluator()
+
+        with tempfile.TemporaryDirectory() as td:
+            output_path = Path(td) / "result.json"
+            output, exit_code = _run_suite(
+                evaluator=evaluator,
+                test_plans=[
+                    Path("test_select.txt"),
+                    Path("test_search.txt"),
+                    Path("test_permission.txt"),
+                ],
+                repeat=1,
+                output_path=output_path,
+            )
+            on_disk = json.loads(output_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(exit_code, 1)
+        self.assertEqual(evaluator.calls, 1)
+        self.assertEqual(on_disk, output)
+        self.assertEqual(output["expected_plan_count"], 3)
+        self.assertEqual(output["terminal_plan_count"], 1)
+        self.assertEqual(len(output["test_plans"]), 1)
+        self.assertEqual(output["test_plans"][0]["abort_scope"], "suite")
+        self.assertEqual(output["score"], 0)
+        self.assertEqual(output["full_points"], 0)
+        self.assertEqual(
+            output["evaluator_errors"],
+            [
+                {
+                    "test_plan": "test_select.txt",
+                    "run_index": 1,
+                    "stage": "restart",
+                    "reason": (
+                        'restart_app: blocked by unrecognized iOS system alert: '
+                        '"Sign in to your Apple Account"'
+                    ),
+                    "scope": "suite",
+                }
+            ],
+        )
+        self.assertEqual(evaluator.bridge.cleanup_calls, 1)
+
     def test_regression_checkpoint_survives_later_plan_exception_and_cleanup_runs(self) -> None:
         """Regression: later infrastructure failure preserves earlier evidence.
 

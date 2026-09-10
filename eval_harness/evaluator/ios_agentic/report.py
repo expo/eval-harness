@@ -28,6 +28,76 @@ def _pct(value: Any) -> str:
     return f"{value:.1f}%"
 
 
+def _assertion_count(step: dict[str, Any], field: str, count_field: str) -> int:
+    """Read migrated explicit counts, then fall back to legacy scalar fields."""
+    count = step.get(count_field)
+    if isinstance(count, int) and not isinstance(count, bool):
+        return count
+    assertions = step.get(field)
+    if isinstance(assertions, int) and not isinstance(assertions, bool):
+        return assertions
+    if isinstance(assertions, list):
+        return len(assertions)
+    return 0
+
+
+def _assertion_cell(
+    step: dict[str, Any],
+    field: str,
+    count_field: str,
+    text_field: str,
+) -> str:
+    count = _assertion_count(step, field, count_field)
+    assertions = step.get(field)
+    if not isinstance(assertions, list):
+        return f'<span class="assertion-count">{count}</span>'
+
+    items = []
+    for assertion in assertions:
+        if not isinstance(assertion, dict):
+            continue
+        passed = assertion.get("passed") is True
+        fatality = "fatal" if assertion.get("fatal") is True else "non-fatal"
+        status = "passed" if passed else "failed"
+        evidence = assertion.get("evidence")
+        evidence_html = (
+            f'<div class="assertion-evidence">Evidence: {_e(evidence)}</div>'
+            if evidence
+            else ""
+        )
+        items.append(
+            "<li>"
+            f'<span class="{"pass" if passed else "fail"}">{fatality} · {status}</span> '
+            f"<code>{_e(assertion.get(text_field))}</code>"
+            f"{evidence_html}"
+            "</li>"
+        )
+
+    if not items:
+        return f'<span class="assertion-count">{count}</span>'
+    return (
+        f'<span class="assertion-count">{count}</span>'
+        '<details class="assertion-details"><summary>View evidence</summary><ul>'
+        f"{''.join(items)}"
+        "</ul></details>"
+    )
+
+
+def _screenshot_evidence(step: dict[str, Any]) -> str:
+    evidence = []
+    if step.get("screenshot"):
+        evidence.append(
+            "<div><strong>Final-state screenshot:</strong> "
+            f"<code>{_e(step.get('screenshot'))}</code></div>"
+        )
+    if step.get("screenshot_error"):
+        evidence.append(
+            '<div class="warning"><strong>Screenshot warning:</strong> '
+            f"{_e(step.get('screenshot_error'))}</div>"
+        )
+    return "".join(evidence) or "n/a"
+
+
 def write_html_report(output: dict[str, Any], path: Path | str) -> None:
     plan_rows = []
     step_rows = []
@@ -42,8 +112,7 @@ def write_html_report(output: dict[str, Any], path: Path | str) -> None:
                 f"<td>{_e(plan.get('error_stage'))}: {_e(plan.get('error_reason'))}</td>"
                 "</tr>"
             )
-            continue
-        if plan.get("status") == "not_applicable":
+        elif plan.get("status") == "not_applicable":
             plan_rows.append(
                 "<tr>"
                 f"<td>{_e(plan.get('test_plan'))}</td>"
@@ -54,15 +123,16 @@ def write_html_report(output: dict[str, Any], path: Path | str) -> None:
                 "</tr>"
             )
             continue
-        plan_rows.append(
-            "<tr>"
-            f"<td>{_e(plan.get('test_plan'))}</td>"
-            f"<td>{_e(plan.get('run_index'))}</td>"
-            f"<td>{_e(plan.get('score'))}/{_e(plan.get('full_points'))}</td>"
-            f"<td>{_pct(plan.get('macro_pct'))}</td>"
-            f"<td>{len(plan.get('steps') or [])} step(s)</td>"
-            "</tr>"
-        )
+        else:
+            plan_rows.append(
+                "<tr>"
+                f"<td>{_e(plan.get('test_plan'))}</td>"
+                f"<td>{_e(plan.get('run_index'))}</td>"
+                f"<td>{_e(plan.get('score'))}/{_e(plan.get('full_points'))}</td>"
+                f"<td>{_pct(plan.get('macro_pct'))}</td>"
+                f"<td>{len(plan.get('steps') or [])} step(s)</td>"
+                "</tr>"
+            )
         for step in plan.get("steps") or []:
             passed = str(step.get("description", "")).startswith("PASSED")
             step_rows.append(
@@ -71,8 +141,9 @@ def write_html_report(output: dict[str, Any], path: Path | str) -> None:
                 f"<td class=\"{'pass' if passed else 'fail'}\">{_e(step.get('description'))}</td>"
                 f"<td>{_e(step.get('points'))}/{_e(step.get('max_points'))}</td>"
                 f"<td>{_e(step.get('iterations'))}</td>"
-                f"<td>{_e(step.get('hard_assertions'))}</td>"
-                f"<td>{_e(step.get('soft_assertions'))}</td>"
+                f"<td>{_assertion_cell(step, 'hard_assertions', 'hard_assertion_count', 'command')}</td>"
+                f"<td>{_assertion_cell(step, 'soft_assertions', 'soft_assertion_count', 'check')}</td>"
+                f"<td>{_screenshot_evidence(step)}</td>"
                 "</tr>"
             )
     doc = f"""<!doctype html>
@@ -87,6 +158,12 @@ def write_html_report(output: dict[str, Any], path: Path | str) -> None:
     .note {{ color: #555; max-width: 760px; }}
     .pass {{ color: #1a7a1a; }}
     .fail {{ color: #b3261e; }}
+    .warning {{ color: #8a5a00; }}
+    .assertion-count {{ font-weight: 600; }}
+    .assertion-details summary {{ cursor: pointer; white-space: nowrap; }}
+    .assertion-details ul {{ margin: 8px 0 0; padding-left: 20px; }}
+    .assertion-evidence {{ color: #555; margin-top: 4px; }}
+    code {{ white-space: pre-wrap; overflow-wrap: anywhere; }}
   </style>
 </head>
 <body>
@@ -106,7 +183,7 @@ def write_html_report(output: dict[str, Any], path: Path | str) -> None:
   seed phase determined the primitive doesn't apply to this app; see the
   reason in the table above instead.</p>
   <table>
-    <thead><tr><th>Test plan</th><th>Step</th><th>Points</th><th>Iterations</th><th>Hard assertions</th><th>Soft assertions</th></tr></thead>
+    <thead><tr><th>Test plan</th><th>Step</th><th>Points</th><th>Iterations</th><th>Hard assertions</th><th>Soft assertions</th><th>Screenshot evidence</th></tr></thead>
     <tbody>{''.join(step_rows)}</tbody>
   </table>
 </body>
