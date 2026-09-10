@@ -12,6 +12,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+interface PackageManifest {
+  dependencies: Record<string, string>;
+  devDependencies: Record<string, string>;
+  peerDependencies?: Record<string, string>;
+  optionalDependencies?: Record<string, string>;
+}
+
 const installer = process.argv[2] ?? 'npm';
 assert(['npm', 'bun'].includes(installer));
 
@@ -22,7 +29,7 @@ const env = { ...process.env };
 delete env.NODE_PATH;
 delete env.NODE_OPTIONS;
 
-const run = (command, args, cwd = scratch) => {
+const run = (command: string, args: string[], cwd = scratch) => {
   try {
     return execFileSync(command, args, {
       cwd,
@@ -32,8 +39,14 @@ const run = (command, args, cwd = scratch) => {
       timeout: 120_000,
     });
   } catch (error) {
-    process.stderr.write(error.stdout ?? '');
-    process.stderr.write(error.stderr ?? '');
+    if (error instanceof Error) {
+      for (const stream of ['stdout', 'stderr'] as const) {
+        const output = stream in error ? Reflect.get(error, stream) : undefined;
+        if (typeof output === 'string' || Buffer.isBuffer(output)) {
+          process.stderr.write(output);
+        }
+      }
+    }
     throw error;
   }
 };
@@ -60,13 +73,15 @@ try {
     assert(!/['"]@expo\/source-scan(?:['"]|\/)/.test(output), `${file} references private package`);
   }
 
-  const manifest = JSON.parse(run('tar', ['-xOf', tarball, 'package/package.json']));
+  const manifest: PackageManifest = JSON.parse(
+    run('tar', ['-xOf', tarball, 'package/package.json'])
+  );
   for (const field of [
     'dependencies',
     'devDependencies',
     'peerDependencies',
     'optionalDependencies',
-  ]) {
+  ] as const) {
     assert(
       !Object.values(manifest[field] ?? {}).some((value) => /^(catalog|workspace):/.test(value)),
       `${field} contains a local protocol`
@@ -94,7 +109,7 @@ try {
     run('npm', ['install', '--ignore-scripts', '--no-audit', '--no-fund', ...dependencies]);
   }
 
-  const installed = JSON.parse(
+  const installed: PackageManifest = JSON.parse(
     readFileSync(path.join(scratch, 'node_modules/@expo/agent-eval-vitest/package.json'), 'utf8')
   );
   assert(!existsSync(path.join(scratch, 'node_modules/@expo/source-scan')));
@@ -113,12 +128,12 @@ try {
     include: ['*.eval.ts'], server: { deps: { inline: ['@expo/agent-eval-vitest'] } },
   } };`
   );
-  run(process.execPath, ['node_modules/vitest/vitest.mjs', 'run']);
+  run('node', ['node_modules/vitest/vitest.mjs', 'run']);
   for (const [module, resolution] of [
     ['NodeNext', 'NodeNext'],
     ['ESNext', 'Bundler'],
-  ]) {
-    run(process.execPath, [
+  ] as const) {
+    run('node', [
       'node_modules/typescript/bin/tsc',
       '--noEmit',
       '--strict',
