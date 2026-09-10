@@ -9,6 +9,9 @@ runner plus uploaded artifacts.
 
 ## Current Shape
 
+- `packages/`: reusable npm libraries managed as Bun workspaces. The root
+  package stays private; each published package owns its exports and build.
+
 - `eval_harness/app_builder/`: authoring side. `scripts/` holds its workflow
   entrypoint (`author-app.sh`). The coding-agent prompt itself lives in
   `dataset/prompts/`, selected by id via `dataset/prompts.json`.
@@ -67,10 +70,10 @@ runner plus uploaded artifacts.
   replay workflow retains both controls. Keep the judge fixed when comparing
   author models unless the experiment explicitly varies it.
 - `eval_harness/legacy/` is archival. Do not wire new workflows or docs to files there.
-- Do not add new root-level folders unless there is a strong reason. Runtime
+- `packages/` is the intentional home for reusable npm libraries. Harness runtime
   code should live under `eval_harness/app_builder/`, `eval_harness/evaluator/`,
   or `eval_harness/utils/`. `dataset/` (PRDs, test plans, `prd_skills.json`
-  and `prd_test_plans.json` ground truth) is the one intentional exception,
+  and `prd_test_plans.json` ground truth) is the dataset exception,
   since it's data/fixtures rather than runtime code.
 - Expo project routing belongs in `app.config.js` and should remain configurable
   through `EAS_PROJECT_ID`, `EXPO_SLUG`, `EXPO_OWNER`, and `EXPO_APP_NAME`.
