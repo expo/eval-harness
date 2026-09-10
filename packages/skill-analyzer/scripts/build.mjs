@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { chmodSync, copyFileSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { copyFileSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { rollup } from 'rollup';
 import { dts } from 'rollup-plugin-dts';
@@ -11,7 +11,7 @@ const entrypoints = Object.values(manifest.exports).map((entry) =>
   entry.import.slice('./build/'.length, -'.js'.length)
 );
 const result = await Bun.build({
-  entrypoints: [...entrypoints, 'bin'].map((name) => `./src/${name}.ts`),
+  entrypoints: entrypoints.map((name) => `./src/${name}.ts`),
   root: './src',
   outdir: './build',
   target: 'bun',
@@ -52,4 +52,3 @@ mkdirSync('build/uptake_checks', { recursive: true });
 for (const name of ['checks_data.json', 'skill_map.json']) {
   copyFileSync(`src/uptake_checks/${name}`, `build/uptake_checks/${name}`);
 }
-chmodSync('build/bin.js', 0o755);

@@ -9,8 +9,8 @@ or cloud services are invoked by analysis.
 
 Requires **Bun >=1.3.14** at runtime. Bun bundles the analyzer's JavaScript;
 TypeScript and rollup-plugin-dts produce self-contained declarations. The
-package's `exports`, `types`, and executable point into `build/`, with check JSON
-included alongside the bundles. Compilation does not make this a Node runtime.
+package's `exports` and `types` point into `build/`; its executable loads the
+compiled CLI, with check JSON included alongside the bundles. Compilation does not make this a Node runtime.
 
 `@babel/parser` and `tar` are external runtime dependencies. The private
 source-scan workspace is a dev dependency whose code and types are bundled;
@@ -94,8 +94,9 @@ validation is part of these commands.
 See [check authoring](src/uptake_checks/README.md) for rules and coverage limits.
 
 The build uses shared chunks so all public entrypoints see one check registry.
-A dedicated `build/bin.js` entrypoint invokes the CLI; library imports have no
-CLI side effects. `bun pm pack` runs the build and resolves catalog/workspace versions (Bun is
+A checked-in `bin/skill-analyzer.mjs` entrypoint invokes the compiled CLI; library imports have no
+CLI side effects. The bin exists before the first install so Bun can link it before
+the postinstall build. `bun pm pack` runs the build and resolves catalog/workspace versions (Bun is
 required on the build machine). Use Bun for packing or publishing releases;
 direct `npm pack` does not resolve Bun catalogs.
 The isolated smoke checks install the tarball with both npm and Bun, blocking

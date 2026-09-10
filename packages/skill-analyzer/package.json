@@ -15,7 +15,8 @@
   "files": [
     "build",
     "LICENSE",
-    "MIGRATION.md"
+    "MIGRATION.md",
+    "bin"
   ],
   "main": "./build/index.js",
   "types": "./build/index.d.ts",
@@ -70,7 +71,7 @@
     }
   },
   "bin": {
-    "skill-analyzer": "./build/bin.js"
+    "skill-analyzer": "./bin/skill-analyzer.mjs"
   },
   "publishConfig": {
     "access": "public"

@@ -37,7 +37,7 @@ try {
       .map((file) => file.replace(/^package\//, ''))
   );
   for (const file of [
-    'build/bin.js',
+    'bin/skill-analyzer.mjs',
     'build/main.js',
     'build/index.js',
     'build/index.d.ts',
@@ -57,6 +57,7 @@ try {
     [...files].every(
       (file) =>
         file.startsWith('build/') ||
+        file === 'bin/skill-analyzer.mjs' ||
         ['README.md', 'MIGRATION.md', 'package.json', 'LICENSE'].includes(file)
     )
   );

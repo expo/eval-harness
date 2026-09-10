@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { resolve } from 'node:path';
 
-const cli = resolve(import.meta.dir, '../build/bin.js');
+const cli = resolve(import.meta.dir, '../bin/skill-analyzer.mjs');
 test('package CLI requires explicit ground truth before materializing inputs', () => {
   const result = Bun.spawnSync(
     [
