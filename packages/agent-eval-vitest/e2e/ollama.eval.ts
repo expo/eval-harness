@@ -23,6 +23,8 @@ const agentEval = createAgentEval({
     systemPrompt: [
       'You operate a fixture CLI in a temporary project.',
       'Its only command is create-report, with no arguments.',
+      'Invoke it with exactly {"run":["create-report"]}. The run array contains only strings.',
+      'Do not add an empty array, object, or null argument.',
       'This command reads input.json and writes report.json.',
       'After the command succeeds, report that the task is done.',
     ].join('\n'),
