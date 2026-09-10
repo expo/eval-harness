@@ -455,23 +455,18 @@ The legacy evaluator-trace mirror is disabled unless `PUSH_EVAL_TRACE_BT=1`.
 
 ## Development
 
-Reusable npm libraries live in the root Bun workspaces under `packages/`.
-[`@expo/source-scan`](packages/source-scan/README.md) provides comment stripping,
-Babel parsing, and AST walking shared with the existing skill analyzer.
-The scanner is being prepared for its first npm release.
+The private [`source-scan`](packages/source-scan/README.md) workspace provides
+comment stripping, Babel parsing, and AST walking for the existing skill analyzer.
+It is not published separately; downstream packages bundle the shared utilities.
 
 ```bash
-bun install             # installs workspaces and compiles the package foundation
-bun run build           # rebuild after changing package source
+bun install             # installs workspaces and builds shared utilities
+bun run build           # rebuild after changing source
 bun run test:packages   # source-scan unit tests
-bun run test:pack       # npm pack + isolated Node/TypeScript consumer
 ```
 
-The root package stays private. Workspace exports reference compiled ESM and
-`.d.ts` files under `build/` for both local and npm consumers. The build currently covers source-scan; subsequent packages build in dependency order. The packed consumer checks require Node,
-npm, and registry access; it installs the tarball in a temporary directory outside
-this workspace and removes it afterward. Run `bun run build` explicitly if
-installation hooks were disabled.
+Workspace exports reference compiled ESM and declarations under `build/`.
+Run `bun run build` explicitly if installation hooks were disabled.
 
 The app evaluator can still be run locally against an already served app when
 debugging driver behavior, but collaborators should start with EAS workflows

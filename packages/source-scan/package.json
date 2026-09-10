@@ -29,7 +29,6 @@
   },
   "scripts": {
     "build": "node -e \"require('node:fs').rmSync('build', { recursive: true, force: true })\" && tsc -p tsconfig.build.json",
-    "prepack": "npm run build",
     "test": "bun test src"
   },
   "dependencies": {

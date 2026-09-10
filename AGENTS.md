@@ -206,7 +206,6 @@ Run the canonical local type-check and test suite after changing harness code:
 
 ```bash
 bun run test:all
-bun run test:pack # clean npm consumer: ESM, declarations, public source-scan exports
 ```
 
 Run focused and configuration checks when working in the corresponding area:
