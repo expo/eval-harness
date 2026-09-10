@@ -40,7 +40,7 @@
       "name": "@expo/skill-analyzer",
       "version": "0.1.0",
       "bin": {
-        "skill-analyzer": "./build/bin.js",
+        "skill-analyzer": "./bin/skill-analyzer.mjs",
       },
       "dependencies": {
         "@babel/parser": "catalog:",
