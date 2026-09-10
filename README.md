@@ -494,11 +494,18 @@ Run shell parse checks after touching harness scripts:
 find eval_harness -name '*.sh' -print0 | xargs -0 bash -n
 ```
 
-[GitHub Actions](.github/workflows/test.yml) runs `bun run typecheck` and
-`bun run test:ts` on pull requests, pushes to `main`, and merge-queue commits.
+[GitHub Actions](.github/workflows/test.yml) runs `bun run format:check`,
+`bun run typecheck`, and `bun run test:ts` on pull requests, pushes to `main`, and merge-queue commits.
 This covers the harness and workspace package tests, including source-scan,
 using Bun 1.3.14 and Node 22.17. Tests use fake agent runners and need no model
 credentials. The Python suite remains a separate local check.
+
+Run `bun run format` before committing package or tooling changes. The pinned
+[oxfmt](https://oxc.rs/docs/guide/usage/formatter) version and `.oxfmtrc.json`
+keep formatting consistent for `packages/`, `.github/`, root JavaScript/TypeScript
+scripts, and the root package/TypeScript/formatter configs. Build outputs and the
+analyzer's golden metric/manifest files are excluded. Existing harness and dataset
+files are outside this initial formatting scope.
 
 Run the canonical local type-check and test suite after changing harness code:
 
