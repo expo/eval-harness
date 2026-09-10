@@ -1,4 +1,5 @@
 import { createAgentEval } from '../../../index.ts';
+
 const agentEval = createAgentEval({
   artifactsDir: process.env.EVAL_TEST_ARTIFACTS!,
   runner: async () => ({
@@ -8,6 +9,7 @@ const agentEval = createAgentEval({
     artifacts: [],
   }),
 });
+
 agentEval(import.meta.url, { prompt: 'budget', projectSetup: { prepareAsync() {} } }, (check) => {
   check('preservation passes', () => {});
 });

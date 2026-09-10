@@ -6,6 +6,7 @@ import { dts } from 'rollup-plugin-dts';
 
 rmSync('build', { recursive: true, force: true });
 execFileSync('tsc', ['-p', 'tsconfig.build.json'], { stdio: 'inherit' });
+
 const entrypoints = ['index', 'claude'];
 const result = await Bun.build({
   entrypoints: entrypoints.map((name) => `./src/${name}.ts`),
@@ -16,6 +17,7 @@ const result = await Bun.build({
   sourcemap: 'linked',
   external: ['vitest', '@babel/parser'],
 });
+
 if (!result.success) {
   throw new AggregateError(result.logs, 'JavaScript bundling failed');
 }
@@ -36,6 +38,7 @@ const declarations = await rollup({
     warn(warning);
   },
 });
+
 try {
   await declarations.write({
     dir: 'build',

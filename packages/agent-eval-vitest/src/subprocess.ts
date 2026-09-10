@@ -6,11 +6,13 @@ export interface CommandOptions {
   signal?: AbortSignal;
   timeoutMs?: number;
 }
+
 interface ProcessOptions extends CommandOptions {
   env?: NodeJS.ProcessEnv;
   stdoutPath?: string;
   stderrPath?: string;
 }
+
 interface ProcessResult {
   code: number | null;
   signal: NodeJS.Signals | null;
@@ -34,6 +36,7 @@ export async function runProcessAsync(
   ) {
     throw new Error('timeoutMs must be a finite positive timer duration');
   }
+
   options.signal?.throwIfAborted();
   const child = spawn(command, args, {
     cwd: root,
@@ -41,10 +44,12 @@ export async function runProcessAsync(
     detached: process.platform !== 'win32',
     stdio: ['ignore', 'pipe', 'pipe'],
   });
+
   let aborted = false;
   let timedOut = false;
   let stderr = '';
   let failure: Error | undefined;
+
   const terminateProcessGroup = () => {
     try {
       if (process.platform !== 'win32' && child.pid) {
@@ -58,15 +63,18 @@ export async function runProcessAsync(
       }
     }
   };
+
   const abort = () => {
     aborted = true;
     terminateProcessGroup();
   };
+
   // Register before awaiting anything, then close the pre-spawn abort race.
   options.signal?.addEventListener('abort', abort, { once: true });
   if (options.signal?.aborted) {
     abort();
   }
+
   const timer =
     options.timeoutMs === undefined
       ? undefined
@@ -74,9 +82,11 @@ export async function runProcessAsync(
           timedOut = true;
           terminateProcessGroup();
         }, options.timeoutMs);
+
   child.stderr.on('data', (chunk: Buffer) => {
     stderr = (stderr + chunk.toString()).slice(-64 * 1024);
   });
+
   const artifactWrites = (
     [
       ['stdout', options.stdoutPath],
@@ -92,9 +102,11 @@ export async function runProcessAsync(
       terminateProcessGroup();
     });
   });
+
   child.on('error', (error) => {
     failure ??= error;
   });
+
   // A command may leave descendants holding its pipes open. Kill its process
   // group when the leader exits as well as on cancellation.
   child.once('exit', terminateProcessGroup);
@@ -104,12 +116,15 @@ export async function runProcessAsync(
   }>((resolve) => {
     child.once('close', (code, signal) => resolve({ code, signal }));
   });
+
   clearTimeout(timer);
   options.signal?.removeEventListener('abort', abort);
   await Promise.all(artifactWrites);
+
   if (failure) {
     throw failure;
   }
+
   return { ...exit, aborted, timedOut, stderr };
 }
 
@@ -120,12 +135,15 @@ export async function runCommandAsync(
   options: CommandOptions = {}
 ): Promise<void> {
   const result = await runProcessAsync(root, command, args, options);
+
   if (result.aborted) {
     throw new DOMException('Command aborted', 'AbortError');
   }
+
   if (result.timedOut) {
     throw new Error(`${command} timed out after ${options.timeoutMs}ms\n${result.stderr}`);
   }
+
   if (result.code !== 0) {
     throw new Error(`${command} exited with ${result.code ?? result.signal}\n${result.stderr}`);
   }

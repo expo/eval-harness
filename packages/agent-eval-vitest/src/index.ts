@@ -31,16 +31,19 @@ export function createAgentEval(input: AgentEvalConfig = {}): AgentEval {
       const id = path.basename(fileURLToPath(caseUrl)).replace(/\.eval\.tsx?$/, '');
       const name = `${id}${options.title ? ` — ${options.title}` : ''} [${config.condition}]`;
       const suite = { run: describe, skip: describe.skip, only: describe.only }[mode];
+
       suite(name, () => {
         let run: Awaited<ReturnType<typeof openCase<T>>> | undefined;
         const checks: CheckResult[] = [];
         const registeredNames = new Set<string>();
+
         beforeAll(
           async () => {
             run = await openCase(id, options, config);
           },
           config.timeoutMs + 2 * config.cleanupTimeoutMs + 5_000
         );
+
         afterAll(
           async (currentSuite) => {
             if (run) {
@@ -79,22 +82,27 @@ export function createAgentEval(input: AgentEvalConfig = {}): AgentEval {
           },
           Math.max(60_000, config.cleanupTimeoutMs + 5_000)
         );
+
         defineChecks((checkName, fn) => {
           if (registeredNames.has(checkName)) {
             throw new Error(`Duplicate agent check name: ${checkName}`);
           }
+
           registeredNames.add(checkName);
           test(checkName, { retry: 0, repeats: 0, concurrent: false }, async (context) => {
             if (!run) {
               throw new Error('Agent eval setup did not complete');
             }
+
             const result: CheckResult = { name: checkName, status: 'passed' };
             checks.push(result);
+
             // Also capture failures imposed by Vitest (timeout, assertion counts, hooks).
             context.onTestFailed(() => {
               result.status = 'failed';
               result.error ??= 'Vitest marked this check as failed';
             });
+
             try {
               await fn(run.workspace, {
                 fixture: run.fixture,
@@ -118,6 +126,7 @@ export function createAgentEval(input: AgentEvalConfig = {}): AgentEval {
         });
       });
     };
+
   return Object.assign(define('run'), {
     skip: define('skip'),
     only: define('only'),

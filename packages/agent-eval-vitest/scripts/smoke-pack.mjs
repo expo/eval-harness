@@ -14,11 +14,14 @@ import { fileURLToPath } from 'node:url';
 
 const installer = process.argv[2] ?? 'npm';
 assert(['npm', 'bun'].includes(installer));
+
 const packageRoot = fileURLToPath(new URL('..', import.meta.url));
 const scratch = mkdtempSync(path.join(os.tmpdir(), 'agent-eval-consumer-'));
+
 const env = { ...process.env };
 delete env.NODE_PATH;
 delete env.NODE_OPTIONS;
+
 const run = (command, args, cwd = scratch) => {
   try {
     return execFileSync(command, args, {
@@ -34,6 +37,7 @@ const run = (command, args, cwd = scratch) => {
     throw error;
   }
 };
+
 try {
   // Build and inspect the release artifact before installing it.
   const tarball = path.join(scratch, 'agent-eval-vitest.tgz');
@@ -55,6 +59,7 @@ try {
     const output = readFileSync(path.join(packageRoot, file), 'utf8');
     assert(!/['"]@expo\/source-scan(?:['"]|\/)/.test(output), `${file} references private package`);
   }
+
   const manifest = JSON.parse(run('tar', ['-xOf', tarball, 'package/package.json']));
   for (const field of [
     'dependencies',
@@ -67,6 +72,7 @@ try {
       `${field} contains a local protocol`
     );
   }
+
   // The consumer has no workspace links and cannot fetch private Expo packages.
   writeFileSync(
     path.join(scratch, 'package.json'),
@@ -87,12 +93,14 @@ try {
   } else {
     run('npm', ['install', '--ignore-scripts', '--no-audit', '--no-fund', ...dependencies]);
   }
+
   const installed = JSON.parse(
     readFileSync(path.join(scratch, 'node_modules/@expo/agent-eval-vitest/package.json'), 'utf8')
   );
   assert(!existsSync(path.join(scratch, 'node_modules/@expo/source-scan')));
   assert(!('@expo/source-scan' in installed.dependencies));
   assert(!Object.values(installed.dependencies).some((value) => value.startsWith('workspace:')));
+
   // Run the same readable example as both a Vitest case and a declaration check.
   copyFileSync(
     new URL('./fixtures/consumer.eval.ts', import.meta.url),
@@ -125,6 +133,7 @@ try {
       'case.eval.ts',
     ]);
   }
+
   console.log(
     `Bundled agent-eval consumer passed: ${installer} install with private registry blocked, real Node/Vitest run, bundled scanner, public subpaths and strict declaration checks.`
   );
