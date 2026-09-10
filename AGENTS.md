@@ -16,14 +16,15 @@ runner plus uploaded artifacts.
   `test:e2e` runs use real Ollama inference in the separate advisory GitHub Actions
   workflow. Keep task outcomes distinct from check counts.
   `skill-analyzer/` owns the Bun skill analyzer and shared artifact materializer,
-  publishing TypeScript source and bundled check JSON. The old analyzer and
+  publishing bundled JavaScript, declarations, and check JSON. The old analyzer and
   materializer paths remain compatibility shims; keep their CLI behavior.
-  The kit bundles private source-scan JavaScript with Bun and its declarations
-  with rollup-plugin-dts; source-scan is a dev dependency only. The analyzer
-  copies shared helpers into ignored `src/internal/source-scan/` and ships
-  them as TypeScript. Neither package has a runtime dependency on source-scan;
-  both declare `@babel/parser` directly, and the kit keeps Vitest external.
-  Source-scan and agent-eval-vitest exports point to compiled ESM and declarations under `build/`; run
+  Both packages bundle private source-scan JavaScript with Bun and declarations
+  with rollup-plugin-dts; source-scan is a dev dependency only. No source copies
+  or bundled npm dependencies are needed. Both keep Babel external; the kit
+  also keeps Vitest external and the analyzer keeps tar external. The analyzer
+  still requires Bun at runtime. Its executable has a dedicated entrypoint,
+  and its build copies the check JSON alongside the shared output chunks.
+  All workspace exports point to compiled ESM and declarations under `build/`; run
   `bun install` (which builds the workspace foundation) before harness commands,
   and `bun run build` after editing package source. Keep publication paths in
   `exports` directly, without `publishConfig` remapping.

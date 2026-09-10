@@ -1,4 +1,4 @@
-import { parseSource, walk } from "../internal/source-scan/index.ts";
+import { parseSource, walk } from "@expo/source-scan";
 import { readFileSync } from "node:fs";
 
 export type ParseError = { error: "parse_error"; message: string };

@@ -7,13 +7,15 @@ or cloud services are invoked by analysis.
 
 ## Runtime and installation
 
-Requires **Bun >=1.3.14**. This package intentionally publishes TypeScript source,
-not Node-compatible JavaScript. Its `exports` and `types` point directly to the
-shipped source; no consumer build step or publication remapping is needed.
-`@babel/parser` and `tar` are runtime dependencies. Shared scanning helpers are
-copied from the private source-scan workspace into this package before packing;
-consumers do not install `@expo/source-scan`. TypeScript users should
-install `@types/bun` and enable `allowImportingTsExtensions` with `noEmit`.
+Requires **Bun >=1.3.14** at runtime. Bun bundles the analyzer's JavaScript;
+TypeScript and rollup-plugin-dts produce self-contained declarations. The
+package's `exports`, `types`, and executable point into `build/`, with check JSON
+included alongside the bundles. Compilation does not make this a Node runtime.
+
+`@babel/parser` and `tar` are external runtime dependencies. The private
+source-scan workspace is a dev dependency whose code and types are bundled;
+consumers do not install it. Public declarations do not require `@types/bun` or
+`allowImportingTsExtensions`. No source-copy or consumer build step is needed.
 
 After publication:
 
@@ -86,3 +88,11 @@ the legacy CLI and fixtures captured before extraction. It needs npm registry
 access. No live EAS/model validation is part of these commands.
 
 See [check authoring](src/uptake_checks/README.md) for rules and coverage limits.
+
+The build uses shared chunks so all public entrypoints see one check registry.
+A dedicated `build/bin.js` entrypoint invokes the CLI; library imports have no
+CLI side effects. `npm pack` runs the build (Bun is required on the build machine).
+The isolated smoke checks install the tarball with both npm and Bun, blocking
+registry access for the private workspace. They check the executable, every
+export, shared registry/class identity, packaged data, artifact parity, and
+strict NodeNext/Bundler declarations without `skipLibCheck` or Bun ambient types.

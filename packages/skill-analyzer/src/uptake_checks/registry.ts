@@ -1,4 +1,4 @@
-import { stripComments } from "../internal/source-scan/strip-comments.ts";
+import { stripComments } from "@expo/source-scan/strip-comments";
 import {
   existsSync,
   readFileSync,

@@ -463,8 +463,8 @@ colocated agent cases, injectable runners, fixture cleanup, and independent
 Vitest checks. [`@expo/skill-analyzer`](packages/skill-analyzer/README.md) provides
 the skill-use analyzer, bundled uptake checks, and safe artifact materialization.
 The Vitest kit and analyzer are being prepared for their first npm release.
-Both include the shared helpers; source-scan is never published. The kit bundles
-its JavaScript with Bun and its declarations with rollup-plugin-dts.
+Both include the shared helpers; source-scan is never published. Both bundle
+JavaScript with Bun and declarations with rollup-plugin-dts.
 
 ```bash
 bun install             # installs workspaces and compiles the package foundation
@@ -473,12 +473,10 @@ bun run test:packages   # package unit and Vitest integration tests
 bun run test:pack       # tarballs + isolated installs, runtime and type checks
 ```
 
-The root package stays private. Source-scan and agent-eval-vitest export compiled
-ESM and declarations under `build/`. Skill-analyzer explicitly publishes Bun
-TypeScript source with packaged JSON checks. The analyzer build refreshes its
-ignored `src/internal/source-scan/` copies before type-checking. The kit uses
-source-scan as a build-time workspace dependency and generates self-contained
-JavaScript and types; it does not copy source files.
+The root package stays private. Workspace exports reference compiled ESM and
+`.d.ts` files under `build/`. The analyzer keeps its Bun runtime requirement and
+ships check JSON alongside its bundles. Both consumers use source-scan as a
+build-time workspace dependency, with no source-copy step or runtime dependency.
 The build runs source-scan first. The packed consumer checks require Bun, Node,
 npm, and registry access; they install tarballs in temporary directories outside
 this workspace and remove them afterward. Run `bun run build` explicitly if

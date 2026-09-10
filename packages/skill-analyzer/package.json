@@ -13,71 +13,72 @@
     "bun": ">=1.3.14"
   },
   "files": [
-    "src"
+    "build",
+    "LICENSE"
   ],
-  "main": "./src/index.ts",
-  "types": "./src/index.ts",
+  "main": "./build/index.js",
+  "types": "./build/index.d.ts",
   "exports": {
     ".": {
-      "types": "./src/index.ts",
-      "import": "./src/index.ts"
+      "types": "./build/index.d.ts",
+      "import": "./build/index.js"
     },
     "./cli": {
-      "types": "./src/main.ts",
-      "import": "./src/main.ts"
+      "types": "./build/main.d.ts",
+      "import": "./build/main.js"
     },
     "./artifacts": {
-      "types": "./src/artifacts.ts",
-      "import": "./src/artifacts.ts"
+      "types": "./build/artifacts.d.ts",
+      "import": "./build/artifacts.js"
     },
     "./utils": {
-      "types": "./src/utils.ts",
-      "import": "./src/utils.ts"
+      "types": "./build/utils.d.ts",
+      "import": "./build/utils.js"
     },
     "./analysis": {
-      "types": "./src/analysis.ts",
-      "import": "./src/analysis.ts"
+      "types": "./build/analysis.d.ts",
+      "import": "./build/analysis.js"
     },
     "./uptake_checks/trigger": {
-      "types": "./src/uptake_checks/trigger.ts",
-      "import": "./src/uptake_checks/trigger.ts"
+      "types": "./build/uptake_checks/trigger.d.ts",
+      "import": "./build/uptake_checks/trigger.js"
     },
     "./uptake_checks/registry": {
-      "types": "./src/uptake_checks/registry.ts",
-      "import": "./src/uptake_checks/registry.ts"
+      "types": "./build/uptake_checks/registry.d.ts",
+      "import": "./build/uptake_checks/registry.js"
     },
     "./uptake_checks/index": {
-      "types": "./src/uptake_checks/index.ts",
-      "import": "./src/uptake_checks/index.ts"
+      "types": "./build/uptake_checks/index.d.ts",
+      "import": "./build/uptake_checks/index.js"
     },
     "./uptake_checks/code_checks": {
-      "types": "./src/uptake_checks/code_checks.ts",
-      "import": "./src/uptake_checks/code_checks.ts"
+      "types": "./build/uptake_checks/code_checks.d.ts",
+      "import": "./build/uptake_checks/code_checks.js"
     },
     "./build_health/node_parser": {
-      "types": "./src/build_health/node_parser.ts",
-      "import": "./src/build_health/node_parser.ts"
+      "types": "./build/build_health/node_parser.d.ts",
+      "import": "./build/build_health/node_parser.js"
     },
     "./build_health/syntax_check": {
-      "types": "./src/build_health/syntax_check.ts",
-      "import": "./src/build_health/syntax_check.ts"
+      "types": "./build/build_health/syntax_check.d.ts",
+      "import": "./build/build_health/syntax_check.js"
     },
     "./build_health/bundle_check": {
-      "types": "./src/build_health/bundle_check.ts",
-      "import": "./src/build_health/bundle_check.ts"
+      "types": "./build/build_health/bundle_check.d.ts",
+      "import": "./build/build_health/bundle_check.js"
     }
   },
   "bin": {
-    "skill-analyzer": "./src/main.ts"
+    "skill-analyzer": "./build/bin.js"
   },
   "publishConfig": {
     "access": "public"
   },
   "scripts": {
-    "build": "node ../source-scan/scripts/copy-source.mjs && tsc -p tsconfig.json",
+    "build": "bun run --cwd ../source-scan build && bun scripts/build.mjs",
     "prepack": "npm run build",
     "test": "bun test tests",
-    "test:pack": "node scripts/smoke-pack.mjs"
+    "test:pack": "node scripts/smoke-pack.mjs && node scripts/smoke-pack.mjs bun"
   },
   "dependencies": {
     "tar": "^7.5.22",
@@ -85,6 +86,10 @@
   },
   "devDependencies": {
     "@types/bun": "1.3.14",
-    "typescript": "7.0.2"
+    "typescript": "7.0.2",
+    "@expo/source-scan": "workspace:*",
+    "rollup": "4.63.1",
+    "rollup-plugin-dts": "6.5.1",
+    "@typescript/typescript6": "6.0.2"
   }
 }

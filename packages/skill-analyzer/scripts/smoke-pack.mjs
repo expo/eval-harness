@@ -6,6 +6,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { fixture, normalize } from './fixture.mjs';
 
+const installer = process.argv[2] ?? 'npm';
+assert(['npm', 'bun'].includes(installer));
 const packageRoot = fileURLToPath(new URL('..', import.meta.url));
 const repo = path.resolve(packageRoot, '../..');
 const scratch = mkdtempSync(path.join(tmpdir(), 'skill-analyzer-consumer-'));
@@ -23,12 +25,18 @@ try {
     tarballs.push(path.join(scratch, packed.filename));
     if (name === 'skill-analyzer') {
       const files = new Set(packed.files.map(file => file.path));
-      for (const file of ['src/internal/source-scan/index.ts', 'src/internal/source-scan/parse.ts', 'src/internal/source-scan/walk.ts', 'src/internal/source-scan/strip-comments.ts', 'src/main.ts', 'src/index.ts', 'src/artifacts.ts', 'src/build_health/node_parser.ts', 'src/uptake_checks/checks_data.json', 'src/uptake_checks/skill_map.json']) assert(files.has(file), `Missing ${file}`);
-      assert([...files].every(file => file.startsWith('src/') || ['README.md', 'package.json', 'LICENSE'].includes(file)));
+      for (const file of ['build/bin.js', 'build/main.js', 'build/index.js', 'build/index.d.ts', 'build/artifacts.js', 'build/build_health/node_parser.js', 'build/uptake_checks/checks_data.json', 'build/uptake_checks/skill_map.json']) assert(files.has(file), `Missing ${file}`);
+      for (const file of [...files].filter(file => /\.(js|d\.ts)$/.test(file))) {
+        assert(!/['"]@expo\/source-scan(?:['"]|\/)/.test(readFileSync(path.join(packageRoot, file), 'utf8')), `${file} references private package`);
+      }
+      assert([...files].every(file => file.startsWith('build/') || ['README.md', 'package.json', 'LICENSE'].includes(file)));
     }
   }
   writeFileSync(path.join(scratch, 'package.json'), JSON.stringify({ private: true, type: 'module' }));
-  run('npm', ['install', '--ignore-scripts', '--no-audit', '--no-fund', ...tarballs, 'typescript@7.0.2', '@types/bun@1.3.14']);
+  writeFileSync(path.join(scratch, '.npmrc'), '@expo:registry=http://127.0.0.1:9\nfetch-retries=0\n');
+  const dependencies = [...tarballs, 'typescript@7.0.2', '@types/node@22'];
+  if (installer === 'bun') run('bun', ['add', '--ignore-scripts', ...dependencies]);
+  else run('npm', ['install', '--ignore-scripts', '--no-audit', '--no-fund', ...dependencies]);
   assert(!existsSync(path.join(scratch, 'node_modules/@expo/source-scan')));
   const installed = JSON.parse(readFileSync(path.join(scratch, 'node_modules/@expo/skill-analyzer/package.json'), 'utf8'));
   assert(!('@expo/source-scan' in installed.dependencies));
@@ -51,12 +59,14 @@ try {
   const manifest = JSON.parse(readFileSync(path.join(packageRoot, 'package.json'), 'utf8'));
   writeFileSync(path.join(scratch, 'consumer.ts'), `
 import assert from 'node:assert/strict';
-import { analyzeArtifacts, defaultChecksDirectory, checkSyntax, CheckResult, computeBundleResult } from '@expo/skill-analyzer';
+import { analyzeArtifacts, defaultChecksDirectory, checkSyntax, CheckResult, computeBundleResult, allChecks } from '@expo/skill-analyzer';
 import { materializeArtifact } from '@expo/skill-analyzer/artifacts';
 import { runCli } from '@expo/skill-analyzer/cli';
+import { CheckResult as RegistryResult, register } from '@expo/skill-analyzer/uptake_checks/registry';
 import { c } from 'tar';
 ${Object.keys(manifest.exports).map((key,i) => `import * as entry${i} from '${key === '.' ? manifest.name : manifest.name + key.slice(1)}'; void entry${i};`).join('\n')}
 assert.equal(typeof CheckResult, 'function');
+assert.equal(CheckResult, RegistryResult, 'entrypoints share class identity');
 const root = ${JSON.stringify(scratch)};
 materializeArtifact(root + '/authored', root + '/materialized');
 const result = await analyzeArtifacts({ authoredArtifact: root + '/authored', evalArtifact: null, scenario: 'skills_available_unmentioned', outDir: root + '/api-report', prdSkillsPath: root + '/prd-skills.json', checksDir: defaultChecksDirectory });
@@ -64,6 +74,9 @@ assert.equal(result.app, 'test-app');
 assert.equal((await checkSyntax(root + '/authored/author-agent-workspace/run-1')).ok, true);
 assert.equal(computeBundleResult(root + '/authored/author-agent-workspace/run-1').ok, null);
 assert.equal(await runCli(['analyze-artifacts', '--authored-artifact', 'absent', '--scenario', 's', '--out-dir', 'absent']), 2);
+const customRunner = () => new CheckResult({ id: 'packed-custom-check', category: 'test', kind: 'code', target: null, passed: true, evidence: 'shared registry', status: 'passed' });
+register('packed-custom-check', 'test')(customRunner);
+assert.equal(allChecks(defaultChecksDirectory).get('packed-custom-check')?.run, customRunner, 'entrypoints share registry state');
 await c({ gzip: true, file: root + '/authored.tar.gz', cwd: root }, ['authored']);
 `);
   run('bun', ['consumer.ts']);
@@ -78,7 +91,7 @@ await c({ gzip: true, file: root + '/authored.tar.gz', cwd: root }, ['authored']
   assert.deepEqual(archivedMetrics.skills, directoryMetrics.skills);
   assert.deepEqual(archivedMetrics.build_health, directoryMetrics.build_health);
   for (const [module, resolution] of [['NodeNext', 'NodeNext'], ['ESNext', 'Bundler']]) {
-    run(process.execPath, ['node_modules/typescript/bin/tsc', '--noEmit', '--strict', '--skipLibCheck', '--allowImportingTsExtensions', '--target', 'ESNext', '--module', module, '--moduleResolution', resolution, '--types', 'bun', 'consumer.ts']);
+    run(process.execPath, ['node_modules/typescript/bin/tsc', '--noEmit', '--strict', '--target', 'ESNext', '--module', module, '--moduleResolution', resolution, '--types', 'node', 'consumer.ts']);
   }
-  console.log('Packed npm consumer passed: Bun bin/API, all exports, packaged checks, NodeNext/Bundler types, directory/archive analysis, materialization, pre-extraction and legacy metrics/manifest parity.');
+  console.log(`Bundled analyzer passed: ${installer} install with private registry blocked, Bun bin/API, all exports, packaged checks, strict NodeNext/Bundler types, directory/archive analysis, materialization, pre-extraction and legacy parity.`);
 } finally { rmSync(scratch, { recursive: true, force: true }); }
