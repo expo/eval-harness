@@ -458,6 +458,8 @@ The legacy evaluator-trace mirror is disabled unless `PUSH_EVAL_TRACE_BT=1`.
 The private [`source-scan`](packages/source-scan/README.md) workspace provides
 comment stripping, Babel parsing, and AST walking for the existing skill analyzer.
 It is not published separately; downstream packages bundle the shared utilities.
+Shared external versions live in the root `catalog`; each package declares its
+own dependencies using `catalog:`. Internal dependencies use `workspace:*`.
 
 ```bash
 bun install             # installs workspaces and builds shared utilities

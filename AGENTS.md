@@ -11,6 +11,8 @@ runner plus uploaded artifacts.
 
 - `packages/`: Bun workspaces. `source-scan/` is private and supplies the shared
   parser, AST walk, and lexical comment stripper used by the skill analyzer.
+  Shared versions live in the root catalog; declare actual dependencies in each
+  package with `catalog:` and use `workspace:*` for internal packages.
   Package exports point to compiled ESM and declarations under `build/`; run
   `bun install` (which builds the workspace foundation) before harness commands,
   and `bun run build` after editing package source. Keep publication paths in
