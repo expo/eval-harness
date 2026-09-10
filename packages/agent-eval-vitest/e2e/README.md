@@ -5,11 +5,21 @@ exports, Vitest registration, a child-process CLI, fixture cleanup, and persiste
 execution/check artifacts. It complements the offline fake-server and packed
 consumer tests. It does not run from `bun test` or the root `test:ts` script.
 
-The fixture CLI has one command: `create-report`. It reads a per-run token from
-`input.json` and writes `report.json`. The model must request that command and
-then finish; it cannot produce the expected file by answering in chat. Separate
-checks verify the output, unchanged input, and actual command evidence. A final
-hook verifies workspace removal, registered cleanup, and saved check counts.
+The agent receives a bug report: cart subtotals are incorrect for multiple units.
+It must inspect a small JavaScript project, reproduce the failing test, change the
+implementation, run the tests successfully, and finish with a summary. The command
+adapter exposes generic `list`, `read`, `write`, and `test` operations. The prompt
+describes these tools but provides neither a patch nor a prescribed action sequence.
+
+Independent checks execute the repaired module against additional cases outside the
+agent's project (mixed items, zero quantity, empty cart, and input preservation).
+They also require the original tests and documentation to remain unchanged, and
+verify evidence of a failing test before editing and a passing test afterward.
+A final hook verifies workspace removal, registered cleanup, and saved check counts.
+The final source, tests, and README are preserved alongside the model transcript.
+
+This is a small real coding task through the kit's public API. It does not install
+or exercise expo-agent-cli itself; that consumer integration belongs in its repo.
 
 ## Run locally
 
@@ -24,8 +34,7 @@ bun run --cwd packages/agent-eval-vitest test:e2e
 
 `OLLAMA_HOST` selects a different server. `OLLAMA_E2E_MODEL` overrides the model
 for local experiments. The defaults match expo-agent-cli's tier 1 model and
-settings: `qwen3:4b`, temperature 0, seed 42. Thinking is disabled for this small
-smoke test so CPU time goes toward the command loop rather than reasoning. The test allows three model turns,
+settings: `qwen3:4b`, temperature 0, seed 42. Thinking is enabled for diagnosis and code editing. The test allows twelve model turns,
 15 minutes per HTTP request, and 30 minutes for the full evaluation. Slow CPU
 inference can take several minutes; no live server means this explicit command
 fails rather than skipping silently.

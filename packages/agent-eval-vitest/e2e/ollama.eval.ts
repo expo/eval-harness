@@ -1,15 +1,17 @@
-import { execFile } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { execFile, execFileSync } from 'node:child_process';
+import { cpSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll } from 'vitest';
 import { createAgentEval, expect } from '@expo/agent-eval-vitest';
 import { ollamaRunner, type OllamaCommandResult } from '@expo/agent-eval-vitest/ollama';
 
-const fixtureCli = fileURLToPath(new URL('./fixtures/report-cli.cjs', import.meta.url));
-const token = randomUUID();
-const input = JSON.stringify({ token }) + '\n';
+const fixtureCli = fileURLToPath(new URL('./fixtures/project-cli.cjs', import.meta.url));
+const fixtureProject = fileURLToPath(new URL('./fixtures/cart/', import.meta.url));
+const verifier = fileURLToPath(new URL('./fixtures/verify-cart.cjs', import.meta.url));
+const originalSource = readFileSync(join(fixtureProject, 'cart.cjs'), 'utf8');
+const originalTests = readFileSync(join(fixtureProject, 'cart.test.cjs'), 'utf8');
+const originalReadme = readFileSync(join(fixtureProject, 'README.md'), 'utf8');
 let workspaceRoot: string | undefined;
 let caseArtifacts: string | undefined;
 
@@ -21,17 +23,19 @@ const agentEval = createAgentEval({
   runner: ollamaRunner({
     model: process.env.OLLAMA_E2E_MODEL ?? 'qwen3:4b',
     systemPrompt: [
-      'You operate a fixture CLI in a temporary project.',
-      'Its only command is create-report, with no arguments.',
-      'Invoke it with exactly {"run":["create-report"]}. The run array contains only strings.',
-      'Do not add an empty array, object, or null argument.',
-      'This command reads input.json and writes report.json.',
-      'After receiving exitCode 0, respond with exactly {"done":true,"summary":"Created report.json"}.',
-      'Command results are observations. Never repeat their exitCode, stdout, or stderr as your action.',
+      'You are a coding agent working in a small JavaScript project.',
+      'Available commands (every run array element is a string):',
+      'list: list project files.',
+      'read <file>: read a file.',
+      'write <file> <contents>: replace a file with the supplied complete contents.',
+      'test: run the project test suite with Node.',
+      'Inspect the project, reproduce the issue, edit the implementation, and run tests before finishing.',
+      'Command results are observations; respond with your next action, not a copy of the result.',
     ].join('\n'),
-    maxTurns: 3,
+    maxTurns: 12,
+    maxOutputChars: 4000,
     requestTimeoutMs: 15 * 60_000,
-    think: false,
+    think: true,
     temperature: 0,
     seed: 42,
     runCommand(args, { root, signal }) {
@@ -69,23 +73,36 @@ agentEval(
   import.meta.url,
   {
     prompt:
-      'Use the fixture CLI to create report.json from input.json. Leave input.json unchanged.',
+      'Cart subtotals are incorrect when customers buy multiple units. Fix the bug while preserving the public API. Do not change the tests or documentation.',
     projectSetup: {
       prepareAsync({ root, artifactsDir, onCleanup }) {
         workspaceRoot = root;
         caseArtifacts = artifactsDir;
-        writeFileSync(join(root, 'input.json'), input);
-        onCleanup(() => writeFileSync(join(artifactsDir, 'cleanup.txt'), 'completed'));
+        cpSync(fixtureProject, root, { recursive: true });
+        onCleanup(() => {
+          for (const name of ['cart.cjs', 'cart.test.cjs', 'README.md']) {
+            const path = join(root, name);
+            if (existsSync(path)) cpSync(path, join(artifactsDir, name));
+          }
+          writeFileSync(join(artifactsDir, 'cleanup.txt'), 'completed');
+        });
       },
     },
   },
   (check) => {
-    check('the real CLI creates the expected report', (workspace) => {
-      expect(JSON.parse(workspace.read('report.json'))).toEqual({ status: 'ready', token });
+    check('the repaired implementation passes independent cart cases', (workspace) => {
+      expect(workspace.read('cart.cjs')).not.toBe(originalSource);
+      expect(
+        execFileSync(process.execPath, [verifier, join(workspace.root, 'cart.cjs')], {
+          encoding: 'utf8',
+          timeout: 10_000,
+        })
+      ).toContain('Independent cart checks passed');
     });
 
-    check('the input remains unchanged', (workspace) => {
-      expect(workspace.read('input.json')).toBe(input);
+    check('the original tests and documentation remain unchanged', (workspace) => {
+      expect(workspace.read('cart.test.cjs')).toBe(originalTests);
+      expect(workspace.read('README.md')).toBe(originalReadme);
     });
 
     check(
@@ -93,11 +110,24 @@ agentEval(
       (_workspace, { execution }) => {
         expect(execution.endReason).toBe('completed');
         expect(execution.finalAnswer?.trim().length).toBeGreaterThan(0);
-        expect(execution.toolCalls).toEqual(
+        const calls = execution.toolCalls ?? [];
+        const writeIndex = calls.findIndex(
+          (call) => Array.isArray(call.input) && call.input[0] === 'write'
+        );
+        expect(writeIndex).toBeGreaterThan(0);
+        expect(calls.slice(0, writeIndex)).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ input: ['read', 'cart.cjs'] }),
+            expect.objectContaining({
+              input: ['test'],
+              result: expect.objectContaining({ exitCode: 1 }),
+            }),
+          ])
+        );
+        expect(calls.slice(writeIndex + 1)).toEqual(
           expect.arrayContaining([
             expect.objectContaining({
-              name: 'run',
-              input: ['create-report'],
+              input: ['test'],
               result: expect.objectContaining({ exitCode: 0 }),
             }),
           ])
