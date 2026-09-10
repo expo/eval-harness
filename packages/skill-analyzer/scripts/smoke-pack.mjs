@@ -19,22 +19,21 @@ const run = (command, args, cwd = scratch) => {
   catch (error) { process.stderr.write(error.stdout ?? ''); process.stderr.write(error.stderr ?? ''); throw error; }
 };
 try {
-  const tarballs = [];
-  for (const name of ['skill-analyzer']) {
-    const [packed] = JSON.parse(run('npm', ['pack', '--json', '--pack-destination', scratch], path.join(repo, 'packages', name)));
-    tarballs.push(path.join(scratch, packed.filename));
-    if (name === 'skill-analyzer') {
-      const files = new Set(packed.files.map(file => file.path));
-      for (const file of ['build/bin.js', 'build/main.js', 'build/index.js', 'build/index.d.ts', 'build/artifacts.js', 'build/build_health/node_parser.js', 'build/uptake_checks/checks_data.json', 'build/uptake_checks/skill_map.json']) assert(files.has(file), `Missing ${file}`);
-      for (const file of [...files].filter(file => /\.(js|d\.ts)$/.test(file))) {
-        assert(!/['"]@expo\/source-scan(?:['"]|\/)/.test(readFileSync(path.join(packageRoot, file), 'utf8')), `${file} references private package`);
-      }
-      assert([...files].every(file => file.startsWith('build/') || ['README.md', 'package.json', 'LICENSE'].includes(file)));
-    }
+  const tarball = path.join(scratch, 'skill-analyzer.tgz');
+  run('bun', ['pm', 'pack', '--filename', tarball], packageRoot);
+  const files = new Set(run('tar', ['-tzf', tarball]).trim().split('\n').map(file => file.replace(/^package\//, '')));
+  for (const file of ['build/bin.js', 'build/main.js', 'build/index.js', 'build/index.d.ts', 'build/artifacts.js', 'build/build_health/node_parser.js', 'build/uptake_checks/checks_data.json', 'build/uptake_checks/skill_map.json']) assert(files.has(file), `Missing ${file}`);
+  for (const file of [...files].filter(file => /\.(js|d\.ts)$/.test(file))) {
+    assert(!/['"]@expo\/source-scan(?:['"]|\/)/.test(readFileSync(path.join(packageRoot, file), 'utf8')), `${file} references private package`);
+  }
+  assert([...files].every(file => file.startsWith('build/') || ['README.md', 'package.json', 'LICENSE'].includes(file)));
+  const manifest = JSON.parse(run('tar', ['-xOf', tarball, 'package/package.json']));
+  for (const field of ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies']) {
+    assert(!Object.values(manifest[field] ?? {}).some(value => /^(catalog|workspace):/.test(value)), `${field} contains a local protocol`);
   }
   writeFileSync(path.join(scratch, 'package.json'), JSON.stringify({ private: true, type: 'module' }));
   writeFileSync(path.join(scratch, '.npmrc'), '@expo:registry=http://127.0.0.1:9\nfetch-retries=0\n');
-  const dependencies = [...tarballs, 'typescript@7.0.2', '@types/node@22'];
+  const dependencies = [tarball, `typescript@${manifest.devDependencies.typescript}`, '@types/node@22'];
   if (installer === 'bun') run('bun', ['add', '--ignore-scripts', ...dependencies]);
   else run('npm', ['install', '--ignore-scripts', '--no-audit', '--no-fund', ...dependencies]);
   assert(!existsSync(path.join(scratch, 'node_modules/@expo/source-scan')));
@@ -56,7 +55,6 @@ try {
     assert.deepEqual(actual, legacy, `${name}: legacy CLI parity`);
   }
   assert(readFileSync(path.join(packedOut, 'report.html'), 'utf8').includes('expo-router'));
-  const manifest = JSON.parse(readFileSync(path.join(packageRoot, 'package.json'), 'utf8'));
   writeFileSync(path.join(scratch, 'consumer.ts'), `
 import assert from 'node:assert/strict';
 import { analyzeArtifacts, defaultChecksDirectory, checkSyntax, CheckResult, computeBundleResult, allChecks } from '@expo/skill-analyzer';

@@ -6,14 +6,14 @@
       "name": "eval-experiments",
       "dependencies": {
         "@expo/skill-analyzer": "workspace:*",
-        "tar": "^7.5.22",
       },
       "devDependencies": {
         "@expo/config": "57.0.7",
         "@expo/require-utils": "57.0.4",
-        "@types/bun": "1.3.14",
+        "@types/bun": "catalog:",
         "fast-check": "4.9.0",
         "oxfmt": "0.67.0",
+        "tar": "catalog:",
         "typescript": "catalog:",
       },
     },
@@ -40,19 +40,19 @@
       "name": "@expo/skill-analyzer",
       "version": "0.1.0",
       "bin": {
-        "skill-analyzer": "./build/main.js",
+        "skill-analyzer": "./build/bin.js",
       },
       "dependencies": {
-        "@babel/parser": "^7.29.8",
-        "tar": "^7.5.22",
+        "@babel/parser": "catalog:",
+        "tar": "catalog:",
       },
       "devDependencies": {
         "@expo/source-scan": "workspace:*",
-        "@types/bun": "1.3.14",
-        "@typescript/typescript6": "6.0.2",
-        "rollup": "4.63.1",
-        "rollup-plugin-dts": "6.5.1",
-        "typescript": "7.0.2",
+        "@types/bun": "catalog:",
+        "@typescript/typescript6": "catalog:",
+        "rollup": "catalog:",
+        "rollup-plugin-dts": "catalog:",
+        "typescript": "catalog:",
       },
     },
     "packages/source-scan": {
@@ -68,9 +68,11 @@
   },
   "catalog": {
     "@babel/parser": "^7.29.8",
+    "@types/bun": "1.3.14",
     "@typescript/typescript6": "6.0.2",
     "rollup": "4.63.1",
     "rollup-plugin-dts": "6.5.1",
+    "tar": "^7.5.22",
     "typescript": "7.0.2",
   },
   "packages": {

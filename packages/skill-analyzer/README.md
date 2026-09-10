@@ -91,7 +91,9 @@ See [check authoring](src/uptake_checks/README.md) for rules and coverage limits
 
 The build uses shared chunks so all public entrypoints see one check registry.
 A dedicated `build/bin.js` entrypoint invokes the CLI; library imports have no
-CLI side effects. `npm pack` runs the build (Bun is required on the build machine).
+CLI side effects. `bun pm pack` runs the build and resolves catalog/workspace versions (Bun is
+required on the build machine). Use Bun for packing or publishing releases;
+direct `npm pack` does not resolve Bun catalogs.
 The isolated smoke checks install the tarball with both npm and Bun, blocking
 registry access for the private workspace. They check the executable, every
 export, shared registry/class identity, packaged data, artifact parity, and

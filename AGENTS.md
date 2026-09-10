@@ -24,6 +24,9 @@ runner plus uploaded artifacts.
   also keeps Vitest external and the analyzer keeps tar external. The analyzer
   still requires Bun at runtime. Its executable has a dedicated entrypoint,
   and its build copies the check JSON alongside the shared output chunks.
+  Shared versions live in the root catalog; keep dependency declarations in
+  their owning packages. Use `bun pm pack` for releases so no `catalog:` or
+  `workspace:` protocols reach installed consumers.
   All workspace exports point to compiled ESM and declarations under `build/`; run
   `bun install` (which builds the workspace foundation) before harness commands,
   and `bun run build` after editing package source. Keep publication paths in

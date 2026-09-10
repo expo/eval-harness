@@ -15,15 +15,15 @@
     "format:check": "oxfmt --check 'packages/**' '.github/**' package.json tsconfig.json .oxfmtrc.json 'scripts/**/*.{ts,js,mjs,cjs}' --no-error-on-unmatched-pattern"
   },
   "dependencies": {
-    "tar": "^7.5.22",
     "@expo/skill-analyzer": "workspace:*"
   },
   "devDependencies": {
     "@expo/config": "57.0.7",
     "@expo/require-utils": "57.0.4",
-    "@types/bun": "1.3.14",
+    "@types/bun": "catalog:",
     "fast-check": "4.9.0",
     "oxfmt": "0.67.0",
+    "tar": "catalog:",
     "typescript": "catalog:"
   },
   "workspaces": [
@@ -31,9 +31,11 @@
   ],
   "catalog": {
     "@babel/parser": "^7.29.8",
+    "@types/bun": "1.3.14",
     "@typescript/typescript6": "6.0.2",
     "rollup": "4.63.1",
     "rollup-plugin-dts": "6.5.1",
+    "tar": "^7.5.22",
     "typescript": "7.0.2"
   }
 }

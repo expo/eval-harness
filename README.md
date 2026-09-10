@@ -473,7 +473,10 @@ bun run test:packages   # package unit and Vitest integration tests
 bun run test:pack       # tarballs + isolated installs, runtime and type checks
 ```
 
-The root package stays private. Workspace exports reference compiled ESM and
+The root package stays private. Shared dependency versions live in its `catalog`;
+packages declare only the dependencies they use via `catalog:`. Internal
+dependencies use `workspace:*`. Use `bun pm pack` for release tarballs so both
+protocols become ordinary versions for consumers. Workspace exports reference compiled ESM and
 `.d.ts` files under `build/`. The analyzer keeps its Bun runtime requirement and
 ships check JSON alongside its bundles. Both consumers use source-scan as a
 build-time workspace dependency, with no source-copy step or runtime dependency.
