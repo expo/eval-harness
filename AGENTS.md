@@ -9,8 +9,12 @@ runner plus uploaded artifacts.
 
 ## Current Shape
 
-- `packages/`: reusable npm libraries managed as Bun workspaces. The root
-  package stays private; each published package owns its exports and build.
+- `packages/`: publishable Bun workspaces. `source-scan/` supplies the shared
+  parser, AST walk, and lexical comment stripper used by the skill analyzer.
+  Package exports point to compiled ESM and declarations under `build/`; run
+  `bun install` (which builds the workspace foundation) before harness commands,
+  and `bun run build` after editing package source. Keep publication paths in
+  `exports` directly, without `publishConfig` remapping.
 
 - `eval_harness/app_builder/`: authoring side. `scripts/` holds its workflow
   entrypoint (`author-app.sh`). The coding-agent prompt itself lives in
@@ -202,6 +206,7 @@ Run the canonical local type-check and test suite after changing harness code:
 
 ```bash
 bun run test:all
+bun run test:pack # clean npm consumer: ESM, declarations, public source-scan exports
 ```
 
 Run focused and configuration checks when working in the corresponding area:

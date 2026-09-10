@@ -1,4 +1,4 @@
-import { parse } from "@babel/parser";
+import { parseSource, walk } from "@expo/source-scan";
 import { readFileSync } from "node:fs";
 
 export type ParseError = { error: "parse_error"; message: string };
@@ -109,27 +109,6 @@ export function extractAstFactsFromSource(source: string): AstFacts | ParseError
     defaultExportCount,
     reactNativeJsxElementsUsed,
   };
-}
-
-function parseSource(code: string): unknown {
-  return parse(code, {
-    sourceType: "module",
-    plugins: ["jsx", "typescript"],
-  });
-}
-
-function walk(value: unknown, visit: (node: Record<string, unknown>) => void): void {
-  if (Array.isArray(value)) {
-    for (const item of value) walk(item, visit);
-    return;
-  }
-  const node = asObject(value);
-  if (node === null) return;
-  if (typeof node.type === "string") visit(node);
-  for (const [key, child] of Object.entries(node)) {
-    if (["loc", "start", "end", "range"].includes(key)) continue;
-    if (child !== null && typeof child === "object") walk(child, visit);
-  }
 }
 
 function asObject(value: unknown): Record<string, unknown> | null {

@@ -3,14 +3,19 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "typecheck": "tsc --noEmit",
-    "test:ts": "bun test eval_harness",
+    "typecheck": "bun run build && tsc --noEmit",
+    "test:ts": "bun run build && bun test eval_harness && bun run test:packages",
     "test:python": "PYTHONPATH=. uv run --group test python -m unittest discover -s eval_harness -p 'test_*.py'",
-    "test:all": "bun run typecheck && bun run test:ts && bun run test:python"
+    "test:all": "bun run typecheck && bun run test:ts && bun run test:python",
+    "build": "bun run --cwd packages/source-scan build",
+    "test:packages": "bun run --cwd packages/source-scan test",
+    "test:pack": "bun run --cwd packages/source-scan test:pack",
+    "postinstall": "bun run build"
   },
   "dependencies": {
     "@babel/parser": "7.29.8",
-    "tar": "^7.5.22"
+    "tar": "^7.5.22",
+    "@expo/source-scan": "workspace:*"
   },
   "devDependencies": {
     "@expo/config": "57.0.7",
