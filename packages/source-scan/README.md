@@ -27,15 +27,13 @@ stripComments("const url = 'https://expo.dev'; // comment");
 The `@expo/source-scan/strip-comments` and `@expo/source-scan/walk` subpaths
 load without importing Babel. The root entry imports the parser.
 
-The Vitest kit uses this workspace as a build-time dependency and bundles its
-JavaScript and declarations into its own output. The Bun analyzer copies the
-four source modules into its `src/internal/source-scan/` directory before
-building or packing to retain its TypeScript-source distribution. Generated copies
-are ignored by Git; edit the canonical files here. Consumers declare
-`@babel/parser` directly and must not depend on this private workspace at runtime.
-The analyzer ships its copies as TypeScript alongside its other source files.
+Both the Vitest kit and analyzer use this workspace as a dev dependency.
+Bun bundles its JavaScript into each consumer; rollup-plugin-dts bundles its
+public declarations. Babel stays a direct runtime dependency in both consumers.
+There are no source-copy steps or separately published scanner packages.
 
-`node ../source-scan/scripts/copy-source.mjs` runs from a consumer package root.
-`bun run --cwd packages/source-scan test` runs the shared helper tests.
-The published packages' isolated npm smoke checks verify inclusion and ensure
-no `@expo/source-scan` installation is required.
+Each consumer build refreshes source-scan first. Edit the canonical files here
+and run the root build. `bun run --cwd packages/source-scan test` runs shared
+helper tests. The consumers' isolated tarball checks install with npm and Bun
+while the private package's registry is blocked, and verify runtime and strict
+type resolution without source-scan installed.
