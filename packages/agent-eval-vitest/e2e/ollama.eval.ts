@@ -26,10 +26,12 @@ const agentEval = createAgentEval({
       'Invoke it with exactly {"run":["create-report"]}. The run array contains only strings.',
       'Do not add an empty array, object, or null argument.',
       'This command reads input.json and writes report.json.',
-      'After the command succeeds, report that the task is done.',
+      'After receiving exitCode 0, respond with exactly {"done":true,"summary":"Created report.json"}.',
+      'Command results are observations. Never repeat their exitCode, stdout, or stderr as your action.',
     ].join('\n'),
     maxTurns: 3,
     requestTimeoutMs: 15 * 60_000,
+    think: false,
     temperature: 0,
     seed: 42,
     runCommand(args, { root, signal }) {

@@ -153,7 +153,8 @@ system prompt; the runner adds JSON action instructions. Put grading in Vitest c
 
 The host defaults to `OLLAMA_HOST` or `http://127.0.0.1:11434`; `host` overrides it.
 The model is always explicit. The runner does not start Ollama or pull models.
-Defaults are 8 chat requests, temperature 0, seed 42, and a 15-minute deadline per
+Use `think: false` to disable thinking for supported models; when omitted, the
+server/model default applies. Defaults are 8 chat requests, temperature 0, seed 42, and a 15-minute deadline per
 HTTP request. Configure the evaluation's total `timeoutMs` separately; the default
 kit deadline may be shorter than local inference. Node HTTP avoids fetch's shorter
 headers timeout, and the runner cancels pending HTTP requests on abort.

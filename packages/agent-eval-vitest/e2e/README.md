@@ -24,7 +24,8 @@ bun run --cwd packages/agent-eval-vitest test:e2e
 
 `OLLAMA_HOST` selects a different server. `OLLAMA_E2E_MODEL` overrides the model
 for local experiments. The defaults match expo-agent-cli's tier 1 model and
-settings: `qwen3:4b`, temperature 0, seed 42. The test allows three model turns,
+settings: `qwen3:4b`, temperature 0, seed 42. Thinking is disabled for this small
+smoke test so CPU time goes toward the command loop rather than reasoning. The test allows three model turns,
 15 minutes per HTTP request, and 30 minutes for the full evaluation. Slow CPU
 inference can take several minutes; no live server means this explicit command
 fails rather than skipping silently.

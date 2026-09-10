@@ -25,6 +25,8 @@ export interface OllamaRunnerOptions {
   requestTimeoutMs?: number;
   /** Feedback limit per stdout/stderr field. Full output remains in evidence. Default: 800. */
   maxOutputChars?: number;
+  /** Override thinking on models that support it; otherwise use the server default. */
+  think?: boolean;
   temperature?: number;
   seed?: number;
 }
@@ -98,6 +100,7 @@ export function ollamaRunner(options: OllamaRunnerOptions): AgentRunner {
           messages,
           stream: false,
           format: 'json',
+          ...(options.think === undefined ? {} : { think: options.think }),
           options: { temperature, seed },
         };
         await record({ type: 'request', turn: turns, body });
