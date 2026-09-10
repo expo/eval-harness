@@ -213,13 +213,17 @@ resolution, rather than just reading the dependency declaration.
 
 Scaffolding is an explicit alternative to `baseDirectory`: supply an exact
 `createExpoAppVersion` and an explicit `baseTemplate` (pin the template too for
-reproducibility). There is no shared scaffold cache in this initial implementation.
+reproducibility). For create-expo-app 3.7.0 and newer, scaffolding passes
+`--no-agents-md` in both conditions to prevent generated agent instructions and
+automatic Expo Claude-plugin activation. Older versions do not receive the flag.
+Prepared fixture layers and user hooks may still introduce their own agent config.
+There is no shared scaffold cache in this initial implementation.
 
 For `with-skill`, the adapter copies the package skill into the Claude skill
 layout and excludes `.evals`. For `without-skill`, it removes that package's skill
 at the same target; consumers remain responsible for any other skills/config
-present in their base fixture. Generic project setups do not require Expo or a
-skill directory.
+present in their base fixture. The core `projectSetup` API can be used without
+this adapter; `createExpoProject` requires a `skillDir`.
 
 Legacy `EXPO_SKILL_EVAL_TIMEOUT` (seconds), `EXPO_SKILL_EVAL_CONDITION`,
 `EXPO_SKILL_EVAL_DRY`, `EXPO_SKILL_EVAL_KEEP`, and `EXPO_SKILL_EVAL_MODEL` remain

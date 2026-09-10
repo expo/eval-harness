@@ -173,6 +173,39 @@ describe('optional scaffolding', () => {
     ]);
   });
 
+  test.each(['3.7.0', '4.0.0'])(
+    'disables generated agent files with scaffold %s',
+    async (version) => {
+      for (const condition of ['with-skill', 'without-skill'] as const) {
+        context.condition = condition;
+        context.runAsync = async (_command, args, runOptions) => {
+          expect(args).toContain('--no-agents-md');
+          expect(runOptions).toEqual({ timeoutMs: 600_000 });
+          writeFile('workspace/package.json', '{}');
+          if (!args.includes('--no-agents-md')) {
+            writeFile('workspace/AGENTS.md', 'Expo guidance');
+            writeFile('workspace/CLAUDE.md', '@AGENTS.md');
+            writeFile(
+              'workspace/.claude/settings.json',
+              JSON.stringify({
+                enabledPlugins: { 'expo@claude-plugins-official': true },
+              })
+            );
+          }
+        };
+        await createExpoProject({
+          ...options,
+          createExpoAppVersion: version,
+          baseTemplate: 'blank-typescript@sdk-55',
+        }).prepareAsync(context);
+        expect(existsSync(join(context.root, 'AGENTS.md'))).toBe(false);
+        expect(existsSync(join(context.root, 'CLAUDE.md'))).toBe(false);
+        expect(existsSync(join(context.root, '.claude/settings.json'))).toBe(false);
+        expect(existsSync(join(context.root, skillPath))).toBe(condition === 'with-skill');
+      }
+    }
+  );
+
   test('requires an exact scaffold version', () => {
     expect(() => createExpoProject({ ...options, baseTemplate: 'blank' })).toThrow(/version/i);
   });

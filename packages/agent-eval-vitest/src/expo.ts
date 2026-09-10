@@ -13,7 +13,7 @@ export interface ExpoProjectSetup {
   dependencies?: Record<string, string>;
   files?: Record<string, string>;
   prepareAsync?: (context: PrepareContext) => void | Promise<void>;
-  /** Optional prepared base copied before named fixtures. No shared cache is used. */
+  /** Optional prepared base copied before named fixtures. */
   baseDirectory?: URL | string;
   /** Optional scaffold opt-in: exact create-expo-app version, never latest. */
   createExpoAppVersion?: string;
@@ -83,7 +83,7 @@ function copyLayer(source: string, root: string, signal: AbortSignal, excludeEva
 /**
  * Prepare an Expo project for an agent evaluation. Prepared fixture layers
  * are the default; no network or dependency install runs unless requested via
- * pinned scaffolding or prepareAsync. There is deliberately no scaffold cache.
+ * pinned scaffolding or prepareAsync.
  */
 export function createExpoProject(options: ExpoProjectSetup): ProjectSetup<void> {
   if (!/^(?:@[a-z0-9._-]+\/)?[a-z0-9][a-z0-9._-]*$/.test(options.packageName)) {
@@ -123,6 +123,9 @@ export function createExpoProject(options: ExpoProjectSetup): ProjectSetup<void>
         throw new Error(`packageRoot name does not match ${options.packageName}`);
       }
       if (options.createExpoAppVersion) {
+        const [major, minor] = options.createExpoAppVersion.split('.').map(Number);
+        // Agent file generation and this opt-out were introduced in 3.7.0.
+        const supportsAgentFiles = major! > 3 || (major === 3 && minor! >= 7);
         await context.runAsync(
           'npx',
           [
@@ -133,8 +136,9 @@ export function createExpoProject(options: ExpoProjectSetup): ProjectSetup<void>
             options.baseTemplate!,
             '--no-install',
             '--yes',
+            ...(supportsAgentFiles ? ['--no-agents-md'] : []),
           ],
-          { timeoutSeconds: 600 }
+          { timeoutMs: 600_000 }
         );
       }
       signal.throwIfAborted();
@@ -162,8 +166,8 @@ export function createExpoProject(options: ExpoProjectSetup): ProjectSetup<void>
       fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n');
       await options.prepareAsync?.(context);
       signal.throwIfAborted();
-      // Revalidate paths after user preparation, which may have installed or
-      // replaced node_modules. A manifest alone does not link the actual build.
+      // Installation in the preparation hook may replace the local checkout;
+      // restore its dependency and link so the agent uses the package under test.
       const updatedPath = inside(root, 'package.json');
       const updated = JSON.parse(fs.readFileSync(updatedPath, 'utf8'));
       updated.dependencies = {
