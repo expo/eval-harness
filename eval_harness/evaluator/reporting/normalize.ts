@@ -29,7 +29,7 @@ import type {
   ReportInputs,
   StageStatus,
 } from "./types.ts";
-import { skillsFromToolCall } from "../skill_invocation/uptake_checks/trigger.ts";
+import { skillsFromToolCall } from "@expo/skill-analyzer/uptake_checks/trigger";
 import { renderReport } from "./render.ts";
 
 type JsonRecord = Record<string, unknown>;

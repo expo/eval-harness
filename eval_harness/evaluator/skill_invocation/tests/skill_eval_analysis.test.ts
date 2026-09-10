@@ -22,10 +22,10 @@ import {
   writeHtmlReport,
   type SkillEvalPayload,
   type SkillResult,
-} from "../analysis.ts";
-import { CheckResult, type Check } from "../uptake_checks/registry.ts";
+} from "@expo/skill-analyzer/analysis";
+import { CheckResult, type Check } from "@expo/skill-analyzer/uptake_checks/registry";
 
-const CLI_PATH = resolve(import.meta.dir, "../main.ts");
+const CLI_PATH = resolve(import.meta.dir, "../../../../node_modules/.bin/skill-analyzer");
 const SHELL_ENTRYPOINT = resolve(import.meta.dir, "../scripts/eval-skill-use.sh");
 const REPO_ROOT = resolve(import.meta.dir, "../../../..");
 
@@ -1217,6 +1217,8 @@ test("[REGRESSION] failed archive analysis removes its controlled scratch direct
       "analyze-artifacts",
       "--authored-artifact",
       archive,
+      "--prd-skills",
+      join(REPO_ROOT, "dataset/prd_skills.json"),
       "--scenario",
       "skills_available_unmentioned",
       "--out-dir",
@@ -1315,6 +1317,7 @@ test("[REGRESSION] shell entrypoint runs with Bun and no Python executable", () 
       join(workflowRoot, "eval_harness"),
       "dir",
     );
+    symlinkSync(join(REPO_ROOT, "node_modules"), join(workflowRoot, "node_modules"), "dir");
     const outDir = join(workflowRoot, "skill-eval-report");
     const shellEntrypoint = join(
       workflowRoot,

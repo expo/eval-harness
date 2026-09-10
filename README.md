@@ -36,11 +36,6 @@ eval_harness/
       prompts/                # agentic evaluator's system prompt
       scripts/                # iOS build+eval entrypoints
     skill_invocation/
-      uptake_checks/          # compatibility exports + symlinks to packaged check data
-      build_health/           # compatibility exports + bundle CLI shim
-      main.ts                 # Bun CLI shim with repository ground-truth default
-      analysis.ts             # compatibility export from @expo/skill-analyzer
-      utils.ts                # compatibility export from @expo/skill-analyzer
       tests/                  # skill evaluator unit tests
       scripts/                # skill-use analysis entrypoint
   utils/                      # artifacts, iOS, shell, and telemetry helpers (shared)
@@ -228,7 +223,7 @@ both resolved automatically from that same PRD — via
 `dataset/prd_test_plans.json` and `dataset/prd_skills.json` respectively, no
 manual test-plan or case-spec selection needed. `skill_scenario` feeds both
 the authoring step (it's an enforced config, not just a label — see
-`uptake_checks/README.md`) and the analysis step; `skill_mention` only matters
+`packages/skill-analyzer/src/uptake_checks/README.md`) and the analysis step; `skill_mention` only matters
 for the `skills_available_mentioned` scenario:
 
 ```bash

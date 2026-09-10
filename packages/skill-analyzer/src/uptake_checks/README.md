@@ -183,9 +183,10 @@ bun test eval_harness/evaluator/skill_invocation/tests/skill_eval_core.test.ts
 Then run the analyzer against at least one known-good authored app artifact:
 
 ```bash
-bun eval_harness/evaluator/skill_invocation/main.ts analyze-artifacts \
+bun node_modules/.bin/skill-analyzer analyze-artifacts \
   --authored-artifact /path/to/authored-app.tar.gz \
   --scenario skills_available_unmentioned \
+  --prd-skills dataset/prd_skills.json \
   --out-dir /tmp/skill-eval-report
 ```
 

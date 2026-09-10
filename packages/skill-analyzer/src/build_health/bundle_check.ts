@@ -69,7 +69,7 @@ export function readBundleResult(appDir: string): BundleResult | null {
 export function main(args: string[] = process.argv.slice(2)): number {
   const [workspace, ...options] = args;
   if (workspace === undefined) {
-    console.error('usage: bun bundle_check.ts <workspace-dir> [--platform ios|android]');
+    console.error('usage: skill-analyzer bundle-check <workspace-dir> [--platform ios|android]');
     return 2;
   }
   let platform: BundlePlatform = 'ios';
@@ -81,7 +81,7 @@ export function main(args: string[] = process.argv.slice(2)): number {
     }
     platform = requestedPlatform;
   } else if (options.length !== 0) {
-    console.error('usage: bun bundle_check.ts <workspace-dir> [--platform ios|android]');
+    console.error('usage: skill-analyzer bundle-check <workspace-dir> [--platform ios|android]');
     return 2;
   }
   const outcome = persistBundleResult(workspace, { platform });

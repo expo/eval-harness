@@ -112,6 +112,8 @@ jobs:
     steps:
       - uses: eas/checkout
 
+      - uses: eas/install_node_modules
+
       - name: Author app with coding agent
         run: bash ./eval_harness/app_builder/scripts/author-app.sh
 
@@ -154,7 +156,7 @@ jobs:
       - name: Materialize authored app safely
         run: |
           artifact_path="${{ steps.download_author.outputs.artifact_path }}"
-          bun eval_harness/utils/artifacts/materialize.ts \
+          bun node_modules/.bin/skill-analyzer materialize \
             --artifact "$artifact_path" --dest "$PWD/authored-app-input" --root-name authored-app
 
       - name: Check Claude subscription OAuth
@@ -195,6 +197,8 @@ jobs:
     steps:
       - uses: eas/checkout
 
+      - uses: eas/install_node_modules
+
       - name: Download authored app
         uses: eas/download_artifact
         id: download_author
@@ -204,7 +208,7 @@ jobs:
       - name: Materialize authored app safely
         run: |
           artifact_path='${{ steps.download_author.outputs.artifact_path }}'
-          bun eval_harness/utils/artifacts/materialize.ts \
+          bun node_modules/.bin/skill-analyzer materialize \
             --artifact "$artifact_path" --dest "$PWD/authored-app-input" --root-name authored-app
 
       - name: Analyze authored app for skill eval
@@ -240,6 +244,8 @@ jobs:
     steps:
       - uses: eas/checkout
 
+      - uses: eas/install_node_modules
+
       - name: Download authored app
         uses: eas/download_artifact
         id: report_author
@@ -268,7 +274,7 @@ jobs:
             echo 'authored-app artifact is unavailable; cannot build the required report' >&2
             exit 1
           }
-          bun eval_harness/utils/artifacts/materialize.ts \
+          bun node_modules/.bin/skill-analyzer materialize \
             --artifact "$author_path" --dest "$PWD/report-inputs/author" --root-name authored-app
           report_args=(
             --authored-artifact report-inputs/author --out-dir eval-report
@@ -277,7 +283,7 @@ jobs:
           )
           skill_path='${{ steps.report_skill.outputs.artifact_path }}'
           if [ -n "$skill_path" ] && [ "$skill_path" != undefined ] && [ "$skill_path" != null ]; then
-            bun eval_harness/utils/artifacts/materialize.ts \
+            bun node_modules/.bin/skill-analyzer materialize \
               --artifact "$skill_path" --dest "$PWD/report-inputs/skill" --root-name skill-eval-report
             report_args+=(--skill-artifact report-inputs/skill)
           else
@@ -285,7 +291,7 @@ jobs:
           fi
           ios_path='${{ steps.report_ios.outputs.artifact_path }}'
           if [ -n "$ios_path" ] && [ "$ios_path" != undefined ] && [ "$ios_path" != null ]; then
-            bun eval_harness/utils/artifacts/materialize.ts \
+            bun node_modules/.bin/skill-analyzer materialize \
               --artifact "$ios_path" --dest "$PWD/report-inputs/ios" --root-name ios-eval-report
             report_args+=(--ios-artifact report-inputs/ios)
           else

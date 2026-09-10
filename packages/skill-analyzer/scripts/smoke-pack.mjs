@@ -9,7 +9,6 @@ import { fixture, normalize } from './fixture.mjs';
 const installer = process.argv[2] ?? 'npm';
 assert(['npm', 'bun'].includes(installer));
 const packageRoot = fileURLToPath(new URL('..', import.meta.url));
-const repo = path.resolve(packageRoot, '../..');
 const scratch = mkdtempSync(path.join(tmpdir(), 'skill-analyzer-consumer-'));
 const env = { ...process.env };
 delete env.NODE_PATH;
@@ -56,7 +55,9 @@ try {
   }
   assert(
     [...files].every(
-      (file) => file.startsWith('build/') || ['README.md', 'package.json', 'LICENSE'].includes(file)
+      (file) =>
+        file.startsWith('build/') ||
+        ['README.md', 'MIGRATION.md', 'package.json', 'LICENSE'].includes(file)
     )
   );
   const manifest = JSON.parse(run('tar', ['-xOf', tarball, 'package/package.json']));
@@ -105,19 +106,20 @@ try {
     f.prdSkills,
   ];
   const packedOut = path.join(scratch, 'packed-report');
-  const legacyOut = path.join(scratch, 'legacy-report');
   const cli = path.join(scratch, 'node_modules/.bin/skill-analyzer');
   run(cli, cliArgs(packedOut)); // Test npm's installed bin and Bun shebang.
-  run('bun', [
-    path.join(repo, 'eval_harness/evaluator/skill_invocation/main.ts'),
-    ...cliArgs(legacyOut),
+  run(cli, [
+    'materialize',
+    '--artifact',
+    f.authored,
+    '--dest',
+    path.join(scratch, 'cli-materialized'),
   ]);
+  assert(existsSync(path.join(scratch, 'cli-materialized/manifest.json')));
   for (const name of ['metrics.json', 'manifest.json']) {
     const actual = normalize(JSON.parse(readFileSync(path.join(packedOut, name), 'utf8')), scratch);
-    const legacy = normalize(JSON.parse(readFileSync(path.join(legacyOut, name), 'utf8')), scratch);
     const golden = JSON.parse(readFileSync(path.join(packageRoot, 'tests', name), 'utf8'));
     assert.deepEqual(actual, golden, `${name}: parity against pre-extraction behavior`);
-    assert.deepEqual(actual, legacy, `${name}: legacy CLI parity`);
   }
   assert(readFileSync(path.join(packedOut, 'report.html'), 'utf8').includes('expo-router'));
   writeFileSync(
@@ -187,7 +189,7 @@ await c({ gzip: true, file: root + '/authored.tar.gz', cwd: root }, ['authored']
     ]);
   }
   console.log(
-    `Bundled analyzer passed: ${installer} install with private registry blocked, Bun bin/API, all exports, packaged checks, strict NodeNext/Bundler types, directory/archive analysis, materialization, pre-extraction and legacy parity.`
+    `Bundled analyzer passed: ${installer} install with private registry blocked, Bun bin/API, all exports, packaged checks, strict NodeNext/Bundler types, directory/archive analysis, materialization, pre-extraction parity.`
   );
 } finally {
   rmSync(scratch, { recursive: true, force: true });

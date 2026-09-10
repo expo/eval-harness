@@ -257,7 +257,7 @@ eval::require_authored_app() { test "$1" = 0 && test -f "$2/package.json"; }
 set -eu
 for arg in "$@"; do
   case "$arg" in
-    *bundle_check.ts)
+    bundle-check)
       workspace="${!#}"
       printf '%s\\n' '{"ok":false,"reason":"fixture export failure"}' > "$workspace/.eval-build-health-bundle.json"
       printf '%s\\n' 'bundle check: fixture export failure'
@@ -629,7 +629,8 @@ exit 0
             consumed = subprocess.run(
                 [
                     "bun",
-                    str(ROOT / "eval_harness/utils/artifacts/materialize.ts"),
+                    str(ROOT / "node_modules/.bin/skill-analyzer"),
+                    "materialize",
                     "--artifact",
                     str(archive),
                     "--dest",

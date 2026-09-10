@@ -57,19 +57,23 @@ The caller owns library scratch cleanup; the CLI handles its own temporary
 extractions. The root exports analysis/scoring functions and types, the check
 registry, syntax checks, and bundle helpers. `./cli` exports `runCli`;
 `./artifacts` exports safe extraction/materialization helpers and
-`runMaterializeCli`. The explicit `analysis`, `utils`, `build_health/*`, and
-`uptake_checks/*` subpaths support harness compatibility imports. Bundle helpers
+`runMaterializeCli`. The `analysis`, `utils`, `build_health/*`, and `uptake_checks/*` subpaths expose
+the corresponding analysis, utility, build-health, and check APIs. Bundle helpers
 can invoke the authored app's local Expo CLI; plain analysis reads its recorded
 bundle result. The source parser runs in-process via the included helpers and `@babel/parser`;
 there is no repository-relative child parser executable.
 
-## Repository compatibility and verification
+## CLI utilities and migration
 
-The existing `bun eval_harness/evaluator/skill_invocation/main.ts` CLI supplies
-`dataset/prd_skills.json` as its default. Its shell wrapper, output-directory
-validation, report schemas, and console summary remain compatible. Old module
-paths re-export the package. Old check JSON paths are symlinks to the package's
-single canonical copy. The materializer's old path remains a CLI and import shim.
+```sh
+bunx skill-analyzer materialize --artifact ./authored-app.tar.gz --dest ./authored-app
+bunx skill-analyzer bundle-check ./app --platform ios
+```
+
+Old repository module paths, CLI shims, and check-data symlinks are removed.
+See [migration instructions for expo/skills](MIGRATION.md) for the follow-up PR.
+
+## Verification
 
 From the repository root:
 
@@ -80,12 +84,12 @@ bun run --cwd packages/skill-analyzer test
 bun run --cwd packages/skill-analyzer test:pack
 ```
 
-The existing tests continue exercising the shims, shell validation, scoring,
-artifact security, and dynamic CLI paths. The packed smoke installs real npm
-tarballs outside the checkout, runs the installed Bun bin and API, checks every
-export and TypeScript resolution, and compares metrics/manifests against both
-the legacy CLI and fixtures captured before extraction. It needs npm registry
-access. No live EAS/model validation is part of these commands.
+The tests import the package directly and exercise its CLI, shell validation,
+scoring, and artifact security. Packed smoke tests install real npm tarballs
+outside the checkout, run the installed Bun bin and API, check every export and
+TypeScript resolution, and compare metrics/manifests against fixed fixtures
+captured before extraction. They require npm registry access. No live EAS/model
+validation is part of these commands.
 
 See [check authoring](src/uptake_checks/README.md) for rules and coverage limits.
 

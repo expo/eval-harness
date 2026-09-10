@@ -31,17 +31,3 @@ test('package imports expose scoring, checks, bundled data, and shared materiali
   );
   expect(await Bun.file(resolve(api.defaultChecksDirectory, 'skill_map.json')).exists()).toBe(true);
 });
-
-test('legacy CLI still documents its optional repository ground-truth default', () => {
-  const legacyCli = resolve(
-    import.meta.dir,
-    '../../../eval_harness/evaluator/skill_invocation/main.ts'
-  );
-  const result = Bun.spawnSync([process.execPath, legacyCli, 'analyze-artifacts', '--help'], {
-    stdout: 'pipe',
-    stderr: 'pipe',
-  });
-  expect(result.exitCode).toBe(0);
-  expect(result.stdout.toString()).toContain('[--prd-skills PRD_SKILLS]');
-  expect(result.stdout.toString()).toContain('(default: dataset/prd_skills.json)');
-});

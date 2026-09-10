@@ -14,7 +14,8 @@
   },
   "files": [
     "build",
-    "LICENSE"
+    "LICENSE",
+    "MIGRATION.md"
   ],
   "main": "./build/index.js",
   "types": "./build/index.d.ts",

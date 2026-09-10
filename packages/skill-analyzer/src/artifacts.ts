@@ -369,7 +369,7 @@ export function materializeArtifact(
 
 function usage(message: string): never {
   throw new Error(
-    `usage: materialize.ts --artifact PATH --dest PATH [--root-name NAME]\n${message}`
+    `usage: skill-analyzer materialize --artifact PATH --dest PATH [--root-name NAME]\n${message}`
   );
 }
 

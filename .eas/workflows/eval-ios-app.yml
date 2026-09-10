@@ -87,7 +87,7 @@ jobs:
       - name: Materialize authored app safely
         run: |
           artifact_path="${{ steps.download_author.outputs.artifact_path || steps.download_author_from_url.outputs.artifact_path }}"
-          bun eval_harness/utils/artifacts/materialize.ts \
+          bun node_modules/.bin/skill-analyzer materialize \
             --artifact "$artifact_path" --dest "$PWD/authored-app-input" --root-name authored-app
 
       - name: Check Claude subscription OAuth
