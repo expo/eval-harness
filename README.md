@@ -539,3 +539,46 @@ Validate EAS workflows:
 ```bash
 node /Users/adityashukla/.codex/plugins/cache/openai-curated-remote/expo/1.0.2/skills/expo-cicd-workflows/scripts/validate.js .eas/workflows/*.yml
 ```
+
+## Publishing npm packages
+
+[Publish](.github/workflows/publish.yml) manually releases either
+`@expo/agent-eval-vitest` or `@expo/skill-analyzer` using npm trusted publishing.
+`@expo/source-scan` stays private and is bundled into its consumers.
+The workflow installs from the frozen Bun lockfile, checks types, runs offline
+TypeScript tests and both packages' npm/Bun consumer smoke tests, then runs
+`bun pm pack` and publishes the resulting tarball with npm. Bun resolves the
+catalog/workspace references; npm supplies OIDC authentication. Do not publish
+these workspace directories directly with npm.
+
+Before the first automated release, an npm package owner must configure a
+[trusted publisher](https://docs.npmjs.com/trusted-publishers/) for each public
+package: GitHub organization **expo**, repository **eval-experiments**, workflow
+filename **publish.yml**, allowed action **npm publish**, and no environment name.
+A new package needs to exist on npm before its package settings can be configured;
+coordinate its initial publication with an npm owner. The workflow uses a
+GitHub-hosted runner, Node 22.17 and npm 11.6.2, with `id-token: write` and no
+`NPM_TOKEN`. Merge the workflow onto the default branch before dispatching it.
+
+From a clean branch with `origin` pointing at this repository, preview a release:
+
+```bash
+bun run release --package @expo/agent-eval-vitest --dry-run
+bun run release 0.2.0-beta.1 --package @expo/skill-analyzer --tag next --dry-run
+```
+
+Remove `--dry-run` to bump the package version, regenerate `bun.lock`, commit both,
+push the current branch to origin and dispatch the workflow. Omitting the version
+increments the patch version; passing the current version dispatches without a
+version bump (useful when retrying a failed workflow). The helper requires Git,
+Bun, npm and an authenticated `gh` with repository write access. Dry runs still
+check git state and npm availability, but make no changes. Registry errors other
+than a missing package/version stop the release.
+
+Alternatively, commit and push the version and lockfile changes through your
+normal PR flow, then dispatch **Publish** in GitHub Actions with the package,
+expected version and dist-tag. The expected version must match the selected ref's
+manifest. Prerelease versions require a tag such as `next`, rather than `latest`.
+A successful helper dispatch is not a completed publication: follow the Actions
+run for its result. If a commit/push/dispatch fails, the helper leaves local changes
+in place; inspect them and retry with the explicit version once the branch is clean.
