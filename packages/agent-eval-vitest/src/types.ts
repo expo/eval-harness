@@ -31,8 +31,10 @@ export interface PrepareContext {
   condition: Condition;
   signal: AbortSignal;
   artifactsDir: string;
+  /** Runs after the case signal is aborted. Use runAsync for bounded cleanup commands. */
   onCleanup(cleanup: Cleanup): void;
-  runAsync(command: string, args: string[], options?: { timeoutSeconds?: number }): Promise<void>;
+  /** Command timeout is in milliseconds; default 600_000. */
+  runAsync(command: string, args: string[], options?: { timeoutMs?: number }): Promise<void>;
 }
 export interface ProjectSetup<T = void> {
   prepareAsync(context: PrepareContext): T | Promise<T>;

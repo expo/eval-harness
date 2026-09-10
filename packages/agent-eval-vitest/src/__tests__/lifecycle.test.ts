@@ -297,3 +297,70 @@ test('stalled cleanups share one total deadline and do not block later disposers
   expect(finalCleanup).toBe(true);
   expect(fs.existsSync(run.workspace.root)).toBe(false);
 });
+
+test('a completed attempt keeps its signal live until close, past the setup deadline', async () => {
+  let signal: AbortSignal | undefined;
+  const run = await openCase(
+    'settled-deadline',
+    {
+      prompt: 'x',
+      projectSetup: {
+        prepareAsync(context) {
+          signal = context.signal;
+        },
+      },
+    },
+    { artifactsDir, runner, timeoutMs: 10 }
+  );
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(signal?.aborted).toBe(false);
+  } finally {
+    await run.close();
+  }
+  expect(signal?.aborted).toBe(true);
+});
+
+test('a cleanup rejection after its deadline remains handled', async () => {
+  let rejectCleanup!: (reason: Error) => void;
+  const run = await openCase(
+    'late-cleanup',
+    {
+      prompt: 'x',
+      projectSetup: {
+        prepareAsync({ onCleanup }) {
+          onCleanup(
+            () =>
+              new Promise<void>((_, reject) => {
+                rejectCleanup = reject;
+              })
+          );
+        },
+      },
+    },
+    { artifactsDir, runner, cleanupTimeoutMs: 10 }
+  );
+  await expect(run.close()).rejects.toThrow('cleanup timed out');
+  rejectCleanup(new Error('late cleanup rejection'));
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  expect(fs.existsSync(run.workspace.root)).toBe(false);
+});
+
+test('prepare commands use millisecond timeout options', async () => {
+  await expect(
+    openCase(
+      'command-timeout',
+      {
+        prompt: 'x',
+        projectSetup: {
+          async prepareAsync({ runAsync }) {
+            await runAsync(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {
+              timeoutMs: 20,
+            });
+          },
+        },
+      },
+      { artifactsDir, runner, timeoutMs: 1000 }
+    )
+  ).rejects.toThrow('timed out after 20ms');
+});

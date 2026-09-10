@@ -58,6 +58,8 @@ export default defineConfig({
     // The package imports Vitest's test/hook API; keep the same module context.
     server: { deps: { inline: ['@expo/agent-eval-vitest'] } },
     maxWorkers: 1,
+    testTimeout: 30_000,
+    hookTimeout: 30_000,
   },
 });
 ```
@@ -69,6 +71,10 @@ npx vitest run --config vitest.evals.config.ts
 `agentEval.skip(...)`, `agentEval.only(...)`, normal name filtering, ordinary
 Vitest assertions, and `skip(note)` inside a check are supported. A skipped or
 fully filtered case does not start an agent. No custom reporter is required.
+
+`timeoutMs` controls setup plus the agent run. Each check (including work before
+`skip()`) uses Vitest's separate `testTimeout`; consumer hooks use `hookTimeout`.
+The kit supplies its own timeout for its setup and cleanup hooks.
 
 ## Runner and lifecycle contract
 
@@ -98,10 +104,12 @@ even if preservation checks pass.
 
 Setup and runners must honor `signal`, stop their resources, and settle on abort.
 The kit imposes its own deadline, waits a bounded interval for cancellation, then
-runs registered cleanup in reverse order. Cleanup also runs after partial setup
+runs registered cleanup in reverse order. The original setup/runner `signal` is
+already aborted inside `onCleanup`; do not reuse it for shutdown requests. Cleanup also runs after partial setup
 failure and runner failure. Disposers share a total `cleanupTimeoutMs` budget (default 5s);
 subsequent disposers are still invoked if one fails. Cleanup commands registered
-through `runAsync` receive a fresh signal bounded by that cleanup deadline. JavaScript cannot forcibly terminate
+through `runAsync` receive a fresh signal bounded by that cleanup deadline.
+`runAsync(command, args, { timeoutMs })` uses milliseconds (default `600_000`). JavaScript cannot forcibly terminate
 an arbitrary injected function that ignores cancellation. Checks should observe
 completed evidence and avoid starting unregistered asynchronous work.
 

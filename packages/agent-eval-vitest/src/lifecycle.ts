@@ -46,18 +46,38 @@ function errorText(error: unknown): string {
   return error instanceof Error ? `${error.name}: ${error.message}` : String(error);
 }
 
-async function bounded<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      promise,
-      new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error(message)), timeoutMs);
-      }),
-    ]);
-  } finally {
-    clearTimeout(timer);
-  }
+function bounded<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  message: string,
+  onTimeout?: () => void
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(new Error(message));
+      onTimeout?.();
+    }, timeoutMs);
+
+    // Both handlers remain attached if the deadline wins and work settles later.
+    promise.then(
+      (value) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        reject(error);
+      }
+    );
+  });
 }
 
 /** Opens one agent attempt; the caller MUST close it after all independent checks. */
@@ -152,7 +172,6 @@ export async function openCase<T>(
     })();
     return closing;
   };
-  let timer: ReturnType<typeof setTimeout> | undefined;
   const timeoutError = new Error(
     `Agent eval timed out after ${config.timeoutMs}ms. Artifacts: ${artifactsDir}`
   );
@@ -171,7 +190,7 @@ export async function openCase<T>(
       runAsync: (command, args, runOptions) =>
         runCommandAsync(root, command, args, {
           signal: closed ? cleanupController.signal : controller.signal,
-          timeoutMs: (runOptions?.timeoutSeconds ?? 600) * 1000,
+          timeoutMs: runOptions?.timeoutMs ?? 600_000,
         }),
     });
     controller.signal.throwIfAborted();
@@ -193,16 +212,9 @@ export async function openCase<T>(
     return fixture;
   })();
   try {
-    const fixture = await Promise.race([
-      task,
-      new Promise<never>((_, reject) => {
-        timer = setTimeout(() => {
-          controller.abort(timeoutError);
-          reject(timeoutError);
-        }, config.timeoutMs);
-      }),
-    ]);
-    clearTimeout(timer);
+    const fixture = await bounded(task, config.timeoutMs, timeoutError.message, () =>
+      controller.abort(timeoutError)
+    );
     const completedExecution = execution!;
     let closeResult: Promise<void> | undefined;
     return {
@@ -237,7 +249,6 @@ export async function openCase<T>(
       },
     };
   } catch (original) {
-    clearTimeout(timer);
     controller.abort(original);
     const errors: unknown[] = [original];
     // Give cooperative runners time to terminate children and flush transcripts before cleanup.

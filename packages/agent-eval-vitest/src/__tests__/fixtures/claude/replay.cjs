@@ -18,5 +18,8 @@ if (response.stdout) {
 process.exitCode = response.exitCode ?? 0;
 
 if (response.keepAlive) {
+  process.stdout.write('', () => {
+    process.stderr.write('', () => writeFileSync('ready', 'ready'));
+  });
   setInterval(() => {}, 1000);
 }

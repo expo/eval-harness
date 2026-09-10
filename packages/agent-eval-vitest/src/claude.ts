@@ -8,7 +8,6 @@ function isRecord(value: unknown): value is RecordValue {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
-/** Model precedence: options.model, EXPO_SKILL_EVAL_MODEL, then the CLI default. */
 export function claudeRunner(options: { model?: string } = {}): AgentRunner {
   return async ({ root, prompt, artifactsDir, signal }) => {
     await mkdir(artifactsDir, { recursive: true });
@@ -16,7 +15,7 @@ export function claudeRunner(options: { model?: string } = {}): AgentRunner {
     if (signal.aborted) {
       return {
         finalAnswer: null,
-        toolCalls: [],
+        toolCalls: null,
         endReason: 'cancelled',
         artifacts: [],
       };
@@ -78,7 +77,7 @@ function parseTranscript(transcript: string, aborted: boolean) {
       event = JSON.parse(line);
     } catch {
       // Killing a writer can truncate its last JSONL record.
-      if (aborted && index === lines.length - 1) {
+      if (aborted && lines.slice(index + 1).every((line) => !line.trim())) {
         break;
       }
       throw new Error(`Claude protocol: invalid JSON on line ${index + 1}`);

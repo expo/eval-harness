@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { claudeRunner } from '../claude.ts';
@@ -66,11 +66,18 @@ function recordedArguments(): string[] {
 async function cancelRunningClaude() {
   const controller = new AbortController();
   const pending = claudeRunner()({ ...context, signal: controller.signal });
-  const timer = setTimeout(() => controller.abort(), 300);
+  pending.catch(() => {});
   try {
+    const deadline = performance.now() + 3000;
+    while (!existsSync(join(workspaceRoot, 'ready'))) {
+      if (performance.now() >= deadline) throw new Error('Fake Claude did not become ready');
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    controller.abort();
     return await pending;
   } finally {
-    clearTimeout(timer);
+    controller.abort();
+    await pending.catch(() => {});
   }
 }
 
@@ -158,6 +165,23 @@ describe('protocol failures', () => {
 });
 
 describe('process failures and cancellation', () => {
+  test('pre-start cancellation leaves tool evidence unavailable', async () => {
+    const result = await claudeRunner()({ ...context, signal: AbortSignal.abort() });
+    expect(result).toMatchObject({ finalAnswer: null, toolCalls: null, endReason: 'cancelled' });
+  });
+
+  test('ignores a cancelled trailing partial record followed by blank lines', async () => {
+    const stdout = '{"type":\n\n';
+    installFakeClaude({ stdout, keepAlive: true });
+    expect((await cancelRunningClaude()).endReason).toBe('cancelled');
+    expect(readArtifact('claude.stdout.jsonl')).toBe(stdout);
+  });
+
+  test('still rejects malformed records before later evidence on cancellation', async () => {
+    installFakeClaude({ stdout: '{"type":\n{"type":"system"}\n', keepAlive: true });
+    await expect(cancelRunningClaude()).rejects.toThrow('invalid JSON');
+  });
+
   test('rejects when the CLI cannot start', async () => {
     await expect(claudeRunner()(context)).rejects.toThrow();
   });
