@@ -183,6 +183,53 @@ and workspace-first named check callbacks keep their familiar shape.
 `loadAstSupport()` uses the shipped scanner dependency; a broken parser install
 throws instead of silently skipping AST checks.
 
+## Expo fixtures and migration from the old kit
+
+Wrap the old declarative setup with `createExpoProject`:
+
+```ts
+import { createExpoProject } from '@expo/agent-eval-vitest/expo';
+
+const projectSetup = createExpoProject({
+  packageName: 'expo-sqlite',
+  packageRoot: new URL('../../', import.meta.url),
+  skillDir: new URL('../', import.meta.url),
+  fixturesDir: new URL('./fixtures/', import.meta.url),
+  baseDirectory: new URL('./base-app/', import.meta.url),
+  fixture: 'notes-db',
+  files: { 'README.md': 'Eval workspace\n' },
+  async prepareAsync({ runAsync }) {
+    await runAsync('npm', ['install']);
+  },
+});
+```
+
+Paths above are illustrative; resolve them for your case location. The prepared
+base and fixtures must contain ordinary files/directories, not symlinks. Builds
+and dependencies required by the local package must already be available in its
+checkout. After preparation, the adapter sets the manifest dependency and links
+`node_modules/<package>` to the actual local checkout. Tests verify real module
+resolution, rather than just reading the dependency declaration.
+
+Scaffolding is an explicit alternative to `baseDirectory`: supply an exact
+`createExpoAppVersion` and an explicit `baseTemplate` (pin the template too for
+reproducibility). There is no shared scaffold cache in this initial implementation.
+The old implicit `create-expo-app@latest` behavior is deliberately removed.
+
+For `with-skill`, the adapter copies the package skill into the Claude skill
+layout and excludes `.evals`. For `without-skill`, it removes that package's skill
+at the same target; consumers remain responsible for any other skills/config
+present in their base fixture. Generic project setups do not require Expo or a
+skill directory.
+
+Migration from the unpublished `@expo/skill-eval-kit`:
+
+1. Change imports to `@expo/agent-eval-vitest` and wrap declarative setup with
+   `createExpoProject`, choosing a prepared base or explicit pinned scaffold.
+2. Replace the in-repo source alias with the installed package and use the
+   dependency-inline setting above.
+3. Keep the existing `agentEval(import.meta.url, options, checks)` call shape.
+
 Legacy `EXPO_SKILL_EVAL_TIMEOUT` (seconds), `EXPO_SKILL_EVAL_CONDITION`,
 `EXPO_SKILL_EVAL_DRY`, `EXPO_SKILL_EVAL_KEEP`, and `EXPO_SKILL_EVAL_MODEL` remain
 supported. Explicit configuration wins over environment values. Other timing
