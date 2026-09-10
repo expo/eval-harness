@@ -1,4 +1,4 @@
-const { readFileSync, readdirSync, writeFileSync } = require('node:fs');
+const { existsSync, readFileSync, readdirSync, writeFileSync } = require('node:fs');
 const { spawnSync } = require('node:child_process');
 
 const [command, ...args] = process.argv.slice(2);
@@ -7,7 +7,12 @@ const validFile = (name) => typeof name === 'string' && /^[a-zA-Z0-9_.-]+$/.test
 if (command === 'list' && args.length === 0) {
   console.log(readdirSync('.').join('\n'));
 } else if (command === 'read' && args.length === 1 && validFile(args[0])) {
-  process.stdout.write(readFileSync(args[0], 'utf8'));
+  if (!existsSync(args[0])) {
+    console.error(`No such file: ${args[0]}. Use list to discover the exact filenames.`);
+    process.exitCode = 1;
+  } else {
+    process.stdout.write(readFileSync(args[0], 'utf8'));
+  }
 } else if (command === 'write' && args.length === 2 && validFile(args[0])) {
   writeFileSync(args[0], args[1]);
   console.log(`Wrote ${args[0]}`);
@@ -21,6 +26,8 @@ if (command === 'list' && args.length === 0) {
   if (result.error) console.error(result.error.message);
   process.exitCode = result.status ?? 1;
 } else {
-  console.error('Commands: list | read <file> | write <file> <contents> | test');
+  console.error(
+    'Invalid arguments. Use ["list"], ["read", "filename"], ["write", "filename", "contents"], or ["test"].'
+  );
   process.exitCode = 2;
 }

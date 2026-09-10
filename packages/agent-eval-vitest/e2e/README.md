@@ -34,7 +34,8 @@ bun run --cwd packages/agent-eval-vitest test:e2e
 ```
 
 `OLLAMA_HOST` selects a different server. `OLLAMA_E2E_MODEL` overrides the model
-for local experiments. The defaults are `qwen3:4b`, temperature 0, seed 42. Thinking is enabled for diagnosis and code editing. The test allows twelve model turns,
+for local experiments. The defaults are `qwen3:4b`, temperature 0.6, seed 42. The temperature follows the [Qwen model guidance](https://huggingface.co/Qwen/Qwen3-4B#best-practices),
+which warns against greedy decoding in thinking mode. Thinking is enabled for diagnosis and code editing. The test allows twelve model turns,
 15 minutes per HTTP request, and 30 minutes for the full evaluation. Slow CPU
 inference can take several minutes; no live server means this explicit command
 fails rather than skipping silently.
