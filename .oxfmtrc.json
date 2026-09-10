@@ -10,6 +10,7 @@
     "**/dist/**",
     "**/.vitest-integration-*/**",
     "packages/skill-analyzer/tests/metrics.json",
-    "packages/skill-analyzer/tests/manifest.json"
+    "packages/skill-analyzer/tests/manifest.json",
+    "**/.eval-results/**"
   ]
 }

@@ -227,3 +227,10 @@ The smoke checks install it using npm and Bun with the `@expo` registry blocked,
 then run real Node/Vitest checks and strict NodeNext/Bundler type checks without
 `skipLibCheck`. The type checks include `ESNext.Disposable`, required by Vitest's
 spy declarations.
+
+## Live end-to-end coverage
+
+The opt-in `bun run test:e2e` command exercises a real Ollama model through Vitest,
+a fixture CLI, independent checks, cleanup, and saved evidence. See
+[end-to-end test guide](https://github.com/expo/eval-experiments/tree/main/packages/agent-eval-vitest/e2e) for local setup and the separate advisory GitHub
+Actions job. The default tests continue to run without live models.

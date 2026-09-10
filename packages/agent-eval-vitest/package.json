@@ -36,7 +36,8 @@
     "build": "bun run --cwd ../source-scan build && bun scripts/build.mts",
     "test": "bun test src/__tests__",
     "prepack": "bun run build",
-    "test:pack": "bun scripts/smoke-pack.mts && bun scripts/smoke-pack.mts bun"
+    "test:pack": "bun scripts/smoke-pack.mts && bun scripts/smoke-pack.mts bun",
+    "test:e2e": "bun run build && vitest run --config e2e/vitest.config.ts"
   },
   "dependencies": {
     "@babel/parser": "catalog:"
