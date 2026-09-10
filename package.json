@@ -7,16 +7,16 @@
     "test:ts": "bun run build && bun test eval_harness && bun run test:packages",
     "test:python": "PYTHONPATH=. uv run --group test python -m unittest discover -s eval_harness -p 'test_*.py'",
     "test:all": "bun run typecheck && bun run test:ts && bun run test:python",
-    "build": "bun run --cwd packages/source-scan build && bun run --cwd packages/agent-eval-vitest build",
-    "test:packages": "bun run --cwd packages/source-scan test && bun run --cwd packages/agent-eval-vitest test",
-    "test:pack": "bun run --cwd packages/agent-eval-vitest test:pack",
+    "build": "bun run --cwd packages/source-scan build && bun run --cwd packages/agent-eval-vitest build && bun run --cwd packages/skill-analyzer build",
+    "test:packages": "bun run --cwd packages/source-scan test && bun run --cwd packages/agent-eval-vitest test && bun run --cwd packages/skill-analyzer test",
+    "test:pack": "bun run --cwd packages/agent-eval-vitest test:pack && bun run --cwd packages/skill-analyzer test:pack",
     "postinstall": "bun run build",
     "format": "oxfmt --write 'packages/**' '.github/**' package.json tsconfig.json .oxfmtrc.json 'scripts/**/*.{ts,js,mjs,cjs}' --no-error-on-unmatched-pattern",
     "format:check": "oxfmt --check 'packages/**' '.github/**' package.json tsconfig.json .oxfmtrc.json 'scripts/**/*.{ts,js,mjs,cjs}' --no-error-on-unmatched-pattern"
   },
   "dependencies": {
     "tar": "^7.5.22",
-    "@expo/source-scan": "workspace:*"
+    "@expo/skill-analyzer": "workspace:*"
   },
   "devDependencies": {
     "@expo/config": "57.0.7",

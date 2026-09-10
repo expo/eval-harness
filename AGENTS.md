@@ -15,13 +15,15 @@ runner plus uploaded artifacts.
   and ordinary Vitest checks. Its default tests must use fake runners. Explicit
   `test:e2e` runs use real Ollama inference in the separate advisory GitHub Actions
   workflow. Keep task outcomes distinct from check counts.
+  `skill-analyzer/` owns the Bun skill analyzer and shared artifact materializer,
+  publishing TypeScript source and bundled check JSON. The old analyzer and
+  materializer paths remain compatibility shims; keep their CLI behavior.
   The kit bundles private source-scan JavaScript with Bun and its declarations
-  with rollup-plugin-dts. Source-scan is a dev dependency only; Babel and Vitest
-  stay external. Published runtime dependencies must not include source-scan.
-  Centralize shared external versions in the root catalog; keep dependency
-  declarations in their owning packages. Pack releases with `bun pm pack` so
-  no `catalog:` or `workspace:` protocols reach consumers.
-  Package exports point to compiled ESM and declarations under `build/`; run
+  with rollup-plugin-dts; source-scan is a dev dependency only. The analyzer
+  copies shared helpers into ignored `src/internal/source-scan/` and ships
+  them as TypeScript. Neither package has a runtime dependency on source-scan;
+  both declare `@babel/parser` directly, and the kit keeps Vitest external.
+  Source-scan and agent-eval-vitest exports point to compiled ESM and declarations under `build/`; run
   `bun install` (which builds the workspace foundation) before harness commands,
   and `bun run build` after editing package source. Keep publication paths in
   `exports` directly, without `publishConfig` remapping.
@@ -33,7 +35,8 @@ runner plus uploaded artifacts.
   iOS apps with `agent-device` and scores app-agnostic primitive test plans
   against a PRD. `prompts/prompt_agent.py` is its system prompt; `scripts/`
   holds `eval-ios-app.sh`.
-- `eval_harness/evaluator/skill_invocation/`: v0 skill-use analyzer package. It
+- `eval_harness/evaluator/skill_invocation/`: compatibility entrypoints and tests
+  for `packages/skill-analyzer/`. The v0 analyzer
   inspects authored app artifacts, authoring traces, static uptake checks, and
   optional evaluator outcomes. `scripts/` holds `eval-skill-use.sh`.
 - `eval_harness/utils/`: shared artifacts, iOS, shell, and telemetry helpers

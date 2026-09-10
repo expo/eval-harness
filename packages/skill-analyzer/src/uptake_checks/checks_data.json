@@ -1,0 +1,183 @@
+{
+  "_comment": "Lexical (regex, comment-stripped) and structural (path) checks. Syntax-tree checks now exist too, but are code-driven (see code_checks.ts, registered through registry.ts) rather than declared here -- route-graph checks still don't exist (needs its own research pass on Metro internals, see git history). Every check here is skill-agnostic; skill_map.json is the only file that says which skill(s) currently claim a given check. See SKILL_UPTAKE_COVERAGE_ANALYSIS.md (repo root, untracked) for the full-ecosystem gap analysis this file's expo-native-ui/expo-ui/expo-data-fetching/expo-dom/expo-tailwind-setup/eas-hosting/expo-app-clip checks and the expo-router/expo-project-structure gap-fill checks came from. Third review round: several negative/anti-pattern checks that used to live here (router_no_direct_react_navigation_import, native_ui_no_expo_av, native_ui_no_dimensions_get, native_ui_no_safe_area_view_from_react_native, expo_ui_no_host_from_subpackage, expo_ui_platform_specific_trees_not_in_app_dir, data_fetching_no_axios) moved to code_checks.ts so each can require an engagement precondition before a clean pass counts as uptake -- the declarative dispatch has no not_applicable concept, so a check needing conditional applicability must be code-driven (see code_checks.ts's module documentation).",
+  "checks": [
+    {
+      "id": "router_import",
+      "category": "lexical",
+      "kind": "import",
+      "target": "expo-router",
+      "description": "Imports from 'expo-router' at all"
+    },
+    {
+      "id": "router_navigation_api_used",
+      "category": "lexical",
+      "kind": "text_any",
+      "target": [
+        "<Link[\\s/>]", "<Redirect[\\s/>]", "useRouter\\(", "useLocalSearchParams\\(",
+        "useSegments\\(", "usePathname\\(", "useNavigation\\("
+      ],
+      "description": "Uses a real expo-router navigation API -- declarative (<Link>, <Redirect>) or imperative (useRouter/useLocalSearchParams/useSegments/usePathname/useNavigation) -- all are valid per the skill, not just the <Link> tag. Verified against a real authored app that legitimately uses only useRouter()."
+    },
+    {
+      "id": "router_navigator_jsx_tag",
+      "category": "lexical",
+      "kind": "text_any",
+      "target": ["<Stack[\\s/>]", "<Tabs[\\s/>]", "<NativeTabs[\\s/>]", "<Drawer[\\s/>]", "<Slot[\\s/>]"],
+      "description": "Uses a real Stack/Tabs/NativeTabs/Drawer/Slot JSX element, not a bare word match. Drawer confirmed necessary against a real wiki_reader app using expo-router/drawer -- a Stack/Tabs/NativeTabs-only list would have false-negatived on legitimate code."
+    },
+    {
+      "id": "router_app_dir_exists",
+      "category": "structural",
+      "kind": "path_exists",
+      "target": ["app", "src/app"],
+      "description": "app/ (or src/app/) directory exists"
+    },
+    {
+      "id": "router_has_index_route",
+      "category": "structural",
+      "kind": "path_exists",
+      "target": ["app/index.*", "app/**/index.*", "src/app/index.*", "src/app/**/index.*"],
+      "description": "At least one index route exists (proxy for 'the app always has a route matching /'). Known limitation: matches any index.* anywhere under app/, not specifically the root -- an app with only a nested index (e.g. app/settings/index.tsx) and no real root route would still pass. Verified correct on 2 real apps using route groups ((tabs)/index.tsx, (drawer)/index.tsx), since groups don't affect the URL path -- but this is a proxy, not a real route-graph check (deferred, see uptake_checks/README.md)."
+    },
+    {
+      "id": "router_has_layout_file",
+      "category": "structural",
+      "kind": "path_exists",
+      "target": ["app/**/_layout.*", "src/app/**/_layout.*"],
+      "description": "At least one _layout file exists -- the skill's rule: ALWAYS use _layout.tsx to define stacks"
+    },
+    {
+      "id": "router_no_colocated_non_route_files_in_app_dir",
+      "category": "structural",
+      "kind": "path_absent",
+      "target": [
+        "app/utils", "app/helpers", "app/constants", "app/hooks", "app/components", "app/context",
+        "app/lib", "app/services", "app/shared", "app/types",
+        "src/app/utils", "src/app/helpers", "src/app/constants", "src/app/hooks", "src/app/components", "src/app/context",
+        "src/app/lib", "src/app/services", "src/app/shared", "src/app/types"
+      ],
+      "description": "Anti-pattern the skill calls out by name: never co-locate components/types/utilities in the app directory. This is a denylist heuristic, not exhaustive -- it can miss the anti-pattern under an unlisted name, and could in principle false-positive if an app has a genuine *route* literally named one of these (not observed in any real app checked so far)."
+    },
+    {
+      "id": "project_structure_components_dir_exists",
+      "category": "structural",
+      "kind": "path_exists",
+      "target": ["components", "src/components"],
+      "description": "components/ (or src/components/) exists for reusable UI"
+    },
+    {
+      "id": "project_structure_no_separate_styles_files",
+      "category": "structural",
+      "kind": "path_absent",
+      "target": ["**/*.styles.ts", "**/*.styles.tsx", "**/*.styles.js"],
+      "description": "Anti-pattern: the skill says colocate StyleSheet.create in the component file, not a separate *.styles.ts file"
+    },
+    {
+      "id": "project_structure_no_dunder_tests_dir",
+      "category": "structural",
+      "kind": "path_absent",
+      "target": ["**/__tests__/**"],
+      "description": "Anti-pattern: the skill prefers colocated x.test.ts beside x.ts over a __tests__/ folder"
+    },
+    {
+      "id": "tsconfig_path_alias_configured",
+      "category": "structural",
+      "kind": "tsconfig_path_alias",
+      "target": "@/*",
+      "description": "Shared by expo-router and expo-project-structure: tsconfig.json (or jsconfig.json) compilerOptions.paths configures the '@/*' alias both skills prefer over relative imports."
+    },
+    {
+      "id": "router_kebab_case_filenames_in_app_dir",
+      "category": "structural",
+      "kind": "path_absent",
+      "target": [
+        "app/**/*[A-Z]*.tsx", "app/**/*[A-Z]*.ts", "app/**/*[A-Z]*.jsx", "app/**/*[A-Z]*.js",
+        "src/app/**/*[A-Z]*.tsx", "src/app/**/*[A-Z]*.ts", "src/app/**/*[A-Z]*.jsx", "src/app/**/*[A-Z]*.js"
+      ],
+      "description": "expo-router rule: kebab-case file names in app/, no special characters (which includes no uppercase letters). Route-group names like (tabs), dynamic segments like [id], and _layout/index are all lowercase already, so this only flags a genuine PascalCase/camelCase route filename."
+    },
+    {
+      "id": "router_no_illegal_group_only_file",
+      "category": "structural",
+      "kind": "path_absent",
+      "target": [
+        "app/**/(*)*.tsx", "app/**/(*)*.ts", "app/**/(*)*.jsx", "app/**/(*)*.js",
+        "src/app/**/(*)*.tsx", "src/app/**/(*)*.ts", "src/app/**/(*)*.jsx", "src/app/**/(*)*.js"
+      ],
+      "description": "expo-router rule: a route group can never be a file named (foo).tsx -- it must be a (foo)/index.tsx directory. Distinct from router_no_colocated_non_route_files_in_app_dir (that's about non-route files under a denylisted name, this is about the illegal group-as-file shape)."
+    },
+    {
+      "id": "router_not_found_route_exists",
+      "category": "structural",
+      "kind": "path_exists",
+      "target": ["app/+not-found.*", "src/app/+not-found.*"],
+      "description": "expo-router convention: a +not-found route for unmatched paths."
+    },
+    {
+      "id": "expo_ui_import_used",
+      "category": "lexical",
+      "kind": "text_any",
+      "target": [
+        "from ['\"]@expo/ui['\"]", "from ['\"]@expo/ui/swift-ui['\"]",
+        "from ['\"]@expo/ui/jetpack-compose['\"]", "from ['\"]@expo/ui/community/"
+      ],
+      "description": "Actually imports from @expo/ui (root, a platform-specific subpackage, or a community drop-in), not just declares it as a package.json dependency. A dependency-only check (an earlier version of this check) has a real loophole: an app can declare @expo/ui and never import or render anything from it, and still pass every expo-ui check, since the other two are absence checks -- confirmed live against both real hot_chocolate/wiki_reader apps, which declare the dependency but never import it anywhere in src/."
+    },
+    {
+      "id": "data_fetching_uses_fetch_or_query_lib",
+      "category": "lexical",
+      "kind": "text_any",
+      "target": ["fetch\\(", "from ['\"]@tanstack/react-query['\"]", "from ['\"]swr['\"]"],
+      "description": "expo-data-fetching rule: real network requests use fetch directly, or a proper data-fetching library (React Query, SWR) for anything non-trivial."
+    },
+    {
+      "id": "tailwind_nativewind_package_dependency",
+      "category": "structural",
+      "kind": "package_dependency",
+      "target": "nativewind",
+      "description": "expo-tailwind-setup rule: nativewind is a declared dependency."
+    },
+    {
+      "id": "tailwind_css_package_dependency",
+      "category": "structural",
+      "kind": "package_dependency",
+      "target": "tailwindcss",
+      "description": "expo-tailwind-setup rule: tailwindcss is a declared dependency."
+    },
+    {
+      "id": "tailwind_metro_config_uses_withnativewind",
+      "category": "lexical",
+      "kind": "text",
+      "target": "withNativewind\\(",
+      "description": "expo-tailwind-setup rule: metro.config.js must wrap its config with withNativewind(...)."
+    },
+    {
+      "id": "tailwind_postcss_uses_official_plugin",
+      "category": "lexical",
+      "kind": "text",
+      "target": "@tailwindcss/postcss",
+      "description": "expo-tailwind-setup rule: postcss.config.mjs uses the official @tailwindcss/postcss plugin. Checked as a text match rather than path_exists on postcss.config.mjs alone, since postcss.config.mjs is read as source (.mjs is a SOURCE_SUFFIXES extension) and this also confirms the right plugin, not just any postcss config file."
+    },
+    {
+      "id": "tailwind_global_css_exists",
+      "category": "structural",
+      "kind": "path_exists",
+      "target": ["src/global.css", "global.css"],
+      "description": "expo-tailwind-setup rule: a global.css importing the tailwind theme/preflight/utilities exists. Existence-only -- CSS file content isn't part of the source corpus any lexical check reads, so this can't confirm the actual @import lines."
+    },
+    {
+      "id": "app_clip_target_dir_exists",
+      "category": "structural",
+      "kind": "path_exists",
+      "target": ["targets/clip"],
+      "description": "expo-app-clip rule: an App Clip target is scaffolded at targets/clip/ via @bacons/apple-targets. Config-subset check only -- see SKILL_UPTAKE_COVERAGE_ANALYSIS.md for why the fuller app.json/AASA-content rules aren't checked here."
+    },
+    {
+      "id": "app_clip_aasa_file_exists",
+      "category": "structural",
+      "kind": "path_exists",
+      "target": ["public/.well-known/apple-app-site-association", "web/.well-known/apple-app-site-association"],
+      "description": "expo-app-clip rule: the Apple App Site Association file is hosted at .well-known/apple-app-site-association. Existence-only, not content-verified (needs its appclips/webcredentials/activitycontinuation blocks for real correctness, deferred)."
+    }
+  ]
+}

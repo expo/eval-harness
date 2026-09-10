@@ -1,3 +1,2 @@
-// Keep a package-facing entrypoint while registry.ts makes code-check
-// registration unavoidable even for callers that import the registry directly.
-export * from "./registry.ts";
+// Compatibility import; implementation lives in the published package.
+export * from "@expo/skill-analyzer/uptake_checks/index";
