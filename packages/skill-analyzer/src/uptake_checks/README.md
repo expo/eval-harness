@@ -4,13 +4,13 @@ Answers "did the authored app actually follow this skill's guidance," as a casca
 
 ## Check cascade
 
-| Tier | Answers | Implementation |
-|---|---|---|
-| Trigger detection | Was the skill invoked at all, per the agent's own trace? | `trigger.ts` |
-| Lexical | Regex, comment-stripped source scan (`text`, `text_any`, `text_absent`, `import`) | `checks_data.json` |
-| Structural | Filesystem shape (`path_exists`, `path_absent`, `package_dependency`) | `checks_data.json` |
-| Syntax-tree | Real AST parsing, for rules a regex genuinely can't verify | `code_checks.ts`, `../build_health/node_parser.ts` |
-| Route-graph | Real route graph | not built yet |
+| Tier              | Answers                                                                           | Implementation                                     |
+| ----------------- | --------------------------------------------------------------------------------- | -------------------------------------------------- |
+| Trigger detection | Was the skill invoked at all, per the agent's own trace?                          | `trigger.ts`                                       |
+| Lexical           | Regex, comment-stripped source scan (`text`, `text_any`, `text_absent`, `import`) | `checks_data.json`                                 |
+| Structural        | Filesystem shape (`path_exists`, `path_absent`, `package_dependency`)             | `checks_data.json`                                 |
+| Syntax-tree       | Real AST parsing, for rules a regex genuinely can't verify                        | `code_checks.ts`, `../build_health/node_parser.ts` |
+| Route-graph       | Real route graph                                                                  | not built yet                                      |
 
 Trigger detection isn't skill-content-specific — it's still "was this skill's guidance exercised," just answered from the trace instead of the source.
 
@@ -22,12 +22,12 @@ Not covered: native build + simulator + test-plan e2e (that's the existing `eval
 
 ## Check result status
 
-| Status | Meaning | Counts toward `uptake_rate`? |
-|---|---|---|
-| `passed` | check ran, no violation found | yes |
-| `failed` | check ran, found a violation | yes |
-| `not_applicable` | the check's precondition doesn't hold for this app (e.g. a rule about API routes when the app has none) | no |
-| `unavailable` | evidence genuinely couldn't be collected (e.g. the AST parser couldn't run) | no |
+| Status           | Meaning                                                                                                 | Counts toward `uptake_rate`? |
+| ---------------- | ------------------------------------------------------------------------------------------------------- | ---------------------------- |
+| `passed`         | check ran, no violation found                                                                           | yes                          |
+| `failed`         | check ran, found a violation                                                                            | yes                          |
+| `not_applicable` | the check's precondition doesn't hold for this app (e.g. a rule about API routes when the app has none) | no                           |
+| `unavailable`    | evidence genuinely couldn't be collected (e.g. the AST parser couldn't run)                             | no                           |
 
 Only code-driven checks (`code_checks.ts`) can return `not_applicable`/`unavailable` — the generic declarative dispatch (`checks_data.json`'s `import`/`text`/`text_any`/`text_absent`/`path_exists`/`path_absent`/`package_dependency`/`tsconfig_path_alias` kinds) always answers a global "does any file match" question with no conditional precondition, so it only ever produces `passed`/`failed`. `hosting_api_routes_use_typescript` and `data_fetching_expo_public_env_prefix` are code-driven specifically to get a `not_applicable` path (no `+api` routes / no client-side env var reads, respectively).
 
@@ -39,18 +39,18 @@ Every result (all four statuses) stays in the per-skill `checks` list the HTML r
 
 ### Engagement gating for negative checks
 
-A `text_absent`/`path_absent` check (or its code-driven equivalent) always reads `passed` when its forbidden pattern is absent — including when the app never engaged with that skill at all, which is absence of usage, not evidence of correct usage. A *failing* negative check never needs gating: finding the forbidden pattern is itself proof the app touched that area. The following require their own positive engagement signal before a clean pass counts as real uptake, otherwise `not_applicable`:
+A `text_absent`/`path_absent` check (or its code-driven equivalent) always reads `passed` when its forbidden pattern is absent — including when the app never engaged with that skill at all, which is absence of usage, not evidence of correct usage. A _failing_ negative check never needs gating: finding the forbidden pattern is itself proof the app touched that area. The following require their own positive engagement signal before a clean pass counts as real uptake, otherwise `not_applicable`:
 
-| Check | Requires (else `not_applicable`) |
-|---|---|
-| `expo_ui_no_host_from_subpackage` | an `@expo/ui` import |
-| `expo_ui_platform_specific_trees_not_in_app_dir` | an `@expo/ui` import |
-| `data_fetching_no_axios` | observable fetch/query-lib usage |
-| `dom_layout_excludes_use_dom` | a confirmed real `'use dom'` directive |
-| `native_ui_no_expo_av` | expo-audio/expo-video usage |
-| `native_ui_no_dimensions_get` | `useWindowDimensions()` usage |
-| `native_ui_no_safe_area_view_from_react_native` | `react-native-safe-area-context` usage |
-| `router_no_direct_react_navigation_import` | an `expo-router` import |
+| Check                                            | Requires (else `not_applicable`)       |
+| ------------------------------------------------ | -------------------------------------- |
+| `expo_ui_no_host_from_subpackage`                | an `@expo/ui` import                   |
+| `expo_ui_platform_specific_trees_not_in_app_dir` | an `@expo/ui` import                   |
+| `data_fetching_no_axios`                         | observable fetch/query-lib usage       |
+| `dom_layout_excludes_use_dom`                    | a confirmed real `'use dom'` directive |
+| `native_ui_no_expo_av`                           | expo-audio/expo-video usage            |
+| `native_ui_no_dimensions_get`                    | `useWindowDimensions()` usage          |
+| `native_ui_no_safe_area_view_from_react_native`  | `react-native-safe-area-context` usage |
+| `router_no_direct_react_navigation_import`       | an `expo-router` import                |
 
 Each expo-native-ui anti-pattern check gates on its OWN feature-specific replacement rather than a shared skill-wide signal — using `react-native-safe-area-context` isn't evidence the app made a correct media or dimensions choice, so a shared signal would activate unrelated checks. expo-native-ui also has no single skill-wide positive check: the skill is far broader than these three anti-patterns (semantic colors, scroll-view insets, SF Symbols, haptics, animations, and more), and an app can follow it well while never touching any of these specific features — there's no honest single "did this app use expo-native-ui" signal today, only per-feature ones.
 
@@ -58,16 +58,16 @@ Each expo-native-ui anti-pattern check gates on its OWN feature-specific replace
 
 ## Design: checks are not owned by skills
 
-Every check in `checks_data.json` verifies one durable, skill-agnostic fact about the code (e.g. "does `app/` exist," "is `<Link>` or `useRouter()` used") — it has no notion of which skill(s) care about it. `skill_map.json` is the *only* file that says "skill X currently claims checks [A, B, C]."
+Every check in `checks_data.json` verifies one durable, skill-agnostic fact about the code (e.g. "does `app/` exist," "is `<Link>` or `useRouter()` used") — it has no notion of which skill(s) care about it. `skill_map.json` is the _only_ file that says "skill X currently claims checks [A, B, C]."
 
 A skill can be renamed, merged, or split later by editing `skill_map.json` alone — the checks themselves don't move, and a check can be shared across multiple skills (e.g. `router_app_dir_exists` is claimed by both `expo-router` and `expo-project-structure`). Sharing isn't automatic: a shared check should only be claimed by a skill if it can't otherwise read as a false positive for that skill's own engagement (see `router_no_direct_react_navigation_import` above).
 
 ## Which skills have checks
 
-| | Count |
-|---|---|
-| Skills under `plugins/expo/skills/` | 21 |
-| Mapped in `skill_map.json` | 9 |
+|                                     | Count |
+| ----------------------------------- | ----- |
+| Skills under `plugins/expo/skills/` | 21    |
+| Mapped in `skill_map.json`          | 9     |
 
 Mapped: `expo-router`, `expo-project-structure`, `expo-native-ui`, `expo-ui`, `expo-data-fetching`, `expo-dom`, `expo-tailwind-setup`, `eas-hosting`, `expo-app-clip` (config subset only).
 
@@ -77,13 +77,13 @@ The other 12 are deliberately unmapped: most because their guidance is a CLI/clo
 
 ## Files
 
-| File | Purpose |
-|---|---|
-| `checks_data.json` | Lexical + structural checks (declarative), each tagged with a `category`. Only ever produces `passed`/`failed`. |
-| `skill_map.json` | skill id → `[check id, ...]` |
-| `registry.ts` | Loads both, runs checks, defines `CheckResult`'s status model, and exposes registration for code-driven checks |
-| `code_checks.ts` | Code-driven checks: per-file-subset filtering, real AST parsing, or conditional (`not_applicable`-capable) rules the generic declarative dispatch can't express |
-| `trigger.ts` | Trigger detection, trace-based + recall/precision scoring against `dataset/prd_skills.json` |
+| File               | Purpose                                                                                                                                                         |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `checks_data.json` | Lexical + structural checks (declarative), each tagged with a `category`. Only ever produces `passed`/`failed`.                                                 |
+| `skill_map.json`   | skill id → `[check id, ...]`                                                                                                                                    |
+| `registry.ts`      | Loads both, runs checks, defines `CheckResult`'s status model, and exposes registration for code-driven checks                                                  |
+| `code_checks.ts`   | Code-driven checks: per-file-subset filtering, real AST parsing, or conditional (`not_applicable`-capable) rules the generic declarative dispatch can't express |
+| `trigger.ts`       | Trigger detection, trace-based + recall/precision scoring against `dataset/prd_skills.json`                                                                     |
 
 ## Contributor guide: add coverage for another skill
 
@@ -106,9 +106,9 @@ Add each observable rule from the skill to the `"checks"` array in
 
 Available kinds:
 
-| Category | Kinds |
-| --- | --- |
-| `lexical` | `import`, `text`, `text_any`, `text_absent` |
+| Category     | Kinds                                                                     |
+| ------------ | ------------------------------------------------------------------------- |
+| `lexical`    | `import`, `text`, `text_any`, `text_absent`                               |
 | `structural` | `path_exists`, `path_absent`, `package_dependency`, `tsconfig_path_alias` |
 
 `text` targets are JavaScript regular expressions passed to `new RegExp()`.
@@ -126,9 +126,7 @@ Add the canonical skill id and its check ids to `skill_map.json`:
 
 ```json
 {
-  "expo-example-skill": [
-    "example_api_used"
-  ]
+  "expo-example-skill": ["example_api_used"]
 }
 ```
 
@@ -164,10 +162,7 @@ The checks are then assigned to the skill in `skill_map.json`:
 
 ```json
 {
-  "expo-router": [
-    "router_import",
-    "router_app_dir_exists"
-  ]
+  "expo-router": ["router_import", "router_app_dir_exists"]
 }
 ```
 

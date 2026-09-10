@@ -52,8 +52,5 @@
     "hosting_api_routes_use_typescript",
     "hosting_no_banned_node_imports_in_api_routes"
   ],
-  "expo-app-clip": [
-    "app_clip_target_dir_exists",
-    "app_clip_aasa_file_exists"
-  ]
+  "expo-app-clip": ["app_clip_target_dir_exists", "app_clip_aasa_file_exists"]
 }

@@ -1,15 +1,11 @@
 {
   "extends": "../../tsconfig.json",
   "compilerOptions": {
-    "lib": [
-      "ES2023"
-    ],
+    "lib": ["ES2023"],
     "target": "ES2022",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
-    "types": [
-      "bun"
-    ],
+    "types": ["bun"],
     "noEmit": false,
     "rewriteRelativeImportExtensions": true,
     "declaration": true,
@@ -17,8 +13,6 @@
     "outDir": "build/.types",
     "emitDeclarationOnly": true
   },
-  "include": [
-    "src/**/*.ts"
-  ],
+  "include": ["src/**/*.ts"],
   "exclude": []
 }

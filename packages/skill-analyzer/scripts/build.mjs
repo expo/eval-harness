@@ -7,9 +7,11 @@ import { dts } from 'rollup-plugin-dts';
 rmSync('build', { recursive: true, force: true });
 execFileSync('tsc', ['-p', 'tsconfig.build.json'], { stdio: 'inherit' });
 const manifest = JSON.parse(readFileSync('package.json', 'utf8'));
-const entrypoints = Object.values(manifest.exports).map(entry => entry.import.slice('./build/'.length, -'.js'.length));
+const entrypoints = Object.values(manifest.exports).map((entry) =>
+  entry.import.slice('./build/'.length, -'.js'.length)
+);
 const result = await Bun.build({
-  entrypoints: [...entrypoints, 'bin'].map(name => `./src/${name}.ts`),
+  entrypoints: [...entrypoints, 'bin'].map((name) => `./src/${name}.ts`),
   root: './src',
   outdir: './build',
   target: 'bun',
@@ -22,9 +24,12 @@ if (!result.success) throw new AggregateError(result.logs, 'JavaScript bundling 
 
 // Bundle the private workspace's declarations too; public dependencies stay external.
 const declarations = await rollup({
-  input: Object.fromEntries(entrypoints.map(name => [name, `build/.types/${name}.d.ts`])),
-  external: id => !id.startsWith('.') && !path.isAbsolute(id)
-    && id !== '@expo/source-scan' && !id.startsWith('@expo/source-scan/'),
+  input: Object.fromEntries(entrypoints.map((name) => [name, `build/.types/${name}.d.ts`])),
+  external: (id) =>
+    !id.startsWith('.') &&
+    !path.isAbsolute(id) &&
+    id !== '@expo/source-scan' &&
+    !id.startsWith('@expo/source-scan/'),
   plugins: [dts({ respectExternal: true, tsconfig: './tsconfig.build.json' })],
   onwarn(warning, warn) {
     if (warning.code === 'UNRESOLVED_IMPORT') throw new Error(warning.message);
@@ -32,7 +37,12 @@ const declarations = await rollup({
   },
 });
 try {
-  await declarations.write({ dir: 'build', format: 'es', entryFileNames: '[name].d.ts', chunkFileNames: 'types-[hash].d.ts' });
+  await declarations.write({
+    dir: 'build',
+    format: 'es',
+    entryFileNames: '[name].d.ts',
+    chunkFileNames: 'types-[hash].d.ts',
+  });
 } finally {
   await declarations.close();
   rmSync('build/.types', { recursive: true, force: true });

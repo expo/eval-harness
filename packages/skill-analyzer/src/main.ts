@@ -1,13 +1,13 @@
 #!/usr/bin/env bun
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 
-import { analyzeArtifacts, printSummary } from "./analysis.ts";
-import { unpackArtifact } from "./utils.ts";
+import { analyzeArtifacts, printSummary } from './analysis.ts';
+import { unpackArtifact } from './utils.ts';
 
 const PACKAGE_DIR = import.meta.dir;
-export const defaultChecksDirectory = path.resolve(PACKAGE_DIR, "uptake_checks");
+export const defaultChecksDirectory = path.resolve(PACKAGE_DIR, 'uptake_checks');
 
 const TOP_LEVEL_HELP = `usage: main.ts [-h] {analyze-artifacts} ...
 
@@ -49,30 +49,30 @@ type AnalyzeOptions = {
   checksDir: string;
 };
 
-export async function runCli(argv: string[], defaults: { prdSkills?: string } = {}): Promise<number> {
-  if (argv.length === 0) return usageError("the following arguments are required: cmd");
+export async function runCli(
+  argv: string[],
+  defaults: { prdSkills?: string } = {}
+): Promise<number> {
+  if (argv.length === 0) return usageError('the following arguments are required: cmd');
   const command = argv[0];
-  if (command === "-h" || command === "--help") {
+  if (command === '-h' || command === '--help') {
     process.stdout.write(TOP_LEVEL_HELP);
     return 0;
   }
-  if (command !== "analyze-artifacts") {
+  if (command !== 'analyze-artifacts') {
     return usageError(
-      `argument cmd: invalid choice: '${command ?? ""}' (choose from 'analyze-artifacts')`,
+      `argument cmd: invalid choice: '${command ?? ''}' (choose from 'analyze-artifacts')`
     );
   }
   const parsed = parseAnalyzeOptions(argv.slice(1), defaults);
-  if (typeof parsed === "number") return parsed;
-  const scratch = mkdtempSync(path.join(tmpdir(), "expo-skill-eval-"));
+  if (typeof parsed === 'number') return parsed;
+  const scratch = mkdtempSync(path.join(tmpdir(), 'expo-skill-eval-'));
   try {
-    const authored = unpackArtifact(
-      parsed.authoredArtifact,
-      path.join(scratch, "authored"),
-    );
-    const evalArtifact = parsed.evalArtifact === null ||
-        ["undefined", "null", ""].includes(parsed.evalArtifact)
-      ? null
-      : unpackArtifact(parsed.evalArtifact, path.join(scratch, "eval"));
+    const authored = unpackArtifact(parsed.authoredArtifact, path.join(scratch, 'authored'));
+    const evalArtifact =
+      parsed.evalArtifact === null || ['undefined', 'null', ''].includes(parsed.evalArtifact)
+        ? null
+        : unpackArtifact(parsed.evalArtifact, path.join(scratch, 'eval'));
     const payload = await analyzeArtifacts({
       authoredArtifact: authored,
       evalArtifact,
@@ -92,30 +92,39 @@ export async function runCli(argv: string[], defaults: { prdSkills?: string } = 
   }
 }
 
-function parseAnalyzeOptions(argv: string[], defaults: { prdSkills?: string }): AnalyzeOptions | number {
+function parseAnalyzeOptions(
+  argv: string[],
+  defaults: { prdSkills?: string }
+): AnalyzeOptions | number {
   const fail = (message: string): 2 => analyzeUsageError(message, defaults);
-  if (argv.includes("-h") || argv.includes("--help")) {
-    process.stdout.write(defaults.prdSkills === undefined ? ANALYZE_HELP : ANALYZE_HELP
-      .replace("--out-dir OUT_DIR --prd-skills PRD_SKILLS", "--out-dir OUT_DIR [--prd-skills PRD_SKILLS]")
-      .replace("(required; no repository dataset is bundled)", "(default: dataset/prd_skills.json)"));
+  if (argv.includes('-h') || argv.includes('--help')) {
+    process.stdout.write(
+      defaults.prdSkills === undefined
+        ? ANALYZE_HELP
+        : ANALYZE_HELP.replace(
+            '--out-dir OUT_DIR --prd-skills PRD_SKILLS',
+            '--out-dir OUT_DIR [--prd-skills PRD_SKILLS]'
+          ).replace(
+            '(required; no repository dataset is bundled)',
+            '(default: dataset/prd_skills.json)'
+          )
+    );
     return 0;
   }
   const values = new Map<string, string>();
   const known = new Set([
-    "--authored-artifact",
-    "--eval-artifact",
-    "--scenario",
-    "--out-dir",
-    "--prd-skills",
-    "--checks-dir",
+    '--authored-artifact',
+    '--eval-artifact',
+    '--scenario',
+    '--out-dir',
+    '--prd-skills',
+    '--checks-dir',
   ]);
   for (let index = 0; index < argv.length; index += 1) {
-    const token = argv[index] ?? "";
-    const equal = token.indexOf("=");
+    const token = argv[index] ?? '';
+    const equal = token.indexOf('=');
     const rawOption = equal === -1 ? token : token.slice(0, equal);
-    const matches = [...known].filter((candidate) =>
-      candidate.startsWith(rawOption)
-    );
+    const matches = [...known].filter((candidate) => candidate.startsWith(rawOption));
     const option = known.has(rawOption)
       ? rawOption
       : matches.length === 1
@@ -123,33 +132,33 @@ function parseAnalyzeOptions(argv: string[], defaults: { prdSkills?: string }): 
         : null;
     if (option === null) {
       if (matches.length > 1) {
-        return fail(
-          `ambiguous option: ${rawOption} could match ${matches.join(", ")}`,
-        );
+        return fail(`ambiguous option: ${rawOption} could match ${matches.join(', ')}`);
       }
       return fail(`unrecognized arguments: ${token}`);
     }
     const value = equal === -1 ? argv[index + 1] : token.slice(equal + 1);
-    if (value === undefined || (equal === -1 && value.startsWith("--"))) {
+    if (value === undefined || (equal === -1 && value.startsWith('--'))) {
       return fail(`argument ${option}: expected one argument`);
     }
     values.set(option, value);
     if (equal === -1) index += 1;
   }
-  const missing = ["--authored-artifact", "--scenario", "--out-dir", ...(defaults.prdSkills === undefined ? ["--prd-skills"] : [])]
-    .filter((option) => !values.has(option));
+  const missing = [
+    '--authored-artifact',
+    '--scenario',
+    '--out-dir',
+    ...(defaults.prdSkills === undefined ? ['--prd-skills'] : []),
+  ].filter((option) => !values.has(option));
   if (missing.length > 0) {
-    return fail(
-      `the following arguments are required: ${missing.join(", ")}`,
-    );
+    return fail(`the following arguments are required: ${missing.join(', ')}`);
   }
   return {
-    authoredArtifact: values.get("--authored-artifact") ?? "",
-    evalArtifact: values.get("--eval-artifact") ?? null,
-    scenario: values.get("--scenario") ?? "",
-    outDir: values.get("--out-dir") ?? "",
-    prdSkills: values.get("--prd-skills") ?? defaults.prdSkills ?? "",
-    checksDir: values.get("--checks-dir") ?? defaultChecksDirectory,
+    authoredArtifact: values.get('--authored-artifact') ?? '',
+    evalArtifact: values.get('--eval-artifact') ?? null,
+    scenario: values.get('--scenario') ?? '',
+    outDir: values.get('--out-dir') ?? '',
+    prdSkills: values.get('--prd-skills') ?? defaults.prdSkills ?? '',
+    checksDir: values.get('--checks-dir') ?? defaultChecksDirectory,
   };
 }
 
@@ -159,13 +168,14 @@ function usageError(message: string): 2 {
 }
 
 function analyzeUsageError(message: string, defaults: { prdSkills?: string }): 2 {
-  const prdUsage = defaults.prdSkills === undefined ? "--prd-skills PRD_SKILLS" : "[--prd-skills PRD_SKILLS]";
+  const prdUsage =
+    defaults.prdSkills === undefined ? '--prd-skills PRD_SKILLS' : '[--prd-skills PRD_SKILLS]';
   process.stderr.write(
     `usage: main.ts analyze-artifacts [-h] --authored-artifact AUTHORED_ARTIFACT\n` +
       `                                 [--eval-artifact EVAL_ARTIFACT] --scenario SCENARIO\n` +
       `                                 --out-dir OUT_DIR ${prdUsage}\n` +
       `                                 [--checks-dir CHECKS_DIR]\n` +
-      `main.ts analyze-artifacts: error: ${message}\n`,
+      `main.ts analyze-artifacts: error: ${message}\n`
   );
   return 2;
 }
