@@ -19,23 +19,27 @@ const agentEval = createAgentEval({
   artifactsDir: '.eval-results',
 });
 
-agentEval(import.meta.url, {
-  prompt: 'The app still shows the old screen after my edit. Refresh it.',
-  projectSetup: {
-    async prepareAsync({ root, signal, onCleanup }) {
-      const fixture = await startReloadFixture(root, signal);
-      onCleanup(() => fixture.stop());
-      return fixture;
+agentEval(
+  import.meta.url,
+  {
+    prompt: 'The app still shows the old screen after my edit. Refresh it.',
+    projectSetup: {
+      async prepareAsync({ root, signal, onCleanup }) {
+        const fixture = await startReloadFixture(root, signal);
+        onCleanup(() => fixture.stop());
+        return fixture;
+      },
     },
   },
-}, (check) => {
-  check('runtime receives the reload', (_workspace, { fixture }) => {
-    expect(fixture.reloadRequests()).toHaveLength(1);
-  });
-  check('agent explains the result', (_workspace, { execution }) => {
-    expect(execution.finalAnswer).toContain('refreshed');
-  });
-});
+  (check) => {
+    check('runtime receives the reload', (_workspace, { fixture }) => {
+      expect(fixture.reloadRequests()).toHaveLength(1);
+    });
+    check('agent explains the result', (_workspace, { execution }) => {
+      expect(execution.finalAnswer).toContain('refreshed');
+    });
+  }
+);
 ```
 
 Fixture and runner implementations belong to the consumer. The return type from
