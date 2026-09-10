@@ -126,8 +126,7 @@ process trees are not covered by that guarantee.
 ## Ollama command runner
 
 `ollamaRunner` runs a bounded JSON command loop against Ollama's
-[`/api/chat` API](https://docs.ollama.com/api/chat). It follows expo-agent-cli's
-local eval protocol: the model emits `{"run": ["command", "arg"]}` or
+[`/api/chat` API](https://docs.ollama.com/api/chat). The model emits `{"run": ["command", "arg"]}` or
 `{"done": true, "summary": "..."}`. This uses JSON output, not native Ollama tool
 calling. The caller supplies the command executor and describes its CLI in the
 system prompt; the runner never implicitly exposes a shell or reads workspace files.
@@ -148,12 +147,9 @@ const runner = ollamaRunner({
 const agentEval = createAgentEval({ runner, timeoutMs: 20 * 60_000 });
 ```
 
-`executeAgentCli` above is consumer-owned. For expo-agent-cli, adapt its existing
-`runCli` function to forward cancellation and preserve scenario environment
-variables; retain its fixed CLI executable and stdout/stderr capture. Use the
-existing command-summary prompt without its old JSON-output instructions (the
-runner adds those). Keep scenario grading in Vitest checks. This PR does not
-migrate expo-agent-cli or change its tier selection/cache behavior.
+`executeAgentCli` above is consumer-owned: validate arguments, select the executable,
+forward cancellation, and capture stdout/stderr. Describe available commands in the
+system prompt; the runner adds JSON action instructions. Put grading in Vitest checks.
 
 The host defaults to `OLLAMA_HOST` or `http://127.0.0.1:11434`; `host` overrides it.
 The model is always explicit. The runner does not start Ollama or pull models.
