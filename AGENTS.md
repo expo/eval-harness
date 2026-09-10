@@ -11,8 +11,15 @@ runner plus uploaded artifacts.
 
 - `packages/`: Bun workspaces. `source-scan/` is private and supplies the shared
   parser, AST walk, and lexical comment stripper used by the skill analyzer.
-  Shared versions live in the root catalog; declare actual dependencies in each
-  package with `catalog:` and use `workspace:*` for internal packages.
+  `agent-eval-vitest/` adds provider-injectable agent runs, fixture lifecycle,
+  and ordinary Vitest checks. Its tests must use fake runners, never live model
+  calls by default. Keep task outcomes distinct from check counts.
+  The kit bundles private source-scan JavaScript with Bun and its declarations
+  with rollup-plugin-dts. Source-scan is a dev dependency only; Babel and Vitest
+  stay external. Published runtime dependencies must not include source-scan.
+  Centralize shared external versions in the root catalog; keep dependency
+  declarations in their owning packages. Pack releases with `bun pm pack` so
+  no `catalog:` or `workspace:` protocols reach consumers.
   Package exports point to compiled ESM and declarations under `build/`; run
   `bun install` (which builds the workspace foundation) before harness commands,
   and `bun run build` after editing package source. Keep publication paths in
@@ -216,6 +223,7 @@ Run the canonical local type-check and test suite after changing harness code:
 
 ```bash
 bun run test:all
+bun run test:pack # clean npm consumer: ESM, declarations, public exports and real Vitest
 ```
 
 Run focused and configuration checks when working in the corresponding area:

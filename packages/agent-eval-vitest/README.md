@@ -1,0 +1,169 @@
+# @expo/agent-eval-vitest
+
+Agent evaluations expressed as colocated `.eval.ts` cases. Each case prepares a
+project, runs an agent once, then reports independent named checks through Vitest.
+This package is being prepared for its first npm release; the examples below use
+the intended registry name. It requires Node >=22.17 and Vitest >=4.0.18 <5.
+
+## A case with a custom runner
+
+```ts
+// refresh.eval.ts
+import { createAgentEval, expect } from '@expo/agent-eval-vitest';
+import { myToolLoop } from './runner';
+import { startReloadFixture } from './fixtures';
+
+const agentEval = createAgentEval({
+  runner: myToolLoop,
+  timeoutMs: 900_000,
+  artifactsDir: '.eval-results',
+});
+
+agentEval(import.meta.url, {
+  prompt: 'The app still shows the old screen after my edit. Refresh it.',
+  projectSetup: {
+    async prepareAsync({ root, signal, onCleanup }) {
+      const fixture = await startReloadFixture(root, signal);
+      onCleanup(() => fixture.stop());
+      return fixture;
+    },
+  },
+}, (check) => {
+  check('runtime receives the reload', (_workspace, { fixture }) => {
+    expect(fixture.reloadRequests()).toHaveLength(1);
+  });
+  check('agent explains the result', (_workspace, { execution }) => {
+    expect(execution.finalAnswer).toContain('refreshed');
+  });
+});
+```
+
+Fixture and runner implementations belong to the consumer. The return type from
+`prepareAsync` flows into check callbacks. Register cleanup immediately after
+acquiring each resource, including resources created before setup completes.
+
+Use a dedicated Vitest config so costly agent runs are separate from unit tests:
+
+```ts
+// vitest.evals.config.ts
+import { defineConfig } from 'vitest/config';
+
+export default defineConfig({
+  test: {
+    include: ['**/*.eval.ts'],
+    // The package imports Vitest's test/hook API; keep the same module context.
+    server: { deps: { inline: ['@expo/agent-eval-vitest'] } },
+    maxWorkers: 1,
+  },
+});
+```
+
+```sh
+npx vitest run --config vitest.evals.config.ts
+```
+
+`agentEval.skip(...)`, `agentEval.only(...)`, normal name filtering, ordinary
+Vitest assertions, and `skip(note)` inside a check are supported. A skipped or
+fully filtered case does not start an agent. No custom reporter is required.
+
+## Runner and lifecycle contract
+
+An `AgentRunner` receives `{ prompt, root, artifactsDir, signal }` and returns:
+
+```ts
+{
+  finalAnswer: string | null,
+  toolCalls: Array<{ id: string; name: string; input: unknown;
+                    result?: unknown; error?: string }> | null,
+  endReason: 'completed' | 'failed' | 'cancelled' | 'timeout' | 'budget-exhausted',
+  artifacts: string[], // paths relative to artifactsDir
+  metadata?: Record<string, unknown>,
+}
+```
+
+Use `null` for unavailable evidence, rather than claiming no tools were called.
+Keep evidence/metadata JSON-serializable. Write raw transcripts into `artifactsDir`,
+not the disposable workspace. Provider/tool-specific data can remain in `input`,
+`result`, and metadata; a check must understand its runner's tool vocabulary.
+
+Reject for infrastructure failures (missing executable, invalid protocol, etc.).
+Return execution evidence when an agent made an unsuccessful attempt. A tool's
+nonzero exit alone does not imply infrastructure failure. Checks still run on
+unsuccessful attempts, but a non-completed execution makes the Vitest suite fail
+even if preservation checks pass.
+
+Setup and runners must honor `signal`, stop their resources, and settle on abort.
+The kit imposes its own deadline, waits a bounded interval for cancellation, then
+runs registered cleanup in reverse order. Cleanup also runs after partial setup
+failure and runner failure. Disposers share a total `cleanupTimeoutMs` budget (default 5s);
+subsequent disposers are still invoked if one fails. Cleanup commands registered
+through `runAsync` receive a fresh signal bounded by that cleanup deadline. JavaScript cannot forcibly terminate
+an arbitrary injected function that ignores cancellation. Checks should observe
+completed evidence and avoid starting unregistered asynchronous work.
+
+The default `agentEval` uses `claudeRunner()`, exported separately from
+`@expo/agent-eval-vitest/claude`. It runs the installed Claude Code CLI with
+`--dangerously-skip-permissions` in the temporary workspace. CLI authentication
+must already be configured. Configure the model with `claudeRunner({ model })`;
+otherwise the legacy model environment override or the CLI configuration applies.
+The adapter records separate stdout JSONL and stderr artifacts, normalizes tool
+calls/results, and waits for process termination and artifact flushing. This
+release targets POSIX hosts for subprocess-tree cancellation; Windows child
+process trees are not covered by that guarantee.
+
+## Workspace helpers
+
+Workspace helpers (`read`, `exists`, `sourceFiles`, `source`, `packageJson`, `glob`)
+and workspace-first named check callbacks keep their familiar shape.
+`loadAstSupport()` uses the shipped scanner dependency; a broken parser install
+throws instead of silently skipping AST checks.
+
+Legacy `EXPO_SKILL_EVAL_TIMEOUT` (seconds), `EXPO_SKILL_EVAL_CONDITION`,
+`EXPO_SKILL_EVAL_DRY`, `EXPO_SKILL_EVAL_KEEP`, and `EXPO_SKILL_EVAL_MODEL` remain
+supported. Explicit configuration wins over environment values. Other timing
+options use milliseconds.
+
+## Results and verification
+
+Every executed case writes `.eval-results/<case>-<attempt>/result.json` with
+`schemaVersion: 1`, task status, check counts/results, execution evidence, prompt,
+condition, timing, and errors. Status distinguishes `passed`, `failed`, `error`,
+`ungraded` (no passing checks), and `dry-run`. Dry-run seeds are never labeled as
+agent success. Agent/provider metadata is available when supplied by the runner.
+A dedicated aggregate reporter and fixture-content fingerprinting remain follow-up
+work; this result format is separate from the existing EAS producer manifests.
+
+Failed checks do not prevent later checks. Check retries/repeats are disabled;
+a Vitest watch rerun starts a new case attempt. `keepWorkspace` retains files for
+inspection but still stops registered resources. Transcripts and result files
+remain available after workspace deletion; manage their retention in consumer CI.
+
+```sh
+bun run build
+bun run --cwd packages/agent-eval-vitest test
+bun run --cwd packages/agent-eval-vitest test:pack
+```
+
+Tests use fake runners, fake CLI executables, fixture resources, and actual Vitest
+subprocesses. The packed smoke test installs the tarball with npm and Bun in clean
+projects outside the repo, runs Vitest under Node, and checks public exports
+and TypeScript inference. It needs registry access but makes no model calls.
+
+The kit uses Bun's JavaScript bundler. `@expo/source-scan` is a private workspace
+dev dependency: its code is included in the generated ESM, while Babel and Vitest
+stay external. Babel is a runtime dependency and Vitest is a peer dependency.
+No source-scanning files are copied into the kit's source tree.
+
+The build generates declarations with TypeScript and bundles them using
+`rollup-plugin-dts`, including the private scanner's types. Its TypeScript 6
+compatibility dependency supplies the compiler API absent from TypeScript 7.
+These are build tools only; consumers need neither Bun nor the private workspace.
+
+`bun pm pack` runs this build through `prepack` (Bun must be installed on the build
+machine) and replaces catalog/workspace references with normal versions.
+Use Bun for packing or publishing releases; direct `npm pack` does not resolve
+Bun catalogs. The tarball includes JavaScript chunks, source maps, and declarations.
+The smoke checks install it using npm and Bun with the `@expo` registry blocked,
+then run real Node/Vitest checks and strict NodeNext/Bundler type checks without
+`skipLibCheck`. The type checks include `ESNext.Disposable`, required by Vitest's
+spy declarations.
