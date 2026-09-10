@@ -1,55 +1,70 @@
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 import { createWorkspace } from '../workspace.ts';
+import type { EvalWorkspace } from '../types.ts';
 
-describe('createWorkspace', () => {
-  let root: string;
+let root: string;
+let workspace: EvalWorkspace;
 
-  beforeEach(() => {
-    root = fs.mkdtempSync(path.join(os.tmpdir(), 'skill-eval-kit-test-'));
-    fs.mkdirSync(path.join(root, 'src', 'db', 'migrations'), {
-      recursive: true,
-    });
-    fs.mkdirSync(path.join(root, 'node_modules', 'dep'), { recursive: true });
-    fs.writeFileSync(path.join(root, 'package.json'), '{"dependencies":{"expo-sqlite":"*"}}');
-    fs.writeFileSync(path.join(root, 'App.tsx'), 'export default 1; // comment');
-    fs.writeFileSync(path.join(root, 'src', 'db', 'migrations', '001_init.ts'), 'export {};');
-    fs.writeFileSync(path.join(root, 'node_modules', 'dep', 'index.js'), 'ignored');
+beforeEach(() => {
+  root = mkdtempSync(join(tmpdir(), 'agent-eval-workspace-'));
+  workspace = createWorkspace(root, 'with-skill');
+});
+
+afterEach(() => {
+  rmSync(root, { recursive: true, force: true });
+});
+
+function writeFile(relativePath: string, contents: string) {
+  const filename = join(root, relativePath);
+  mkdirSync(dirname(filename), { recursive: true });
+  writeFileSync(filename, contents);
+}
+
+describe('file access', () => {
+  test('reads a workspace file', () => {
+    writeFile('App.tsx', 'export default 1;');
+    expect(workspace.read('App.tsx')).toBe('export default 1;');
   });
 
-  afterEach(() => {
-    fs.rmSync(root, { recursive: true, force: true });
+  test('returns an empty string for a missing file', () => {
+    expect(workspace.read('missing.ts')).toBe('');
   });
 
-  it('reads files and reports existence', () => {
-    const ws = createWorkspace(root, 'with-skill');
-    expect(ws.read('App.tsx')).toContain('export default 1');
-    expect(ws.read('missing.ts')).toBe('');
-    expect(ws.exists('src/db/migrations/001_init.ts')).toBe(true);
+  test('reports whether a nested file exists', () => {
+    writeFile('src/db/migrations/001_init.ts', 'export {};');
+    expect(workspace.exists('src/db/migrations/001_init.ts')).toBe(true);
+    expect(workspace.exists('missing.ts')).toBe(false);
   });
 
-  it('excludes node_modules from sources and strips comments from source()', () => {
-    const ws = createWorkspace(root, 'with-skill');
-    const paths = ws.sourceFiles().map((f) => f.path);
-    expect(paths).toContain('App.tsx');
-    expect(paths).toContain(path.join('src', 'db', 'migrations', '001_init.ts'));
-    expect(ws.source()).not.toContain('ignored');
-    expect(ws.source()).not.toContain('// comment');
+  test('parses the package manifest', () => {
+    writeFile('package.json', JSON.stringify({ dependencies: { 'expo-sqlite': '*' } }));
+    expect(workspace.packageJson()).toEqual({ dependencies: { 'expo-sqlite': '*' } });
+  });
+});
+
+describe('source discovery', () => {
+  test('includes nested sources but excludes node_modules', () => {
+    writeFile('App.tsx', 'export default 1;');
+    writeFile('src/db/migrations/001_init.ts', 'export {};');
+    writeFile('node_modules/dep/index.js', 'ignored');
+    const paths = workspace.sourceFiles().map((file) => file.path);
+    expect(paths.sort()).toEqual(['App.tsx', join('src', 'db', 'migrations', '001_init.ts')]);
+    expect(workspace.source()).not.toContain('ignored');
   });
 
-  it('globs workspace-relative paths', () => {
-    const ws = createWorkspace(root, 'with-skill');
-    expect(ws.glob('src/db/migrations/*.{ts,tsx,js,sql}')).toEqual([
-      path.join('src', 'db', 'migrations', '001_init.ts'),
+  test('strips comments from the combined source', () => {
+    writeFile('App.tsx', 'export default 1; // comment');
+    expect(workspace.source()).toBe('export default 1; ');
+  });
+
+  test('globs paths relative to the workspace', () => {
+    writeFile('src/db/migrations/001_init.ts', 'export {};');
+    expect(workspace.glob('src/db/migrations/*.{ts,tsx,js,sql}')).toEqual([
+      join('src', 'db', 'migrations', '001_init.ts'),
     ]);
-    expect(ws.glob('nope/*.ts')).toEqual([]);
-  });
-
-  it('parses package.json', () => {
-    const ws = createWorkspace(root, 'with-skill');
-    expect(ws.packageJson()).toEqual({ dependencies: { 'expo-sqlite': '*' } });
+    expect(workspace.glob('nope/*.ts')).toEqual([]);
   });
 });

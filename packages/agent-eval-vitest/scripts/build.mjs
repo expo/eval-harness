@@ -16,7 +16,9 @@ const result = await Bun.build({
   sourcemap: 'linked',
   external: ['vitest', '@babel/parser'],
 });
-if (!result.success) throw new AggregateError(result.logs, 'JavaScript bundling failed');
+if (!result.success) {
+  throw new AggregateError(result.logs, 'JavaScript bundling failed');
+}
 
 // Bundle the private workspace's declarations too; public dependencies stay external.
 const declarations = await rollup({
@@ -28,7 +30,9 @@ const declarations = await rollup({
     !id.startsWith('@expo/source-scan/'),
   plugins: [dts({ respectExternal: true, tsconfig: './tsconfig.build.json' })],
   onwarn(warning, warn) {
-    if (warning.code === 'UNRESOLVED_IMPORT') throw new Error(warning.message);
+    if (warning.code === 'UNRESOLVED_IMPORT') {
+      throw new Error(warning.message);
+    }
     warn(warning);
   },
 });

@@ -24,8 +24,9 @@ export function resolveConfig(config: AgentEvalConfig & { runner: AgentRunner })
   const timeoutMs = config.timeoutMs ?? Number(process.env.EXPO_SKILL_EVAL_TIMEOUT ?? 900) * 1000;
   const cleanupTimeoutMs = config.cleanupTimeoutMs ?? 5_000;
   for (const [name, value] of Object.entries({ timeoutMs, cleanupTimeoutMs })) {
-    if (!Number.isFinite(value) || value <= 0 || value > 2_147_000_000)
+    if (!Number.isFinite(value) || value <= 0 || value > 2_147_000_000) {
       throw new Error(`${name} must be a positive finite number`);
+    }
   }
   const condition =
     config.condition ??
@@ -109,7 +110,9 @@ export async function openCase<T>(
     );
   };
   const dispose = (): Promise<void> => {
-    if (closing) return closing;
+    if (closing) {
+      return closing;
+    }
     closed = true;
     controller.abort(new Error('Case closed'));
     closing = (async () => {
@@ -143,7 +146,9 @@ export async function openCase<T>(
           errors.push(error);
         }
       }
-      if (errors.length) throw new AggregateError(errors, errors.map(errorText).join('; '));
+      if (errors.length) {
+        throw new AggregateError(errors, errors.map(errorText).join('; '));
+      }
     })();
     return closing;
   };
@@ -158,7 +163,9 @@ export async function openCase<T>(
       signal: controller.signal,
       condition: config.condition,
       onCleanup(cleanup) {
-        if (closed) throw new Error('Cannot register fixture resources after case cleanup');
+        if (closed) {
+          throw new Error('Cannot register fixture resources after case cleanup');
+        }
         cleanups.push(cleanup);
       },
       runAsync: (command, args, runOptions) =>
@@ -207,14 +214,19 @@ export async function openCase<T>(
         closeResult ??= (async () => {
           try {
             await dispose();
-            const status = config.dryRun
-              ? 'dry-run'
-              : completedExecution.endReason !== 'completed' ||
-                  checks.some((check) => check.status === 'failed')
-                ? 'failed'
-                : checks.some((check) => check.status === 'passed')
-                  ? 'passed'
-                  : 'ungraded';
+            let status: string;
+            if (config.dryRun) {
+              status = 'dry-run';
+            } else if (
+              completedExecution.endReason !== 'completed' ||
+              checks.some((check) => check.status === 'failed')
+            ) {
+              status = 'failed';
+            } else if (checks.some((check) => check.status === 'passed')) {
+              status = 'passed';
+            } else {
+              status = 'ungraded';
+            }
             writeResult(status, checks);
           } catch (error) {
             writeResult('error', checks, [errorText(error)]);

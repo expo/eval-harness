@@ -30,7 +30,7 @@ export function createAgentEval(input: AgentEvalConfig = {}): AgentEval {
       });
       const id = path.basename(fileURLToPath(caseUrl)).replace(/\.eval\.tsx?$/, '');
       const name = `${id}${options.title ? ` — ${options.title}` : ''} [${config.condition}]`;
-      const suite = mode === 'skip' ? describe.skip : mode === 'only' ? describe.only : describe;
+      const suite = { run: describe, skip: describe.skip, only: describe.only }[mode];
       suite(name, () => {
         let run: Awaited<ReturnType<typeof openCase<T>>> | undefined;
         const checks: CheckResult[] = [];
@@ -46,26 +46,30 @@ export function createAgentEval(input: AgentEvalConfig = {}): AgentEval {
             if (run) {
               // A beforeEach failure can prevent the callback from running at all.
               // Reconcile with Vitest's completed tasks, including hooks/timeouts.
-              const collect = (tasks: typeof currentSuite.tasks): CheckResult[] =>
+              const collectCheckResults = (tasks: typeof currentSuite.tasks): CheckResult[] =>
                 tasks.flatMap((task) => {
-                  if (task.type === 'suite') return collect(task.tasks);
-                  if (!registeredNames.has(task.name)) return [];
-                  const result: CheckResult = {
-                    name: task.name,
-                    status:
-                      task.result?.state === 'fail'
-                        ? 'failed'
-                        : task.result?.state === 'pass'
-                          ? 'passed'
-                          : 'skipped',
-                  };
+                  if (task.type === 'suite') {
+                    return collectCheckResults(task.tasks);
+                  }
+                  if (!registeredNames.has(task.name)) {
+                    return [];
+                  }
+                  let status: CheckResult['status'] = 'skipped';
+                  if (task.result?.state === 'fail') {
+                    status = 'failed';
+                  } else if (task.result?.state === 'pass') {
+                    status = 'passed';
+                  }
+                  const result: CheckResult = { name: task.name, status };
                   const error =
                     task.result?.errors?.map((error) => error.message).join('; ') ??
                     checks.find((check) => check.name === task.name)?.error;
-                  if (error) result.error = error;
+                  if (error) {
+                    result.error = error;
+                  }
                   return [result];
                 });
-              await run.close(collect(currentSuite.tasks));
+              await run.close(collectCheckResults(currentSuite.tasks));
               if (!config.dryRun && run.execution.endReason !== 'completed') {
                 throw new Error(
                   `Agent execution ended: ${run.execution.endReason}. Artifacts: ${run.artifactsDir}`
@@ -76,11 +80,14 @@ export function createAgentEval(input: AgentEvalConfig = {}): AgentEval {
           Math.max(60_000, config.cleanupTimeoutMs + 5_000)
         );
         defineChecks((checkName, fn) => {
-          if (registeredNames.has(checkName))
+          if (registeredNames.has(checkName)) {
             throw new Error(`Duplicate agent check name: ${checkName}`);
+          }
           registeredNames.add(checkName);
           test(checkName, { retry: 0, repeats: 0, concurrent: false }, async (context) => {
-            if (!run) throw new Error('Agent eval setup did not complete');
+            if (!run) {
+              throw new Error('Agent eval setup did not complete');
+            }
             const result: CheckResult = { name: checkName, status: 'passed' };
             checks.push(result);
             // Also capture failures imposed by Vitest (timeout, assertion counts, hooks).
@@ -94,7 +101,9 @@ export function createAgentEval(input: AgentEvalConfig = {}): AgentEval {
                 execution: run.execution,
                 skip(note) {
                   result.status = 'skipped';
-                  if (note) result.error = note;
+                  if (note) {
+                    result.error = note;
+                  }
                   return context.skip(note);
                 },
               });

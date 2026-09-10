@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  copyFileSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -28,6 +35,7 @@ const run = (command, args, cwd = scratch) => {
   }
 };
 try {
+  // Build and inspect the release artifact before installing it.
   const tarball = path.join(scratch, 'agent-eval-vitest.tgz');
   run('bun', ['pm', 'pack', '--filename', tarball], packageRoot);
   const files = run('tar', ['-tzf', tarball])
@@ -59,6 +67,7 @@ try {
       `${field} contains a local protocol`
     );
   }
+  // The consumer has no workspace links and cannot fetch private Expo packages.
   writeFileSync(
     path.join(scratch, 'package.json'),
     JSON.stringify({ private: true, type: 'module' })
@@ -73,38 +82,23 @@ try {
     `typescript@${manifest.devDependencies.typescript}`,
     '@types/node@22',
   ];
-  if (installer === 'bun') run('bun', ['add', '--ignore-scripts', ...dependencies]);
-  else run('npm', ['install', '--ignore-scripts', '--no-audit', '--no-fund', ...dependencies]);
+  if (installer === 'bun') {
+    run('bun', ['add', '--ignore-scripts', ...dependencies]);
+  } else {
+    run('npm', ['install', '--ignore-scripts', '--no-audit', '--no-fund', ...dependencies]);
+  }
   const installed = JSON.parse(
     readFileSync(path.join(scratch, 'node_modules/@expo/agent-eval-vitest/package.json'), 'utf8')
   );
   assert(!existsSync(path.join(scratch, 'node_modules/@expo/source-scan')));
   assert(!('@expo/source-scan' in installed.dependencies));
   assert(!Object.values(installed.dependencies).some((value) => value.startsWith('workspace:')));
-  writeFileSync(
-    path.join(scratch, 'case.eval.ts'),
-    `
-import { expect, createAgentEval, loadAstSupport, stripComments } from '@expo/agent-eval-vitest';
-import { claudeRunner } from '@expo/agent-eval-vitest/claude';
-const agentEval = createAgentEval({ runner: async () => ({
-  finalAnswer: 'done', toolCalls: [], endReason: 'completed', artifacts: [],
-}) });
-agentEval(import.meta.url, { prompt: 'refresh', projectSetup: { prepareAsync() { return { observed: true }; } } }, check => {
-  check('installed package works', async (_ws, { fixture, execution }) => {
-    expect(fixture.observed).toBe(true);
-    expect(execution.finalAnswer).toBe('done');
-    expect(typeof claudeRunner()).toBe('function');
-    const ast = await loadAstSupport();
-    const parsed = ast.parse('const n: number = 1');
-    const nodeTypes: string[] = [];
-    ast.walk(parsed, node => nodeTypes.push(node.type));
-    expect(nodeTypes).toContain('VariableDeclaration');
-    expect(() => ast.parse('const = ;')).toThrow();
-    expect(stripComments('const url = "https://expo.dev"; // comment')).toBe('const url = "https://expo.dev"; ');
-  });
-});
-`
+  // Run the same readable example as both a Vitest case and a declaration check.
+  copyFileSync(
+    new URL('./fixtures/consumer.eval.ts', import.meta.url),
+    path.join(scratch, 'case.eval.ts')
   );
+
   writeFileSync(
     path.join(scratch, 'vitest.config.ts'),
     `export default { test: {
