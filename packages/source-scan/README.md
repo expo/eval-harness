@@ -1,4 +1,6 @@
-# @expo/source-scan
+# source-scan (internal)
+
+**Private workspace; do not publish to npm.**
 
 Shared source-scanning helpers for Expo evaluation tools and the repository's
 skill analyzer. Compiled ESM and TypeScript declarations run under Node and Bun.
@@ -25,18 +27,14 @@ stripComments("const url = 'https://expo.dev'; // comment");
 The `@expo/source-scan/strip-comments` and `@expo/source-scan/walk` subpaths
 load without importing Babel. The root entry imports the parser.
 
-From the repository root:
+Published consumers copy the four source modules into their own
+`src/internal/source-scan/` directory before building or packing. Generated copies
+are ignored by Git; edit the canonical files here. Consumers declare
+`@babel/parser` directly and must not depend on this private workspace at runtime.
+The Vitest kit compiles these copies to ESM and declarations; the Bun analyzer
+ships them as TypeScript alongside its other source files.
 
-```bash
-bun install
-bun run --cwd packages/source-scan test
-bun run --cwd packages/source-scan build
-bun run --cwd packages/source-scan test:pack
-```
-
-`npm pack` runs the package build through `prepack`. Exports always reference
-`build/*.js` and `build/*.d.ts`; publication does not remap source paths.
-The smoke check packs and installs into a fresh temporary npm project, exercises
-all public exports in Node, compiles consumers with NodeNext and Bundler module
-resolution, and checks the lightweight subpaths with Babel removed. It requires
-npm registry access and cleans up the temporary project on success or failure.
+`node ../source-scan/scripts/copy-source.mjs` runs from a consumer package root.
+`bun run --cwd packages/source-scan test` runs the shared helper tests.
+The published packages' isolated npm smoke checks verify inclusion and ensure
+no `@expo/source-scan` installation is required.

@@ -9,7 +9,7 @@ runner plus uploaded artifacts.
 
 ## Current Shape
 
-- `packages/`: publishable Bun workspaces. `source-scan/` supplies the shared
+- `packages/`: Bun workspaces. `source-scan/` is private and supplies the shared
   parser, AST walk, and lexical comment stripper used by the skill analyzer.
   Package exports point to compiled ESM and declarations under `build/`; run
   `bun install` (which builds the workspace foundation) before harness commands,

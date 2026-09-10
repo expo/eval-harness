@@ -57,3 +57,6 @@ agent-workspace/
 
 # compiled workspace packages
 packages/*/build/
+
+# Shared helpers copied into consumers at build time
+packages/*/src/internal/source-scan/

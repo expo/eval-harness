@@ -2,7 +2,7 @@
   "name": "@expo/source-scan",
   "version": "0.1.0",
   "type": "module",
-  "description": "Shared source-scanning helpers for Expo eval harnesses: comment stripping and Babel AST walking",
+  "description": "Internal shared source-scanning helpers for Expo evaluation packages",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -27,14 +27,10 @@
       "import": "./build/walk.js"
     }
   },
-  "publishConfig": {
-    "access": "public"
-  },
   "scripts": {
     "build": "node -e \"require('node:fs').rmSync('build', { recursive: true, force: true })\" && tsc -p tsconfig.build.json",
     "prepack": "npm run build",
-    "test": "bun test src",
-    "test:pack": "node scripts/smoke-pack.mjs"
+    "test": "bun test src"
   },
   "dependencies": {
     "@babel/parser": "^7.29.8"
@@ -42,5 +38,6 @@
   "devDependencies": {
     "typescript": "7.0.2"
   },
-  "types": "./build/index.d.ts"
+  "types": "./build/index.d.ts",
+  "private": true
 }
