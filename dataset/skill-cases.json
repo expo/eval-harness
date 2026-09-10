@@ -33,7 +33,7 @@
     "family": "native-controls",
     "split": "development",
     "fixture": "expo-settings-v1",
-    "prompt": "Replace the notification toggle in this Expo app with a native platform control. Preserve the state and accessible label; keep the installed SDK.",
+    "prompt": "Replace the React Native Switch in App.tsx with the SDK-compatible @expo/ui control. Preserve notification state and its accessible label; keep the installed SDK.",
     "expect": {
       "required": [
         "expo-overview",
@@ -83,7 +83,8 @@
     ],
     "review": [
       "Advice distinguishes SDK-compatible controls from APIs requiring an upgrade."
-    ]
+    ],
+    "read_only": true
   },
   {
     "id": "add-navigation",
@@ -138,7 +139,8 @@
     ],
     "review": [
       "Advice follows the explicitly requested skill and fits the installed SDK."
-    ]
+    ],
+    "read_only": true
   },
   {
     "id": "apply-theme",
@@ -194,7 +196,8 @@
     ],
     "review": [
       "Findings reference actual deviations from existing tokens."
-    ]
+    ],
+    "read_only": true
   },
   {
     "id": "signing-diagnosis",
@@ -223,7 +226,8 @@
     ],
     "review": [
       "Diagnosis connects the rotated certificate to the stale provisioning profile without claiming a build was run."
-    ]
+    ],
+    "read_only": true
   },
   {
     "id": "sdk-advice",
@@ -250,20 +254,21 @@
     ],
     "review": [
       "Advice starts from the installed SDK and reports unverified compatibility honestly."
-    ]
+    ],
+    "read_only": true
   },
   {
     "id": "fetch-error",
     "family": "network-errors",
-    "split": "validation",
+    "split": "development",
     "fixture": "expo-settings-v1",
-    "prompt": "src/load-items.ts parses error responses as successful data. Fix it so a non-successful HTTP response throws before parsing JSON.",
+    "prompt": "Fix src/load-items.ts so unsuccessful HTTP responses reject before parsing JSON. Successful responses must still return parsed data, and network failures must reject. Keep the public loadItems(url) API and leave the UI and dependencies unchanged.",
     "expect": {
-      "required": [
+      "required": [],
+      "optional": [
         "expo-overview",
         "expo-data-fetching"
       ],
-      "optional": [],
       "forbidden": [
         "expo-native-ui",
         "expo-ui",
@@ -271,26 +276,29 @@
       ],
       "unlisted": "observe"
     },
-    "before_edit": true,
+    "before_edit": false,
     "unchanged": [
+      "App.tsx",
+      "package.json",
       "src/actions.ts"
     ],
-    "review": [
-      "A non-2xx response rejects without calling response.json; a successful response still returns parsed data."
+    "review": [],
+    "checks": [
+      "http-response-contract"
     ]
   },
   {
     "id": "fetch-diagnosis",
     "family": "network-errors",
-    "split": "validation",
+    "split": "development",
     "fixture": "expo-settings-v1",
     "prompt": "Review src/load-items.ts for HTTP error handling. Explain the failure mode without editing anything.",
     "expect": {
-      "required": [
+      "required": [],
+      "optional": [
         "expo-overview",
         "expo-data-fetching"
       ],
-      "optional": [],
       "forbidden": [
         "expo-native-ui",
         "eas-app-stores"
@@ -304,7 +312,8 @@
     ],
     "review": [
       "The answer distinguishes rejected network requests from HTTP error responses."
-    ]
+    ],
+    "read_only": true
   },
   {
     "id": "press-feedback",
@@ -385,7 +394,8 @@
     ],
     "review": [
       "Advice uses web accessibility semantics."
-    ]
+    ],
+    "read_only": true
   },
   {
     "id": "bare-native-style",
@@ -436,6 +446,33 @@
     ],
     "review": [
       "The explanation describes the existing screen only."
-    ]
+    ],
+    "read_only": true
+  },
+  {
+    "id": "fetch-correct",
+    "family": "network-errors",
+    "split": "development",
+    "fixture": "expo-fetch-correct-v1",
+    "prompt": "Review src/load-items.ts. It should reject unsuccessful HTTP responses before parsing JSON, return parsed data on success, and reject network failures. If it already meets these requirements, leave all files unchanged; otherwise make only the necessary fix. Keep the public loadItems(url) API.",
+    "expect": {
+      "required": [],
+      "optional": [
+        "expo-overview",
+        "expo-data-fetching"
+      ],
+      "forbidden": [
+        "expo-ui",
+        "eas-app-stores"
+      ],
+      "unlisted": "observe"
+    },
+    "before_edit": false,
+    "unchanged": [],
+    "read_only": true,
+    "checks": [
+      "http-response-contract"
+    ],
+    "review": []
   }
 ]

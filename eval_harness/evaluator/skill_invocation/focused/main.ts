@@ -9,10 +9,12 @@ const HELP = `Focused skill evaluations
   validate --plugin PATH [--cases FILE] [--fixtures DIR]
   run --plugin PATH --out DIR --model MODEL [--case ID] [--split development|validation|holdout]
       [--repetitions 3] [--timeout 300] [--max-turns 20]
+      [--skill-mode with-expo|without-expo|both]
   compare --baseline METRICS --candidate METRICS --out DIR
 
 run is CI-only. validate and compare make no model calls.
 The default split is development. Holdout must be explicitly selected.
+--case pilot selects native-form-advice, signing-diagnosis, fetch-error, fetch-correct.
 `;
 export async function main(argv: string[]): Promise<number> {
   const command = argv[0];
@@ -36,6 +38,7 @@ export async function main(argv: string[]): Promise<number> {
         "max-turns",
         "baseline",
         "candidate",
+        "skill-mode",
       ].map((key) => [key, { type: "string" as const }]),
     ),
     strict: true,
@@ -77,10 +80,21 @@ export async function main(argv: string[]): Promise<number> {
   const selected = cases.filter(
     (item) =>
       item.split === split &&
-      (values.case === undefined || item.id === values.case),
+      (values.case === undefined ||
+        item.id === values.case ||
+        (values.case === "pilot" &&
+          [
+            "native-form-advice",
+            "signing-diagnosis",
+            "fetch-error",
+            "fetch-correct",
+          ].includes(item.id))),
   );
   if (!selected.length)
     throw new Error("No matching cases in the selected split");
+  const skillMode = String(values["skill-mode"] ?? "with-expo");
+  if (!["with-expo", "without-expo", "both"].includes(skillMode))
+    throw new Error("Invalid --skill-mode");
   const positive = (name: string, fallback: number) => {
     const value = Number(values[name] ?? fallback);
     if (!Number.isSafeInteger(value) || value <= 0)
@@ -96,6 +110,7 @@ export async function main(argv: string[]): Promise<number> {
     repetitions: positive("repetitions", 3),
     timeoutSeconds: positive("timeout", 300),
     maxTurns: positive("max-turns", 20),
+    skillMode: skillMode as "with-expo" | "without-expo" | "both",
   });
   // Behavioral failures are advisory. Infrastructure failure makes the job red.
   return attempts.some((run) => run.status === "infrastructure_error") ? 1 : 0;

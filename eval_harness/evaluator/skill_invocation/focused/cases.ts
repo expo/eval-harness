@@ -12,6 +12,8 @@ export type Case = {
   before_edit: boolean;
   unchanged: string[];
   review: string[];
+  read_only?: boolean;
+  checks?: Array<"http-response-contract">;
 };
 
 export function inside(root: string, name: string): string {
@@ -44,6 +46,8 @@ export function loadCases(
       "before_edit",
       "unchanged",
       "review",
+      "read_only",
+      "checks",
     ];
     for (const key of Object.keys(row))
       if (!keys.includes(key)) throw new Error(`Unknown case field: ${key}`);
@@ -60,6 +64,15 @@ export function loadCases(
       throw new Error("Invalid split");
     if (typeof row.before_edit !== "boolean")
       throw new Error("before_edit must be boolean");
+    if (row.read_only !== undefined && typeof row.read_only !== "boolean")
+      throw new Error("read_only must be boolean");
+    if (
+      row.checks !== undefined &&
+      (!Array.isArray(row.checks) ||
+        row.checks.some((id) => id !== "http-response-contract") ||
+        new Set(row.checks).size !== row.checks.length)
+    )
+      throw new Error("Unknown or duplicate outcome check");
     const expect = parseExpectations(row.expect);
     for (const name of [
       ...expect.required,

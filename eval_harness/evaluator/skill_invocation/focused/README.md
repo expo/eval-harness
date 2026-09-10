@@ -14,7 +14,7 @@ bun run test:all
 ```
 
 Case fields: `id`, `family`, `split`, `fixture`, `prompt`, `expect`, `before_edit`,
-`unchanged`, `review`. Required/optional/forbidden skill lists must be disjoint. Unlisted
+`unchanged`, `review`, optional `read_only` and `checks`. Required/optional/forbidden skill lists must be disjoint. Unlisted
 skills default to `observe`; `forbid` enables closed-set scoring. `before_edit` requires
 all required bodies before the first edit request, a conservative deadline suitable
 for these small tasks. Read-only cases omit this deadline by setting it to false.
@@ -36,7 +36,7 @@ The underlying CI-only command (normally called by the workflow):
 ```sh
 bun eval_harness/evaluator/skill_invocation/focused/main.ts run \
   --plugin /path/to/plugin --out /path/to/report --model 'sonnet[1m]' \
-  --case native-form-advice --split development --repetitions 3
+  --case pilot --split development --repetitions 3 --skill-mode both
 ```
 
 `run` requires `CI` and `SKILL_EVAL_REMOTE=1`. Authentication comes from the CI environment.
@@ -83,7 +83,42 @@ bun eval_harness/evaluator/skill_invocation/focused/main.ts compare \
 Changed task, fixture, runtime, model, tool settings or limits make a comparison
 inconclusive. Skill content may differ. Unequal attempt counts and infrastructure or
 observation gaps are inconclusive. Routing changes are reported separately from failed
-source checks; pending reviews cannot become task-success claims. This first version
-has no LLM judge, automatic description rewriting or no-skill ablation. The older
+source checks; pending reviews cannot become task-success claims. This version
+has no LLM judge or automatic description rewriting. The older
 `skills_unavailable` scenario disables both skills and MCP and measures that combined
 intervention, not an isolated skill effect.
+
+## Outcome pilot
+
+`--case pilot` selects native-form-advice, signing-diagnosis, fetch-error, and
+fetch-correct. `--skill-mode both` runs with and without the Expo catalog in fresh
+attempts, alternating condition order across repetitions. Three repetitions means
+24 attempts. Other runtime-provided skills and the tool profile stay the same;
+this measures Expo catalog presence, not the marginal effect of one skill.
+The absence control requires an init skill list and rejects exposed Expo names or
+bodies. Routing is not applicable in the absence control, rather than a failed
+required-load score. Catalog presence is an experimental variable; the shared
+condition hash covers the task, fixture, runtime/model, tool profile, and verifier.
+
+`checks: ["http-response-contract"]` runs a trusted verifier after authoring. It
+imports the output helper in a separate five-second process without CI API-key
+environment variables. This process is not a security sandbox. It checks error
+responses before JSON parsing, successful parsed data, and network rejection.
+Tests include a known-correct fixture and incorrect mutations/no-op repairs.
+Read-only cases use `read_only: true` to check the entire fixture tree. Advice
+assertions remain pending; syntax and preserved files alone never imply task success.
+
+`summary.json` and `report.html` lead with evaluated task outcomes, pending and
+unavailable counts, routing, median time, and model-reported cost (excluding EAS).
+`metrics.json` retains every attempt and trace-backed detail. Behavioral failures
+are advisory; invalid absence controls or unavailable HTTP verification fail the
+CI invocation while preserving artifacts. Optional skills with no delivery are
+reported as `not_loaded`, which is neutral.
+
+The generic HTTP family is now development data because it is used in the pilot.
+Its optional routing labels do not require skill use to solve an ordinary code fix.
+The remaining holdout contains negative families only; it is not yet a balanced
+release benchmark. These file-edit tasks intentionally retain the restricted
+Read/Glob/Grep/Skill/Write/Edit profile. They do not test agent-run shell checks,
+dependency installation, or native execution. Those require a later pinned runnable
+fixture and tool profile, held constant across conditions.

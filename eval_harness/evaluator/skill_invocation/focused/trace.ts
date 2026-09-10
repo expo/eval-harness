@@ -18,6 +18,8 @@ export type Observation = {
   final: string;
   model: string | null;
   usage: unknown;
+  advertised_skills: string[] | null;
+  cost_usd: number | null;
   errors: string[];
 };
 export type RoutingRow = {
@@ -30,7 +32,8 @@ export type RoutingRow = {
     | "loaded_late"
     | "unobservable"
     | "forbidden_load"
-    | "observed";
+    | "observed"
+    | "not_loaded";
   event: number | null;
 };
 
@@ -65,6 +68,8 @@ export function observeClaude(
   let final = "";
   let model: string | null = null;
   let usage: unknown = null;
+  let advertisedSkills: string[] | null = null;
+  let costUsd: number | null = null;
   const bodyEntries = Object.entries(bodies).map(
     ([skill, body]) => [skill, normalize(body)] as const,
   );
@@ -80,6 +85,14 @@ export function observeClaude(
     }
     // This adapter deliberately evaluates one implementation agent only.
     if (event.parent_tool_use_id) continue;
+    if (
+      event.type === "system" &&
+      event.subtype === "init" &&
+      Array.isArray(event.skills)
+    )
+      advertisedSkills = event.skills.filter(
+        (value): value is string => typeof value === "string",
+      );
     const message = record(event.message);
     if (typeof message.model === "string") model = message.model;
     const content = Array.isArray(message.content) ? message.content : [];
@@ -176,6 +189,8 @@ export function observeClaude(
       complete = event.subtype === "success" && event.is_error !== true;
       final = String(event.result ?? "");
       usage = event.usage ?? null;
+      costUsd =
+        typeof event.total_cost_usd === "number" ? event.total_cost_usd : null;
       if (!complete)
         errors.push(
           `Agent result: ${event.subtype}; ${JSON.stringify(event.errors ?? [])}`,
@@ -189,6 +204,8 @@ export function observeClaude(
     final,
     model,
     usage,
+    advertised_skills: advertisedSkills,
+    cost_usd: costUsd,
     errors,
   };
 }
@@ -251,7 +268,7 @@ export function scoreRouting(
           ? "unobservable"
           : expectation === "forbidden"
             ? "passed"
-            : "observed";
+            : "not_loaded";
     return {
       skill,
       expectation,

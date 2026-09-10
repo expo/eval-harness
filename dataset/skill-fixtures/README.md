@@ -8,6 +8,8 @@ expectations live in `../skill-cases.json`, outside the copied agent workspace.
   a fetch helper with missing HTTP error handling, and a synthetic signing diagnostic.
   Package versions follow the [SDK 55 blank template](https://github.com/expo/expo/blob/sdk-55/templates/expo-template-blank-typescript/package.json).
   It can be installed and launched separately with `npm install` and `npm run ios`.
+- `expo-fetch-correct-v1`: a small Expo package context with an already-correct HTTP
+  helper. It checks that a review does not introduce unnecessary edits.
 - `web-settings-v1`: a browser React form with no Expo dependencies.
 - `bare-native-v1`: a React Native source fixture without Expo. It supplies routing
   context, not a complete Xcode/Gradle project.
@@ -18,8 +20,9 @@ on both sides. This makes writes observable and keeps these tests free of cloud 
 It is a controlled routing/source-edit experiment, not a replacement for full app evals.
 
 `source-syntax` means parsing succeeded, not that dependencies typecheck or the app builds.
-`unchanged` checks protect selected behavior-bearing files byte for byte. Task behavior
-and native runtime assertions stay explicitly pending for human/simulator review.
+`unchanged` checks protect selected behavior-bearing files byte for byte. The HTTP verifier executes success, HTTP-error and network-error contracts in a separate
+process. Advice and native-runtime assertions remain pending for review. Read-only cases
+compare all fixture files, including additions and deletions.
 
 Treat versioned fixture directories as immutable once results are used as a baseline.
 Create `-v2` for deliberate fixture changes. The runner hashes all fixture contents and

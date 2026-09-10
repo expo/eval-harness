@@ -218,7 +218,7 @@ test("focused cases have valid fixtures, skills, labels and family splits", () =
       join(harness, "dataset/skill-fixtures"),
       join(plugin, "skills"),
     ).length,
-  ).toBe(16);
+  ).toBe(17);
 });
 
 test("reports escape trace content and comparisons reject changed conditions", () => {
@@ -306,9 +306,8 @@ test("failed routing and artifact checks remain separate in a comparison", () =>
 
 test("offline mocked CLI verifies attempt isolation and artifact capture without model calls", async () => {
   const { chmodSync, mkdirSync } = await import("node:fs");
-  const { runFocusedCases } = await import(
-    "../../../app_builder/run-focused-cases.ts"
-  );
+  const { runFocusedCases } =
+    await import("../../../app_builder/run-focused-cases.ts");
   const root = mkdtempSync(join(tmpdir(), "focused-offline-"));
   const old = {
     PATH: process.env.PATH,
@@ -346,7 +345,7 @@ test("offline mocked CLI verifies attempt isolation and artifact capture without
     process.env.CI = "1";
     process.env.SKILL_EVAL_REMOTE = "1";
     const out = join(root, "out");
-    const runs = await runFocusedCases({
+    const args: Parameters<typeof runFocusedCases>[0] = {
       cases: [
         {
           id: "tiny",
@@ -367,7 +366,8 @@ test("offline mocked CLI verifies attempt isolation and artifact capture without
       repetitions: 2,
       timeoutSeconds: 5,
       maxTurns: 2,
-    });
+    };
+    const runs = await runFocusedCases(args);
     expect(runs.map((run) => run.status)).toEqual(["complete", "complete"]);
     expect(runs[0]?.condition).toBe(runs[1]?.condition);
     expect(runs[0]?.routing[0]?.status).toBe("passed");
@@ -387,6 +387,54 @@ test("offline mocked CLI verifies attempt isolation and artifact capture without
       readFileSync(join(out, "catalog/skills/expo-native-ui/SKILL.md"), "utf8"),
     ).toContain(body);
     expect(existsSync(join(out, "tiny/1/app/manifest.json"))).toBe(false);
+    writeFileSync(
+      stub,
+      `#!${process.execPath}
+if (process.argv.includes("--version")) console.log("offline-stub-1");
+else {
+  const installed = process.argv.includes("--plugin-dir");
+  console.log(JSON.stringify({type:"system",subtype:"init",skills:installed ? ["expo:expo-native-ui"] : ["debug"]}));
+  for (const row of (installed ? ${JSON.stringify(trace)} : [${JSON.stringify(result)}])) console.log(JSON.stringify(row));
+}
+`,
+    );
+    const both = await runFocusedCases({
+      ...args,
+      out: join(out, "both"),
+      skillMode: "both",
+    });
+    expect(both.map((run) => run.skill_mode)).toEqual([
+      "without-expo",
+      "with-expo",
+      "with-expo",
+      "without-expo",
+    ]);
+    expect(both.every((run) => run.status === "complete")).toBe(true);
+    expect(new Set(both.map((run) => run.condition)).size).toBe(1);
+    expect(both[0]?.routing).toEqual([]);
+    expect(both[0]?.plugin_hash).toBe("absent");
+    expect(existsSync(join(out, "both/without-expo/tiny/1/raw.jsonl"))).toBe(
+      true,
+    );
+    expect(existsSync(join(out, "both/with-expo/tiny/1/raw.jsonl"))).toBe(true);
+    expect(readFileSync(join(out, "both/report.html"), "utf8")).toContain(
+      'href="without-expo/tiny/1/raw.jsonl"',
+    );
+    // The same trace must not become a valid absence control if Expo leaked in.
+    writeFileSync(
+      stub,
+      `#!${process.execPath}
+if (process.argv.includes("--version")) console.log("offline-stub-1");
+else for (const row of ${JSON.stringify(trace)}) console.log(JSON.stringify(row));
+`,
+    );
+    const contaminated = await runFocusedCases({
+      ...args,
+      out: join(out, "contaminated"),
+      skillMode: "without-expo",
+      repetitions: 1,
+    });
+    expect(contaminated[0]?.status).toBe("infrastructure_error");
   } finally {
     for (const [key, value] of Object.entries(old)) {
       if (value === undefined) delete process.env[key];
