@@ -38,10 +38,10 @@
     "@babel/parser": "catalog:"
   },
   "peerDependencies": {
-    "vitest": ">=4.0.18 <5"
+    "vitest": ">=4.1.0 <5"
   },
   "devDependencies": {
-    "vitest": "4.0.18",
+    "vitest": "4.1.11",
     "@types/node": "26.1.2",
     "@expo/source-scan": "workspace:*",
     "rollup": "catalog:",

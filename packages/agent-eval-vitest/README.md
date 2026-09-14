@@ -3,7 +3,7 @@
 Agent evaluations expressed as colocated `.eval.ts` cases. Each case prepares a
 project, runs an agent once, then reports independent named checks through Vitest.
 This package is being prepared for its first npm release; the examples below use
-the intended registry name. It requires Node >=22.17 and Vitest >=4.0.18 <5.
+the intended registry name. It requires Node >=22.17 and Vitest >=4.1.0 <5.
 
 ## A case with a custom runner
 

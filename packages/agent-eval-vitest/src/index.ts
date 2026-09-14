@@ -45,7 +45,7 @@ export function createAgentEval(input: AgentEvalConfig = {}): AgentEval {
         );
 
         afterAll(
-          async (currentSuite) => {
+          async ({}, currentSuite) => {
             if (run) {
               // A beforeEach failure can prevent the callback from running at all.
               // Reconcile with Vitest's completed tasks, including hooks/timeouts.
