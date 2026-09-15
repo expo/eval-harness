@@ -58,3 +58,6 @@ agent-workspace/
 # compiled workspace packages
 packages/*/build/
 
+# Agent evaluation outputs and transient test fixtures
+.eval-results/
+.vitest-integration-*/

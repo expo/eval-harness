@@ -455,20 +455,29 @@ The legacy evaluator-trace mirror is disabled unless `PUSH_EVAL_TRACE_BT=1`.
 
 ## Development
 
-The private [`source-scan`](packages/source-scan/README.md) workspace provides
-comment stripping, Babel parsing, and AST walking for the existing skill analyzer.
-It is not published separately; downstream packages bundle the shared utilities.
-Shared external versions live in the root `catalog`; each package declares its
-own dependencies using `catalog:`. Internal dependencies use `workspace:*`.
+Reusable libraries and internal helpers live in the root Bun workspaces under `packages/`.
+The private [`source-scan`](packages/source-scan/README.md) workspace provides comment stripping,
+Babel parsing, and AST walking shared with the existing skill analyzer.
+[`@expo/agent-eval-vitest`](packages/agent-eval-vitest/README.md) provides
+colocated agent cases, injectable runners, fixture cleanup, and independent
+Vitest checks. Only the Vitest kit is being prepared for npm publication; it bundles the shared helpers and their types in its build.
 
 ```bash
-bun install             # installs workspaces and builds shared utilities
-bun run build           # rebuild after changing source
-bun run test:packages   # source-scan unit tests
+bun install             # installs workspaces and compiles the package foundation
+bun run build           # rebuild after changing package source
+bun run test:packages   # package unit and Vitest integration tests
+bun run test:pack       # tarballs + isolated npm/Bun installs and type checks
 ```
 
-Workspace exports reference compiled ESM and declarations under `build/`.
-Run `bun run build` explicitly if installation hooks were disabled.
+The root package stays private. Shared dependency versions are defined once in
+its `catalog`; packages declare their own dependencies with `catalog:`.
+Use `bun pm pack` for release tarballs so catalog and workspace references
+become ordinary versions for consumers. Workspace exports reference compiled ESM and
+`.d.ts` files under `build/` for both local and npm consumers. The kit uses Bun for JavaScript bundling and rollup-plugin-dts for declarations.
+The build runs source-scan before agent-eval-vitest. The packed consumer checks require Node,
+npm, and registry access; it installs the tarball in a temporary directory outside
+this workspace and removes it afterward. Run `bun run build` explicitly if
+installation hooks were disabled.
 
 The app evaluator can still be run locally against an already served app when
 debugging driver behavior, but collaborators should start with EAS workflows
