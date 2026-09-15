@@ -202,6 +202,14 @@ runner plus uploaded artifacts.
 - Hot Chocolate and other richer PRDs are better for product realism, but expect
   authored-app defects to be part of the signal.
 
+## Formatting
+
+Use `bun run format` for package and tooling changes, and `bun run format:check`
+before pushing. Oxfmt is pinned in the root dev dependencies; `.oxfmtrc.json`
+defines the shared style. Keep generated outputs and golden data untouched.
+Formatting does not replace readable test structure: put multi-line executable
+programs in fixture files and keep unrelated behaviors in separate tests.
+
 ## Verification Commands
 
 Run the canonical local type-check and test suite after changing harness code:

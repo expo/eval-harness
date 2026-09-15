@@ -28,7 +28,9 @@ describe('walk traversal', () => {
       children: [{ type: 'First', child: { type: 'Nested' } }, null, { wrapper: { type: 'Last' } }],
     };
     const seen: string[] = [];
-    walk(root, (node) => { seen.push(node.type); });
+    walk(root, (node) => {
+      seen.push(node.type);
+    });
     expect(seen).toEqual(['Root', 'First', 'Nested', 'Last']);
   });
 
@@ -42,15 +44,20 @@ describe('walk traversal', () => {
       expression: { type: 'Identifier' },
     };
     const seen: string[] = [];
-    walk(node, (child) => { seen.push(child.type); });
+    walk(node, (child) => {
+      seen.push(child.type);
+    });
     expect(seen).toEqual(['Root', 'Identifier']);
   });
 
   it('ignores primitives and non-string types while traversing their children', () => {
     const seen: string[] = [];
-    walk([undefined, null, false, 0, 'text', { type: 123, child: { type: 'Identifier' } }], (node) => {
-      seen.push(node.type);
-    });
+    walk(
+      [undefined, null, false, 0, 'text', { type: 123, child: { type: 'Identifier' } }],
+      (node) => {
+        seen.push(node.type);
+      }
+    );
     expect(seen).toEqual(['Identifier']);
   });
 
@@ -58,7 +65,9 @@ describe('walk traversal', () => {
     const leaf = Object.freeze({ type: 'Identifier', name: 'value' });
     const root = Object.freeze({ type: 'Root', child: leaf });
     const seen: AstNode[] = [];
-    walk(root, (node) => { seen.push(node); });
+    walk(root, (node) => {
+      seen.push(node);
+    });
     expect(seen).toHaveLength(2);
     expect(seen[0]).toBe(root);
     expect(seen[1]).toBe(leaf);
