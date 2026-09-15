@@ -122,6 +122,11 @@ try {
     path.join(scratch, 'case.eval.ts')
   );
 
+  copyFileSync(
+    new URL('./fixtures/ollama.eval.ts', import.meta.url),
+    path.join(scratch, 'ollama.eval.ts')
+  );
+
   writeFileSync(
     path.join(scratch, 'vitest.config.ts'),
     `export default { test: {
@@ -137,6 +142,8 @@ try {
       'node_modules/typescript/bin/tsc',
       '--noEmit',
       '--strict',
+      '--types',
+      'node',
       '--target',
       'ES2022',
       '--lib',
@@ -146,6 +153,7 @@ try {
       '--moduleResolution',
       resolution,
       'case.eval.ts',
+      'ollama.eval.ts',
     ]);
   }
 
