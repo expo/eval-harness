@@ -183,6 +183,48 @@ and workspace-first named check callbacks keep their familiar shape.
 `loadAstSupport()` uses the shipped scanner dependency; a broken parser install
 throws instead of silently skipping AST checks.
 
+## Expo fixtures
+
+Prepare an Expo evaluation workspace with `createExpoProject`:
+
+```ts
+import { createExpoProject } from '@expo/agent-eval-vitest/expo';
+
+const projectSetup = createExpoProject({
+  packageName: 'expo-sqlite',
+  packageRoot: new URL('../../', import.meta.url),
+  skillDir: new URL('../', import.meta.url),
+  fixturesDir: new URL('./fixtures/', import.meta.url),
+  baseDirectory: new URL('./base-app/', import.meta.url),
+  fixture: 'notes-db',
+  files: { 'README.md': 'Eval workspace\n' },
+  async prepareAsync({ runAsync }) {
+    await runAsync('npm', ['install']);
+  },
+});
+```
+
+Paths above are illustrative; resolve them for your case location. The prepared
+base and fixtures must contain ordinary files/directories, not symlinks. Builds
+and dependencies required by the local package must already be available in its
+checkout. After preparation, the adapter sets the manifest dependency and links
+`node_modules/<package>` to the actual local checkout. Tests verify real module
+resolution, rather than just reading the dependency declaration.
+
+Scaffolding is an explicit alternative to `baseDirectory`: supply an exact
+`createExpoAppVersion` and an explicit `baseTemplate` (pin the template too for
+reproducibility). For create-expo-app 3.7.0 and newer, scaffolding passes
+`--no-agents-md` in both conditions to prevent generated agent instructions and
+automatic Expo Claude-plugin activation. Older versions do not receive the flag.
+Prepared fixture layers and user hooks may still introduce their own agent config.
+There is no shared scaffold cache in this initial implementation.
+
+For `with-skill`, the adapter copies the package skill into the Claude skill
+layout and excludes `.evals`. For `without-skill`, it removes that package's skill
+at the same target; consumers remain responsible for any other skills/config
+present in their base fixture. The core `projectSetup` API can be used without
+this adapter; `createExpoProject` requires a `skillDir`.
+
 Legacy `EXPO_SKILL_EVAL_TIMEOUT` (seconds), `EXPO_SKILL_EVAL_CONDITION`,
 `EXPO_SKILL_EVAL_DRY`, `EXPO_SKILL_EVAL_KEEP`, and `EXPO_SKILL_EVAL_MODEL` remain
 supported. Explicit configuration wins over environment values. Other timing
