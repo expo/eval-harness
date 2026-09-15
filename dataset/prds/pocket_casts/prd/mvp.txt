@@ -1,0 +1,60 @@
+Pocket Casts — Podcast Library And Queue (MVP)
+
+## Overview
+
+Pocket Casts is a mobile podcast app for discovering shows, managing a library,
+and controlling an episode queue. It starts with eight shows and at least 32
+stable episodes with varied release dates, durations, played states, and
+download states.
+
+The app must work on iOS and Android with Expo SDK 57.x. Subscriptions, queue,
+episode progress, downloads, and settings persist locally. Show feeds may be
+refreshed with standard `fetch`; seeded episodes remain usable offline and after
+refresh failures.
+
+## Navigation And Discovery
+
+A bottom tab bar contains `Podcasts`, `Filters`, `Discover`, and `Profile`.
+Podcasts shows subscribed shows in a grid. Tapping a show opens its artwork,
+title, description, subscription state, and episodes newest first.
+
+Discover searches seeded shows by title, author, or description using a
+case-insensitive substring. Results progressively render and a zero-result view
+says `No podcasts found`. Opening a result shows details; `Subscribe` and
+`Unsubscribe` update the library once, with unsubscribe requiring confirmation.
+Pulling a show list to refresh exposes progress and retains its current episodes
+if the feed fails.
+
+## Episodes And Queue
+
+Each episode row shows title, publication date, duration, played state,
+download state, and a menu. Episode detail includes description and actions for
+`Play`, `Add to Up Next`, `Download`, `Mark played`, and `Share`.
+
+Adding to Up Next inserts an episode once. A queue sheet lists episodes in
+order, supports moving one item earlier or later with labelled controls, and
+removes an item after confirmation. Queue order persists. Mark played/unplayed
+updates all views and the relevant Filters count.
+
+Download changes through visible `Not downloaded`, `Downloading`, and
+`Downloaded` states using bundled episode media. Cancelling a download returns
+to not downloaded; deleting a download keeps the episode and progress.
+
+## Player
+
+Starting an episode reveals a persistent mini-player with episode title,
+play/pause, progress text, and queue action. Opening it presents a full player
+with elapsed and remaining time, 15-second back/forward controls, playback
+speed, and Up Next. Play/pause and seek controls update accessible state and
+persist the latest position. Producing audible playback is outside this MVP.
+
+## Filters, Profile, And Accessibility
+
+Filters provides `New releases`, `In progress`, `Downloaded`, and `Starred`.
+Each opens the exact matching episodes and shows a clear empty state when none
+match. Profile provides appearance and an `Auto-add new releases` toggle.
+
+- Playback, queue position, played/download states, selected tab, and all time
+  values are accessible without relying on artwork or animation.
+- Out of scope: accounts, cloud sync, paid podcasts, casting, CarPlay, watch
+  apps, sleep timer, real background playback, and push notifications.

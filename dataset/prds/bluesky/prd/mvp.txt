@@ -1,0 +1,65 @@
+Bluesky — Social Feed Client (MVP)
+
+## Overview
+
+Bluesky is a mobile social client for browsing a timeline, publishing posts,
+interacting with people, and managing a personal profile. It opens as the demo
+user `Alex Morgan` with a stable social graph and a seeded timeline of at least
+30 posts. All interactions are stored locally and persist across cold restarts.
+
+The app must work on iOS and Android with Expo SDK 57.x. No login, live social
+network, moderation backend, or external API is required.
+
+## Navigation
+
+A bottom tab bar contains `Home`, `Search`, `Notifications`, and `Profile`.
+Each tab preserves its useful state while switching. Profile and post details
+use stack navigation with a labelled back action.
+
+## Timeline
+
+Home shows newest posts first. Each row exposes author name, handle, post text,
+relative time, reply count, repost count, like count, and the current user's
+like/repost state. Seeded posts include plain text, one local image post, one
+quoted post, and one reply thread.
+
+Users can like and unlike a post, repost and undo a repost, open its thread,
+open the author's profile, and share its public text through the native share
+sheet. Counts update exactly once and persist. Pull to refresh shows a loading
+state, prepends one known seeded post the first time, and never duplicates it.
+Scrolling loads the remaining seeded posts in pages without replacing earlier
+rows.
+
+## Compose And Manage Posts
+
+A visible `New post` action presents a composer modal with a multiline field,
+character count, `Cancel`, and `Post`. Post is disabled for blank content or
+content over 300 characters. Cancelling preserves the timeline unchanged.
+
+Publishing inserts one post by Alex at the top of Home and Profile, clears the
+composer, and closes the modal. Alex's posts have a menu with `Edit post` and
+`Delete post`. Editing changes only the selected post after valid input.
+Deleting requires confirmation; cancel retains it and confirm removes it from
+all views permanently.
+
+## Search, Profiles, And Notifications
+
+Search matches seeded people by display name or handle and posts by text using
+a case-insensitive substring. Results are separated into `People` and `Posts`.
+A query with no matches shows `No results`; clearing restores suggestions.
+
+A profile shows name, handle, bio, follower/following counts, follow state, and
+that person's posts. Following or unfollowing updates the state and count once.
+Alex's profile also shows the locally published posts.
+
+Notifications lists seeded likes, follows, replies, and reposts newest first.
+Opening one navigates to the exact profile or post. A `Mark all read` action
+clears the unread badge and persists.
+
+## Accessibility And Out Of Scope
+
+- Selected tabs, interaction states, counts, composer validation, unread state,
+  post media descriptions, and destructive confirmations are accessible.
+- Primary controls have visible labels and at least 44-by-44-point targets.
+- Out of scope: authentication, federation, direct messages, video, live
+  network content, block/mute/report flows, and push notifications.

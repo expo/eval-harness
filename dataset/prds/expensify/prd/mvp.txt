@@ -1,0 +1,59 @@
+Expensify — Team Expense Reports (MVP)
+
+## Overview
+
+Expensify is a mobile expense-management app for recording receipts, organizing
+expenses into reports, and moving reports through an approval workflow. It opens
+in a seeded demo workspace with one submitter, one approver, three reports, and
+at least twelve expenses in varied statuses.
+
+The app must work on iOS and Android with Expo SDK 57.x. Demo workspace changes
+persist locally across cold restarts. There is no login, real payment, bank
+connection, OCR service, email delivery, or server dependency.
+
+## Navigation And Inbox
+
+A bottom tab bar contains `Inbox`, `Expenses`, `Reports`, and `Settings`. Inbox
+shows actionable report events newest first, including drafts to finish,
+reports awaiting approval, and approved reports. Opening an item navigates to
+the exact report or expense and marking it read updates the unread badge.
+
+## Expenses
+
+Expenses are sorted newest first. Rows show merchant, date, amount, category,
+report, receipt state, and status. Search matches merchant, category, and report
+name case-insensitively. Status, category, and date-range filters compose with
+AND logic. No results show `No expenses found` and a clear action.
+
+`New expense` presents a form sheet with merchant, amount, date, category,
+description, report, and optional receipt. Save is disabled until merchant,
+positive amount, date, and category are valid. Attaching a receipt requests
+photo-library or camera permission contextually; denial leaves manual entry
+usable. Saving creates one expense and updates the selected report totals.
+
+Tapping an expense opens it for editing. Draft expenses can be edited or
+deleted after confirmation. Submitted or approved expenses are read-only and
+explain why editing is unavailable.
+
+## Reports And Approval
+
+Reports lists `Draft`, `Submitted`, `Approved`, and `Reimbursed` sections with
+count and total for each. Users can create a uniquely named draft, add or remove
+draft expenses, and inspect itemized totals. An empty report shows `No expenses
+in this report` with `Add expense`.
+
+Submitting a non-empty draft requires confirmation and changes its status to
+Submitted. The Approver view exposes `Approve` and `Reject`; rejection requires
+a reason and returns the report to Draft with that reason visible. Approval
+changes it to Approved. `Mark reimbursed` is available only for approved
+reports. Each transition occurs exactly once and persists.
+
+## Settings, Accessibility, And Out Of Scope
+
+Settings provides workspace currency, demo role (`Submitter` or `Approver`),
+and appearance. Changing role updates available actions without changing data.
+
+- Amounts, statuses, filters, validation, receipt presence, disabled actions,
+  and report totals are accessible text and state.
+- Out of scope: authentication, live collaboration, chat, OCR, corporate cards,
+  bank settlement, tax rules, mileage/GPS, and actual reimbursements.

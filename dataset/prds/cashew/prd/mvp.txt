@@ -1,0 +1,58 @@
+Cashew — Personal Budget Manager (MVP)
+
+## Overview
+
+Cashew is a local-first personal finance app for recording transactions,
+maintaining monthly budgets, and understanding spending. It starts with three
+accounts, six categories, two budgets, and at least 24 transactions across the
+current and previous two months.
+
+The app must work on iOS and Android with Expo SDK 57.x. Accounts, transactions,
+budgets, and settings persist locally across cold restarts. There are no bank
+connections, exchange-rate services, accounts, ads, or server dependencies.
+
+## Navigation And Dashboard
+
+A bottom tab bar contains `Home`, `Transactions`, `Budgets`, and `Settings`.
+Home shows total balance, income, spending, and remaining budget for the
+selected month. Previous and next month controls update every summary. Category
+breakdowns include accessible names, amounts, and percentages; charts may
+supplement but never replace those values.
+
+## Transactions
+
+Transactions are sorted newest first. Each row shows title, category, account,
+date, signed amount, and income or expense type. Search matches title, category,
+or account case-insensitively. Filters for month, type, category, and account
+compose with AND logic and can be cleared together. Zero results show `No
+transactions found`.
+
+`Add transaction` presents a form sheet with type, amount, title, category,
+account, date, and optional note. Save is disabled until amount is positive and
+required fields are selected. Saving inserts exactly one transaction and
+updates balances, dashboard totals, and budgets.
+
+Tapping a row opens that transaction for editing. Saving updates only that
+record. Delete requires confirmation; cancelling retains it and confirming
+removes it permanently and recalculates all affected totals.
+
+## Budgets
+
+Budgets lists each category's monthly limit, spent amount, remaining amount,
+and status. `New budget` requires a category without an existing budget and a
+positive amount. Editing changes the selected budget only. Deleting a budget
+requires confirmation and does not remove transactions.
+
+Overspent and near-limit status use both text and color. Home and Budgets update
+immediately when a transaction or budget changes.
+
+## Settings And Accessibility
+
+Settings provides currency symbol, first day of week, and appearance (`System`,
+`Light`, or `Dark`). Settings apply immediately and persist.
+
+- Monetary values, selected filters, validation, budget status, and dashboard
+  summaries are exposed as accessible text and state.
+- Dates and amounts use one consistent locale-aware format.
+- Out of scope: bank sync, recurring automation, shared budgets, investments,
+  receipt scanning, cloud backup, and financial advice.

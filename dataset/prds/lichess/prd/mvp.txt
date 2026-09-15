@@ -1,0 +1,69 @@
+Lichess Puzzles — Chess Tactics Trainer (MVP)
+
+## Overview
+
+Lichess Puzzles is a mobile chess-training app for solving tactical positions,
+reviewing mistakes, and tracking progress. It ships with a fixed set of twelve
+puzzles spanning several themes and difficulty levels, so every puzzle and
+solution is available offline.
+
+The app must work on iOS and Android with Expo SDK 57.x. Puzzle progress,
+rating, streak, and settings persist locally across cold restarts. There are no
+accounts, online matches, chat, engines, or server dependencies.
+
+## Navigation And Puzzle Catalog
+
+A bottom tab bar contains `Puzzles`, `Progress`, and `Settings`. Puzzles is
+selected initially.
+
+The Puzzles tab lists all twelve puzzles. Each row shows a unique title,
+difficulty, tactical theme, completion state, and best result. Users can search
+titles and themes case-insensitively and filter by `All`, `Unsolved`, or
+`Completed`. Clearing search and filters restores the full difficulty-ascending
+list. A zero-result view says `No puzzles found` and offers `Clear filters`.
+
+Tapping a row opens that exact puzzle. Returning preserves the catalog query,
+filter, and scroll position.
+
+## Solving A Puzzle
+
+The puzzle screen shows whose turn it is, the goal, the chessboard, `Hint`, and
+`Reset puzzle`. Each square and piece has an accessible label such as `White
+knight on f3`; the selected square and legal destinations expose their state.
+Users move by tapping a piece and then a destination. Dragging may be supported
+as an alternative but is not required.
+
+For the seeded puzzle `Back-rank mate`, the exact solution is `Re8+`, followed
+by `Rxe8`, then `Rxe8#`. Correct player moves remain on the board and the
+opponent reply is applied automatically. An incorrect move shows `Try again`,
+keeps the attempt count, and restores the position before that move.
+
+`Hint` first highlights and names the piece to move, then names the destination
+if tapped again. Using a hint marks the result as assisted. `Reset puzzle`
+opens a confirmation dialog; cancelling retains the current position and
+confirming restores the initial position and attempt count.
+
+Completing a puzzle shows `Puzzle solved`, whether it was assisted, attempts,
+rating change, and `Next puzzle`. A completion is recorded only once, even if
+the result view is reopened.
+
+## Progress And Settings
+
+Progress shows accessible text for puzzles solved, current streak, accuracy,
+rating, and solved counts by tactical theme. A recent-results list opens the
+corresponding puzzle. Charts are optional; no value may be communicated only by
+color or geometry.
+
+Settings provides board orientation (`White` or `Black`), piece-move haptics,
+and appearance (`System`, `Light`, or `Dark`). Changes apply immediately and
+persist. Resetting all progress requires confirmation and returns every puzzle
+to unsolved without changing settings.
+
+## Accessibility And Out Of Scope
+
+- Board state, move feedback, result values, and selected controls are exposed
+  semantically, not only visually.
+- Every tappable square is large enough to operate reliably and has a stable
+  chess-coordinate label.
+- Out of scope: live games, clocks, matchmaking, analysis engines, openings,
+  accounts, leaderboards, and downloading new puzzles.

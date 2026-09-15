@@ -1,0 +1,58 @@
+Folo — Feed Reader And Inbox (MVP)
+
+## Overview
+
+Folo is a mobile feed reader that collects articles from followed sources into
+one inbox. It begins with four followed sources and at least 40 stable articles,
+including unread, read, saved, and image-bearing items. The starter library is
+available immediately; users may add another RSS or Atom feed by URL.
+
+The app must work on iOS and Android with Expo SDK 57.x. Followed sources,
+article state, and settings persist locally. Feed requests use standard `fetch`,
+handle loading and failure visibly, and never require an API key or account.
+
+## Navigation And Inbox
+
+A bottom tab bar contains `Inbox`, `Discover`, `Saved`, and `Settings`. Inbox
+shows articles newest first with source, title, excerpt, publication date,
+thumbnail when available, and read/saved state.
+
+Scrolling loads the stable starter articles in pages without replacing earlier
+rows. Pull to refresh shows progress and preserves existing content if a remote
+source fails. Filter chips for `All`, `Unread`, and `Read` combine with a
+case-insensitive search over title, excerpt, and source. No matches show `No
+articles found` and a clear action.
+
+Opening an article marks it read and displays its title, source, date, readable
+content, `Save`, `Mark unread`, `Share`, and `Open original`. Back returns to the
+same inbox position. Save and read state update everywhere exactly once and
+persist. Share opens the native share surface with title and URL.
+
+## Sources And Discovery
+
+Discover lists the followed sources plus `Add feed`. Each source shows name,
+URL, unread count, and follow state. Opening a source shows only its articles.
+
+`Add feed` presents a URL field and `Follow` action. Follow is disabled until a
+valid HTTP or HTTPS URL is entered. While resolving, show `Finding feed` and
+prevent duplicate submissions. A successful response creates one source and
+loads its articles. An invalid document or network failure shows an actionable
+inline error without clearing the URL. A URL already followed reports `Already
+following` and creates no duplicate.
+
+Users can rename a followed source locally or unfollow it after confirmation.
+Cancelling keeps the source and its articles. Confirming removes only that
+source and its unsaved articles; saved articles remain available in Saved.
+
+## Saved, Settings, And Accessibility
+
+Saved lists saved articles newest first and provides the same search, open,
+unsave, and share behavior. Its empty state says `No saved articles`.
+
+Settings provides default article text size, open-original preference, and
+appearance (`System`, `Light`, or `Dark`). All settings persist.
+
+- Article rows, loading/errors, selected filters, read/saved state, and source
+  counts are exposed semantically.
+- Out of scope: authentication, social reactions, AI summaries, newsletters,
+  push notifications, podcast playback, and background refresh.

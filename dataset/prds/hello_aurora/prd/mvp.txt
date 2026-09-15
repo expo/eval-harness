@@ -1,0 +1,63 @@
+Hello Aurora — Aurora Forecast And Sightings (MVP)
+
+## Overview
+
+Hello Aurora is a mobile forecast app for understanding aurora conditions,
+configuring alerts, and viewing community sightings. It opens with stable
+forecast snapshots for Tromsø, Reykjavík, Fairbanks, and Yellowknife plus at
+least 20 community sightings. The user can select any location without being
+physically present there.
+
+The app must work on iOS and Android with Expo SDK 57.x. Selected locations,
+favorites, alert rules, sightings, and passport progress persist locally.
+Forecast refresh uses standard `fetch` against public space-weather data and
+retains the bundled snapshot with a visible timestamp if the request fails.
+
+## Navigation And Forecast
+
+A bottom tab bar contains `Forecast`, `Map`, `Moments`, and `Passport`.
+Forecast shows the selected location and accessible text for aurora strength,
+Kp index, Bz direction/value, cloud cover, darkness window, viewing likelihood,
+and last update. A 27-day outlook lists date, predicted Kp, and likelihood.
+Charts may supplement but cannot replace these values.
+
+The location selector supports case-insensitive search of the four stable
+locations, favorite toggles, and `Use current location`. Location permission is
+requested only for the latter. Denial keeps manual selection fully usable.
+Pull to refresh exposes loading, success timestamp, and non-destructive failure.
+
+## Alerts
+
+`Aurora alerts` presents saved rules and `New alert`. A rule requires location,
+minimum likelihood, radius, and at least one trigger: strong aurora, substorm,
+community sighting, or Bz south. Save is disabled until valid. Users can enable,
+disable, edit, and delete rules; deletion requires confirmation.
+
+Enabling the first rule requests notification permission contextually. Denial
+keeps the rule saved but disabled and explains how to try again. A `Preview
+alert` action shows the exact title and body that would be sent without waiting
+for live conditions.
+
+## Map, Moments, And Passport
+
+Map shows the selected location, aurora oval, cloud layer toggle, and sighting
+markers. Because the map is primarily visual, a labelled `Nearby conditions`
+sheet must list the same visible locations and conditions as accessible rows.
+Selecting a row or marker opens that exact place or sighting.
+
+Moments lists sightings newest first with author, location, time, strength,
+conditions, photo description, and like count. Search and filters for location
+and strength compose. Liking updates once. `Report sighting` presents location,
+strength, notes, and optional photo; valid submission adds one moment and one
+passport point.
+
+Passport shows sightings reported, countries observed, likes received, points,
+and unlocked milestones as accessible text. Opening a milestone explains its
+requirements.
+
+## Accessibility And Out Of Scope
+
+- Forecast values, map-equivalent conditions, selected layers, alert state,
+  sightings, and passport progress never rely only on color, chart, or photo.
+- Out of scope: scientific guarantees, background location, real push delivery,
+  photo-quality requirements, live video, social accounts, and travel advice.
