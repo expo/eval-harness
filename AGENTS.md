@@ -15,13 +15,20 @@ runner plus uploaded artifacts.
   and ordinary Vitest checks. Its default tests must use fake runners. Explicit
   `test:e2e` runs use real Ollama inference in the separate advisory GitHub Actions
   workflow. Keep task outcomes distinct from check counts.
-  The kit bundles private source-scan JavaScript with Bun and its declarations
-  with rollup-plugin-dts. Source-scan is a dev dependency only; Babel and Vitest
-  stay external. Published runtime dependencies must not include source-scan.
-  Centralize shared external versions in the root catalog; keep dependency
-  declarations in their owning packages. Pack releases with `bun pm pack` so
-  no `catalog:` or `workspace:` protocols reach consumers.
-  Package exports point to compiled ESM and declarations under `build/`; run
+  `skill-analyzer/` owns the Bun skill analyzer and shared artifact materializer,
+  publishing bundled JavaScript, declarations, and check JSON. Harness callers
+  import the package directly; use its installed CLI for
+  analysis, materialization, and bundle checks. Old module paths are removed.
+  Both packages bundle private source-scan JavaScript with Bun and declarations
+  with rollup-plugin-dts; source-scan is a dev dependency only. No source copies
+  or bundled npm dependencies are needed. Both keep Babel external; the kit
+  also keeps Vitest external and the analyzer keeps tar external. The analyzer
+  still requires Bun at runtime. Its executable has a dedicated entrypoint,
+  and its build copies the check JSON alongside the shared output chunks.
+  Shared versions live in the root catalog; keep dependency declarations in
+  their owning packages. Use `bun pm pack` for releases so no `catalog:` or
+  `workspace:` protocols reach installed consumers.
+  All workspace exports point to compiled ESM and declarations under `build/`; run
   `bun install` (which builds the workspace foundation) before harness commands,
   and `bun run build` after editing package source. Keep publication paths in
   `exports` directly, without `publishConfig` remapping.
@@ -33,7 +40,8 @@ runner plus uploaded artifacts.
   iOS apps with `agent-device` and scores app-agnostic primitive test plans
   against a PRD. `prompts/prompt_agent.py` is its system prompt; `scripts/`
   holds `eval-ios-app.sh`.
-- `eval_harness/evaluator/skill_invocation/`: v0 skill-use analyzer package. It
+- `eval_harness/evaluator/skill_invocation/`: shell orchestration and tests
+  for `packages/skill-analyzer/`. The v0 analyzer
   inspects authored app artifacts, authoring traces, static uptake checks, and
   optional evaluator outcomes. `scripts/` holds `eval-skill-use.sh`.
 - `eval_harness/utils/`: shared artifacts, iOS, shell, and telemetry helpers
@@ -55,7 +63,7 @@ runner plus uploaded artifacts.
   dispatches and external/future aggregation of their `summary.json` files.
 - The app evaluator CLI is `python -m eval_harness.evaluator.ios_agentic.main`.
 - The skill evaluator CLI is
-  `bun eval_harness/evaluator/skill_invocation/main.ts`.
+  `bun node_modules/.bin/skill-analyzer`.
 - Notes canonical input paths (the small, known-good target used first when
   proving harness changes):
   - PRD: `dataset/prds/notes/prd/mvp.txt`
@@ -105,7 +113,8 @@ runner plus uploaded artifacts.
   against the declarative lexical + structural checks in `checks_data.json`
   plus code-driven checks (including syntax-tree, see `uptake_checks/code_checks.ts`)
   registered via `register`; route-graph checks still don't exist -- see
-  `uptake_checks/README.md`. 9 of 21 Expo skills are currently mapped; the
+  `packages/skill-analyzer/src/uptake_checks/README.md`. 9 of 21 Expo skills are
+  currently mapped; the
   rest are either CLI/cloud-ops skills with no source-tree footprint at all
   (deferred to a future trace-based checking axis, not this static-check
   registry) or assume a pre-existing app this harness doesn't produce -- see
@@ -113,7 +122,7 @@ runner plus uploaded artifacts.
   full-ecosystem gap analysis. Checks are deliberately
   skill-agnostic atomic facts about the code; `skill_map.json` is the only
   file coupled to the current skill taxonomy, so a skill rename/merge/split
-  only touches that one mapping. See `uptake_checks/README.md`. There is no
+  only touches that one mapping. See `packages/skill-analyzer/src/uptake_checks/README.md`. There is no
   manual case-spec selection anymore. Trigger and uptake are scored per
   expected skill independently (`analysis.computeSkillResults`,
   `metrics.json`'s `skills` key) -- a shared check contributes its result to
@@ -169,7 +178,7 @@ runner plus uploaded artifacts.
   compatible with prior layouts for replay, but compatibility paths are
   read-only and must not leak back into workflow output names or documentation.
 - Materialize downloaded artifacts with
-  `eval_harness/utils/artifacts/materialize.ts`, never raw `tar -xzf`. It
+  `bun node_modules/.bin/skill-analyzer materialize`, never raw `tar -xzf`. It
   handles EAS directories, direct archives, nested roots, and supported legacy
   layouts through clean staging while rejecting traversal, escaping links,
   unsafe file types, and ambiguous roots.

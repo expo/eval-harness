@@ -207,7 +207,7 @@ if command -v gtimeout >/dev/null 2>&1; then BH_TO="gtimeout 240";
 elif command -v timeout >/dev/null 2>&1; then BH_TO="timeout 240";
 else BH_TO="bun $ROOT/eval_harness/utils/shell/timeout_exec.ts 240"; fi
 AUTHOR_EXPO_EXPORT_STATUS=warning
-if ( cd "$ROOT" && $BH_TO bun eval_harness/evaluator/skill_invocation/build_health/bundle_check.ts "$WORKSPACE" ) \
+if ( cd "$ROOT" && $BH_TO bun node_modules/.bin/skill-analyzer bundle-check "$WORKSPACE" ) \
   >"$OUT/d-expo-export.log" 2>&1; then
   if "$(command -v python3 || command -v python)" - "$WORKSPACE/.eval-build-health-bundle.json" <<'PYEOF'
 import json

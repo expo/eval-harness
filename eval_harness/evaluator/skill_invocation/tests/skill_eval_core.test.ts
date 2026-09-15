@@ -25,22 +25,22 @@ import {
   readJson,
   unpackArtifact,
   writeJson,
-} from "../utils.ts";
+} from "@expo/skill-analyzer/utils";
 import {
   computeBundleResult,
   persistBundleResult,
   readBundleResult,
-} from "../build_health/bundle_check.ts";
+} from "@expo/skill-analyzer/build_health/bundle_check";
 import {
   checkFileSyntax,
   extractAstFacts,
-} from "../build_health/node_parser.ts";
-import { checkSyntax } from "../build_health/syntax_check.ts";
+} from "@expo/skill-analyzer/build_health/node_parser";
+import { checkSyntax } from "@expo/skill-analyzer/build_health/syntax_check";
 import {
   detectTriggeredSkills,
   scoreTriggerQuality,
   type NormalizedTrace,
-} from "../uptake_checks/trigger.ts";
+} from "@expo/skill-analyzer/uptake_checks/trigger";
 import {
   CheckResult,
   AppTree,
@@ -53,14 +53,12 @@ import {
   runChecks,
   type CheckDefinition,
   type CheckStatus,
-} from "../uptake_checks/registry.ts";
+} from "@expo/skill-analyzer/uptake_checks/registry";
 
-const REAL_CHECKS_DIR = resolve(import.meta.dir, "../uptake_checks");
+import { defaultChecksDirectory } from "@expo/skill-analyzer";
+const REAL_CHECKS_DIR = defaultChecksDirectory;
 const REPO_ROOT = resolve(import.meta.dir, "../../../..");
-const BUNDLE_CHECK_PATH = resolve(
-  import.meta.dir,
-  "../build_health/bundle_check.ts",
-);
+const BUNDLE_CHECK_PATH = resolve(import.meta.dir, "../../../../node_modules/.bin/skill-analyzer");
 function withTempDir<T>(run: (root: string) => T): T {
   const root = mkdtempSync(join(tmpdir(), "skill-core-"));
   try {
@@ -1491,7 +1489,7 @@ test("[REGRESSION] bundle CLI accepts an Android platform flag", () => {
     chmodSync(fakeExpo, 0o755);
 
     const result = Bun.spawnSync(
-      [process.execPath, BUNDLE_CHECK_PATH, root, "--platform", "android"],
+      [process.execPath, BUNDLE_CHECK_PATH, "bundle-check", root, "--platform", "android"],
       { stdout: "pipe", stderr: "pipe" },
     );
 
@@ -1506,12 +1504,12 @@ test("[REGRESSION] bundle CLI accepts an Android platform flag", () => {
 test("[CHAR] bundle CLI reports invalid invocations instead of crashing", () => {
   // Characterization: the Bun CLI intentionally replaces Python's missing-
   // argument traceback and ignored extra arguments with explicit usage errors.
-  const missing = Bun.spawnSync([process.execPath, BUNDLE_CHECK_PATH], {
+  const missing = Bun.spawnSync([process.execPath, BUNDLE_CHECK_PATH, "bundle-check"], {
     stdout: "pipe",
     stderr: "pipe",
   });
   const unknown = Bun.spawnSync(
-    [process.execPath, BUNDLE_CHECK_PATH, "/tmp/app", "--unknown"],
+    [process.execPath, BUNDLE_CHECK_PATH, "bundle-check", "/tmp/app", "--unknown"],
     { stdout: "pipe", stderr: "pipe" },
   );
 
@@ -1532,7 +1530,7 @@ test("[REGRESSION] authoring invokes the Bun build-health helper", () => {
   );
 
   expect(authoringScript).toContain(
-    "bun eval_harness/evaluator/skill_invocation/build_health/bundle_check.ts",
+    "bun node_modules/.bin/skill-analyzer bundle-check",
   );
   expect(authoringScript).not.toContain(
     "python -m eval_harness.evaluator.skill_invocation.build_health.bundle_check",

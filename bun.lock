@@ -5,15 +5,15 @@
     "": {
       "name": "eval-experiments",
       "dependencies": {
-        "@expo/source-scan": "workspace:*",
-        "tar": "^7.5.22",
+        "@expo/skill-analyzer": "workspace:*",
       },
       "devDependencies": {
         "@expo/config": "57.0.7",
         "@expo/require-utils": "57.0.4",
-        "@types/bun": "1.3.14",
+        "@types/bun": "catalog:",
         "fast-check": "4.9.0",
         "oxfmt": "0.67.0",
+        "tar": "catalog:",
         "typescript": "catalog:",
       },
     },
@@ -36,6 +36,25 @@
         "vitest": ">=4.1.0 <5",
       },
     },
+    "packages/skill-analyzer": {
+      "name": "@expo/skill-analyzer",
+      "version": "0.1.0",
+      "bin": {
+        "skill-analyzer": "./bin/skill-analyzer.mjs",
+      },
+      "dependencies": {
+        "@babel/parser": "catalog:",
+        "tar": "catalog:",
+      },
+      "devDependencies": {
+        "@expo/source-scan": "workspace:*",
+        "@types/bun": "catalog:",
+        "@typescript/typescript6": "catalog:",
+        "rollup": "catalog:",
+        "rollup-plugin-dts": "catalog:",
+        "typescript": "catalog:",
+      },
+    },
     "packages/source-scan": {
       "name": "@expo/source-scan",
       "version": "0.1.0",
@@ -49,9 +68,11 @@
   },
   "catalog": {
     "@babel/parser": "^7.29.8",
+    "@types/bun": "1.3.14",
     "@typescript/typescript6": "6.0.2",
     "rollup": "4.63.1",
     "rollup-plugin-dts": "6.5.1",
+    "tar": "^7.5.22",
     "typescript": "7.0.2",
   },
   "packages": {
@@ -158,6 +179,8 @@
     "@expo/require-utils": ["@expo/require-utils@57.0.4", "", { "dependencies": { "@babel/code-frame": "^7.20.0", "@babel/core": "^7.25.2", "@babel/plugin-transform-modules-commonjs": "^7.24.8" }, "peerDependencies": { "typescript": "^5.0.0 || ^5.0.0-0 || ^6.0.0 || ^7.0.0" }, "optionalPeers": ["typescript"] }, "sha512-e7xbg/9BTQcsZE/oErafZXtI7kh5IgfasLJ97J5sFSzX2cA74pDvdlhW1KHVSaDkQyQv6h1LSLhsY7dEeOk7hw=="],
 
     "@expo/sdk-runtime-versions": ["@expo/sdk-runtime-versions@1.0.0", "", {}, "sha512-Doz2bfiPndXYFPMRwPyGa1k5QaKDVpY806UJj570epIiMzWaYyCtobasyfC++qfIXVb5Ocy7r3tP9d62hAQ7IQ=="],
+
+    "@expo/skill-analyzer": ["@expo/skill-analyzer@workspace:packages/skill-analyzer"],
 
     "@expo/source-scan": ["@expo/source-scan@workspace:packages/source-scan"],
 

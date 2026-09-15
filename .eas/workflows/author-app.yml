@@ -81,6 +81,8 @@ jobs:
     steps:
       - uses: eas/checkout
 
+      - uses: eas/install_node_modules
+
       - name: Author app with coding agent
         run: bash ./eval_harness/app_builder/scripts/author-app.sh
 

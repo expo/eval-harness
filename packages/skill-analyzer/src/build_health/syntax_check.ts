@@ -1,5 +1,5 @@
-import { AppTree } from "../uptake_checks/registry.ts";
-import { checkSourceSyntax } from "./node_parser.ts";
+import { AppTree } from '../uptake_checks/registry.ts';
+import { checkSourceSyntax } from './node_parser.ts';
 
 export type SyntaxCheckResult = {
   total_files: number;
@@ -18,12 +18,10 @@ export async function checkSyntax(appDir: string): Promise<SyntaxCheckResult> {
     [...appTree.files].map(async ([relativePath, source]) => ({
       relativePath,
       facts: checkSourceSyntax(source),
-    })),
+    }))
   );
   const failedFiles = checkedFiles.flatMap(({ relativePath, facts }) =>
-    "error" in facts
-      ? [{ file: relativePath, message: facts.message }]
-      : [],
+    'error' in facts ? [{ file: relativePath, message: facts.message }] : []
   );
   const total = appTree.files.size;
   return {
