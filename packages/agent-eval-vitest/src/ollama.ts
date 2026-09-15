@@ -19,12 +19,16 @@ export interface OllamaRunnerOptions {
   host?: string;
   /** Describe the CLI's available commands and task-specific rules. */
   systemPrompt?: string;
+  /** Optional JSON Schema for run/done actions, passed to Ollama structured outputs. */
+  actionSchema?: Record<string, unknown>;
   /** Maximum chat requests per evaluation. Default: 8. */
   maxTurns?: number;
   /** Wall-clock deadline for each HTTP request, including the response body. Default: 900000. */
   requestTimeoutMs?: number;
   /** Feedback limit per stdout/stderr field. Full output remains in evidence. Default: 800. */
   maxOutputChars?: number;
+  /** Override thinking on models that support it; otherwise use the server default. */
+  think?: boolean;
   temperature?: number;
   seed?: number;
 }
@@ -97,7 +101,8 @@ export function ollamaRunner(options: OllamaRunnerOptions): AgentRunner {
           model: options.model,
           messages,
           stream: false,
-          format: 'json',
+          format: options.actionSchema ?? 'json',
+          ...(options.think === undefined ? {} : { think: options.think }),
           options: { temperature, seed },
         };
         await record({ type: 'request', turn: turns, body });

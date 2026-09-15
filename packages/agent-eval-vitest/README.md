@@ -151,9 +151,14 @@ const agentEval = createAgentEval({ runner, timeoutMs: 20 * 60_000 });
 forward cancellation, and capture stdout/stderr. Describe available commands in the
 system prompt; the runner adds JSON action instructions. Put grading in Vitest checks.
 
+Supply `actionSchema` to constrain generation with an Ollama JSON Schema matching
+your command interface. It must retain the runner's `run`/`done` action shapes.
+Runtime action parsing and command-handler validation still apply.
+
 The host defaults to `OLLAMA_HOST` or `http://127.0.0.1:11434`; `host` overrides it.
 The model is always explicit. The runner does not start Ollama or pull models.
-Defaults are 8 chat requests, temperature 0, seed 42, and a 15-minute deadline per
+Use `think: false` to disable thinking for supported models; when omitted, the
+server/model default applies. Defaults are 8 chat requests, temperature 0, seed 42, and a 15-minute deadline per
 HTTP request. Configure the evaluation's total `timeoutMs` separately; the default
 kit deadline may be shorter than local inference. Node HTTP avoids fetch's shorter
 headers timeout, and the runner cancels pending HTTP requests on abort.
@@ -227,3 +232,10 @@ The smoke checks install it using npm and Bun with the `@expo` registry blocked,
 then run real Node/Vitest checks and strict NodeNext/Bundler type checks without
 `skipLibCheck`. The type checks include `ESNext.Disposable`, required by Vitest's
 spy declarations.
+
+## Live end-to-end coverage
+
+The opt-in `bun run test:e2e` command exercises a real Ollama model through Vitest,
+a fixture CLI, independent checks, cleanup, and saved evidence. See
+[end-to-end test guide](https://github.com/expo/eval-experiments/tree/main/packages/agent-eval-vitest/e2e) for local setup and the separate advisory GitHub
+Actions job. The default tests continue to run without live models.
