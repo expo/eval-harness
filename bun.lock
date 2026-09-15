@@ -5,7 +5,7 @@
     "": {
       "name": "eval-experiments",
       "dependencies": {
-        "@babel/parser": "7.29.8",
+        "@expo/source-scan": "workspace:*",
         "tar": "^7.5.22",
       },
       "devDependencies": {
@@ -13,9 +13,23 @@
         "@expo/require-utils": "57.0.4",
         "@types/bun": "1.3.14",
         "fast-check": "4.9.0",
-        "typescript": "7.0.2",
+        "typescript": "catalog:",
       },
     },
+    "packages/source-scan": {
+      "name": "@expo/source-scan",
+      "version": "0.1.0",
+      "dependencies": {
+        "@babel/parser": "catalog:",
+      },
+      "devDependencies": {
+        "typescript": "catalog:",
+      },
+    },
+  },
+  "catalog": {
+    "@babel/parser": "^7.29.8",
+    "typescript": "7.0.2",
   },
   "packages": {
     "@babel/code-frame": ["@babel/code-frame@7.29.7", "", { "dependencies": { "@babel/helper-validator-identifier": "^7.29.7", "js-tokens": "^4.0.0", "picocolors": "^1.1.1" } }, "sha512-Aup7aUOfpbAUg2ROOJN6Iw5f9DMBlzu0mIkm/malLQFN/YQgO48wCj0Kxa3sEHJvPVFg7siR+qRInwXd2qhQKw=="],
@@ -67,6 +81,8 @@
     "@expo/require-utils": ["@expo/require-utils@57.0.4", "", { "dependencies": { "@babel/code-frame": "^7.20.0", "@babel/core": "^7.25.2", "@babel/plugin-transform-modules-commonjs": "^7.24.8" }, "peerDependencies": { "typescript": "^5.0.0 || ^5.0.0-0 || ^6.0.0 || ^7.0.0" }, "optionalPeers": ["typescript"] }, "sha512-e7xbg/9BTQcsZE/oErafZXtI7kh5IgfasLJ97J5sFSzX2cA74pDvdlhW1KHVSaDkQyQv6h1LSLhsY7dEeOk7hw=="],
 
     "@expo/sdk-runtime-versions": ["@expo/sdk-runtime-versions@1.0.0", "", {}, "sha512-Doz2bfiPndXYFPMRwPyGa1k5QaKDVpY806UJj570epIiMzWaYyCtobasyfC++qfIXVb5Ocy7r3tP9d62hAQ7IQ=="],
+
+    "@expo/source-scan": ["@expo/source-scan@workspace:packages/source-scan"],
 
     "@isaacs/fs-minipass": ["@isaacs/fs-minipass@4.0.1", "", { "dependencies": { "minipass": "^7.0.4" } }, "sha512-wgm9Ehl2jpeqP3zw/7mo3kRHFp5MEDhqAdwy1fTGkHAwnkGOVsgpvQhL8B5n1qlb01jV3n/bI0ZfZp5lWA1k4w=="],
 

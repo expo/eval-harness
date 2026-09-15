@@ -455,6 +455,21 @@ The legacy evaluator-trace mirror is disabled unless `PUSH_EVAL_TRACE_BT=1`.
 
 ## Development
 
+The private [`source-scan`](packages/source-scan/README.md) workspace provides
+comment stripping, Babel parsing, and AST walking for the existing skill analyzer.
+It is not published separately; downstream packages bundle the shared utilities.
+Shared external versions live in the root `catalog`; each package declares its
+own dependencies using `catalog:`. Internal dependencies use `workspace:*`.
+
+```bash
+bun install             # installs workspaces and builds shared utilities
+bun run build           # rebuild after changing source
+bun run test:packages   # source-scan unit tests
+```
+
+Workspace exports reference compiled ESM and declarations under `build/`.
+Run `bun run build` explicitly if installation hooks were disabled.
+
 The app evaluator can still be run locally against an already served app when
 debugging driver behavior, but collaborators should start with EAS workflows
 because they match the runner environment.
