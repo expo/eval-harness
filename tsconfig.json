@@ -21,6 +21,7 @@
   "include": [
     "eval_harness/**/*.ts",
     "packages/*/src/**/*.ts",
+    "scripts/**/*.ts",
     "packages/*/scripts/**/*.mts",
     "packages/*/e2e/**/*.ts"
   ],
