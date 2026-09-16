@@ -189,3 +189,157 @@ console.log(JSON.stringify({subtype:'success',is_error:false,total_cost_usd:0.01
     rmSync(root, { recursive: true, force: true });
   }
 }, 30_000);
+
+test("saved signing quote regression: bold and whitespace are presentation, altered wording is not", () => {
+  const answer =
+    "1. **Regenerate the provisioning profile.** Create a new profile that includes the new distribution certificate.";
+  const quote =
+    "Regenerate the provisioning profile. Create a new profile that includes the new distribution certificate.";
+  const judgment = (text: string) => ({
+    criteria: [1, 2, 3].map((i) => ({
+      id: `review:${i}`,
+      verdict: "passed",
+      quote: text,
+      reason: "Fixture evidence",
+    })),
+  });
+  expect(
+    parseJudgment(judgment(quote), answer).every(
+      (row) => row.status === "passed",
+    ),
+  ).toBe(true);
+  expect(parseJudgment(judgment(quote), answer)[1]?.evidence).toContain(
+    "bold/whitespace normalized",
+  );
+  expect(
+    parseJudgment(judgment(quote.replace(". Create", ".\nCreate")), answer),
+  ).toHaveLength(3);
+  expect(() =>
+    parseJudgment(judgment(quote.replace("Regenerate", "Delete")), answer),
+  ).toThrow("quote");
+  expect(() =>
+    parseJudgment(
+      judgment(quote.replace("new distribution", "old distribution")),
+      answer,
+    ),
+  ).toThrow("quote");
+});
+
+import { createHash } from "node:crypto";
+import { replayJudgments } from "../focused/replay-judgments.ts";
+import { CALIBRATION, SIGNING_RUBRIC } from "../focused/advice-judge.ts";
+
+test("offline replay preserves source evidence, recovers formatting-only failures and rejects altered answers", () => {
+  const root = mkdtempSync(join(tmpdir(), "replay-judge-"));
+  const source = join(root, "source");
+  const write = (path: string, value: unknown) => {
+    mkdirSync(join(source, path, ".."), { recursive: true });
+    writeFileSync(join(source, path), JSON.stringify(value));
+  };
+  const hash = (value: unknown) =>
+    createHash("sha256").update(JSON.stringify(value)).digest("hex");
+  const structured = (answer: string, verdicts: readonly string[]) => ({
+    criteria: verdicts.map((verdict, i) => ({
+      id: `review:${i + 1}`,
+      verdict,
+      quote: answer,
+      reason: "Saved fixture judgment",
+    })),
+  });
+  try {
+    write("judge-calibration.json", {
+      calibrated: true,
+      model: "fake",
+      rubric: SIGNING_RUBRIC,
+    });
+    for (const sample of CALIBRATION)
+      write(`judge-calibration/${sample.id}/raw.json`, {
+        subtype: "success",
+        structured_output: structured(sample.answer, sample.expected),
+      });
+    const observation = observeClaude(
+      JSON.stringify({
+        type: "result",
+        subtype: "success",
+        result: "**Regenerate the profile.** Keep the certificate.",
+      }),
+      {},
+    );
+    const manifest = { adapter: "claude-focused-v2" };
+    const author = hash({ ...manifest, resolved_model: observation.model });
+    const condition = hash({
+      author,
+      judge_model: "fake",
+      resolved_models: [],
+      rubric: SIGNING_RUBRIC,
+      calibrated: true,
+    });
+    const run: Attempt = {
+      id: "signing-diagnosis",
+      family: "signing",
+      attempt: 1,
+      condition,
+      plugin_hash: "absent",
+      skill_mode: "without-expo",
+      artifact_path: "without-expo/signing-diagnosis/1",
+      status: "complete",
+      duration_ms: 1000,
+      observation,
+      routing: [],
+      checks: [],
+      judgment: {
+        status: "unavailable",
+        requested_model: "fake",
+        resolved_models: [],
+        cost_usd: null,
+        evidence: "quote mismatch",
+      },
+    };
+    write("metrics.json", { schema_version: 2, attempts: [run] });
+    write(`${run.artifact_path}/manifest.json`, manifest);
+    const input = {
+      answer: observation.final,
+      criteria: SIGNING_RUBRIC.map((criterion, i) => ({
+        id: `review:${i + 1}`,
+        criterion,
+      })),
+    };
+    write(`${run.artifact_path}/judge/input.json`, input);
+    write(`${run.artifact_path}/judge/raw.json`, {
+      subtype: "success",
+      modelUsage: { fake: {} },
+      total_cost_usd: 0.01,
+      structured_output: structured(
+        "Regenerate the profile. Keep the certificate.",
+        ["passed", "passed", "passed"],
+      ),
+    });
+    const original = readFileSync(join(source, "metrics.json"), "utf8");
+    replayJudgments(source, join(root, "derived"));
+    expect(readFileSync(join(source, "metrics.json"), "utf8")).toBe(original);
+    const result = JSON.parse(
+      readFileSync(join(root, "derived/metrics.json"), "utf8"),
+    ).attempts[0];
+    expect(outcomeVerdict(result)).toBe("passed");
+    expect(readFileSync(join(root, "derived/report.html"), "utf8")).toContain(
+      "Offline replay of saved judge evidence",
+    );
+    expect(result.judgment.cost_usd).toBe(0.01);
+    expect(
+      JSON.parse(readFileSync(join(root, "derived/replay.json"), "utf8"))
+        .source_metrics_sha256,
+    ).toBe(hash(JSON.parse(original)));
+    expect(() => replayJudgments(source, join(source, "nested"))).toThrow(
+      "outside",
+    );
+    write(`${run.artifact_path}/judge/input.json`, {
+      ...input,
+      answer: "An unrelated answer",
+    });
+    expect(() => replayJudgments(source, join(root, "bad"))).toThrow(
+      "mismatch",
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

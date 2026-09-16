@@ -144,7 +144,7 @@ Before grading, it must correctly classify three hand-authored calibration answe
 generic wrong advice, and fabricated execution). Calibration failure makes advice grading unavailable
 and fails the invocation. This tiny gate is not expert validation; all model judgments are
 provisional. Other advice tasks still require review. Invalid/missing judgments are unavailable and their error reasons appear in the summary;
-semantic unknown judgments stay pending. Neither is a pass. Quoted evidence must exist verbatim in the answer. No candidate
+semantic unknown judgments stay pending. Neither is a pass. Quoted evidence must match the answer exactly or after removing paired Markdown bold markers and collapsing whitespace; changed wording is rejected. No candidate
 skill text is used as ground truth. Judge input, raw output, model identity, per-answer cost
 and calibration results are retained. Calibration cost lives in `judge-calibration.json`;
 per-answer judge costs are in `summary.json`, separate from author cost.
@@ -154,3 +154,22 @@ failed criteria, delivered/missing required skills and suggested next investigat
 never turn a small sample into a causal claim or automatically rewrite a skill. Do not tune
 against these cases and present them as unseen validation. Current cases are synthetic
 and the restricted author tool profile remains a controlled file-edit experiment.
+
+## Replay saved judge output without model calls
+
+After materializing a focused artifact, revalidate its saved responses into a new directory:
+
+```sh
+bun eval_harness/evaluator/skill_invocation/focused/main.ts replay-judgments \
+  --report /path/to/focused-skill-eval --out /path/to/replayed-report
+```
+
+This reads calibration, answers, raw judge output and manifests; it does not execute authored
+code or run a model. Calibration, input-answer correspondence and original condition hashes
+must validate. The source artifact is preserved. `replay.json` records its metrics hash,
+recovered attempts and quote-validation version. Recovered judge model/cost metadata restores
+matched comparisons. The derived report does not change the original workflow's error status.
+
+PR summaries use one row per task with both conditions, explicit ungraded counts, and
+collapsible author time/cost and skill-delivery details. Judge failures print their case,
+condition, trial and error in CI logs instead of leaving only an unexplained exit code.

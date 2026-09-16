@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { AdviceJudgment } from "./advice-judge.ts";
 import { OUTCOME_CHECKS, type Check } from "./outcomes.ts";
@@ -142,6 +142,26 @@ export function summarize(attempts: Attempt[]) {
       outcome_unavailable: count("unavailable"),
       infrastructure_errors: runs.filter((run) => run.status !== "complete")
         .length,
+      delivered_skills: Object.fromEntries(
+        [
+          ...new Set(
+            runs.flatMap((run) =>
+              run.observation.events
+                .filter((event) => event.kind === "delivered" && event.skill)
+                .map((event) => event.skill!),
+            ),
+          ),
+        ]
+          .sort()
+          .map((skill) => [
+            skill,
+            runs.filter((run) =>
+              run.observation.events.some(
+                (event) => event.kind === "delivered" && event.skill === skill,
+              ),
+            ).length,
+          ]),
+      ),
       routing_passed: runs.filter((run) => routingVerdict(run) === "passed")
         .length,
       routing_evaluable: runs.filter((run) =>
@@ -272,7 +292,7 @@ export function writeReport(out: string, attempts: Attempt[]): void {
     join(out, "report.html"),
     page(
       "Focused Expo skill evaluation",
-      `<p>Task outcomes and routing are separate. Pending reviews are not passes. Source/JS checks do not establish native-runtime correctness. Counts describe this sample, not production reliability. Costs are model-reported and exclude CI compute. Without Expo skills retains the runtime's other built-in skills.</p>
+      ` ${existsSync(join(out, "replay.json")) ? "<p><b>Offline replay of saved judge evidence.</b> No new model calls. This derived report does not change the original CI error status. See replay.json for provenance.</p>" : ""}<p>Task outcomes and routing are separate. Pending reviews are not passes. Source/JS checks do not establish native-runtime correctness. Counts describe this sample, not production reliability. Costs are model-reported and exclude CI compute. Without Expo skills retains the runtime's other built-in skills.</p>
     <h2>What this experiment tells us</h2><ul>${insights.map((finding) => `<li><b>${escape(finding.id)}</b> (${finding.grading}): ${escape(finding.message)} ${escape(finding.next_step)}</li>`).join("")}</ul>
     <p>Advice judgments are provisional and gated by synthetic calibration, not expert validation. Judge costs are recorded separately in summary.json and judge-calibration.json. Failure evidence and delivery details are in findings.json; these suggest investigations, not proven causes.</p>
     <table><tr><th>Case</th><th>Condition</th><th>Outcome</th><th>Pending</th><th>Unavailable</th><th>Routing</th><th>Attempts</th><th>Paired conditions</th><th>Median time</th><th>Model cost</th></tr>${matrix}</table>${detail}`,

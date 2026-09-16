@@ -1,3 +1,4 @@
+import { replayJudgments } from "./replay-judgments.ts";
 import { gradeSigning } from "./advice-judge.ts";
 import { parseArgs } from "node:util";
 import { resolve, join } from "node:path";
@@ -12,6 +13,7 @@ const HELP = `Focused skill evaluations
       [--repetitions 3] [--timeout 300] [--max-turns 20]
       [--skill-mode with-expo|without-expo|both] [--judge-model MODEL]
   compare --baseline METRICS --candidate METRICS --out DIR
+  replay-judgments --report DIR --out NEW_DIR (saved evidence only, no model calls)
 
 run is CI-only. validate and compare make no model calls.
 The default split is development. Holdout must be explicitly selected.
@@ -43,6 +45,7 @@ export async function main(argv: string[]): Promise<number> {
         "candidate",
         "skill-mode",
         "judge-model",
+        "report",
       ].map((key) => [key, { type: "string" as const }]),
     ),
     strict: true,
@@ -53,6 +56,10 @@ export async function main(argv: string[]): Promise<number> {
       throw new Error(`--${name} is required`);
     return value;
   };
+  if (command === "replay-judgments") {
+    replayJudgments(required("report"), required("out"));
+    return 0;
+  }
   if (command === "compare") {
     compareReports(
       required("baseline"),
