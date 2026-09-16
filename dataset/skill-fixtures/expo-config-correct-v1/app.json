@@ -1,0 +1,26 @@
+{
+  "expo": {
+    "name": "Config Fixture",
+    "slug": "config-fixture",
+    "scheme": "config-fixture",
+    "ios": {
+      "bundleIdentifier": "dev.expo.configfixture",
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "Scan a receipt."
+      }
+    },
+    "android": {
+      "package": "dev.expo.configfixture",
+      "permissions": [
+        "CAMERA"
+      ]
+    },
+    "extra": {
+      "featureFlags": {
+        "receipts": true
+      }
+    },
+    "version": "1.2.3"
+  }
+}

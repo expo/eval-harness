@@ -131,6 +131,12 @@ export async function runFocusedCases(args: {
                 join(import.meta.dir, "../evaluator/skill_invocation/focused"),
               ) + sha(readFileSync(import.meta.filename)),
             ),
+            verifier_node: Bun.spawnSync(["node", "--version"])
+              .stdout.toString()
+              .trim(),
+            verifier_lock_hash: sha(
+              readFileSync(join(import.meta.dir, "../../bun.lock")),
+            ),
             model: args.model,
             runtime: runtimeVersion,
             case: item,
@@ -279,8 +285,9 @@ export async function runFocusedCases(args: {
           checks.push(...(await checkOutcomes(item, fixture, workspace)));
           for (const check of checks.filter(
             (check) =>
-              check.id === "http-response-contract" &&
-              check.status === "unavailable",
+              item.checks?.includes(
+                check.id as NonNullable<Case["checks"]>[number],
+              ) && check.status === "unavailable",
           )) {
             observation.complete = false;
             observation.errors.push(check.evidence);

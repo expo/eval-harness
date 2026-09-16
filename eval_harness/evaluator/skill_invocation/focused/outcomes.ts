@@ -48,11 +48,22 @@ export async function checkOutcomes(
 ): Promise<Check[]> {
   const checks: Check[] = [];
   if (item.read_only) checks.push(unchangedTree(fixture, workspace));
-  if (item.checks?.includes("http-response-contract")) {
+  for (const contract of item.checks ?? []) {
+    const ids = OUTCOME_CHECKS[contract];
     // Execute authored code only in a separate, time-bounded process. Do not
     // pass the authoring job's API keys to the verifier. This is not a sandbox.
     const child = Bun.spawn(
-      [process.execPath, join(import.meta.dir, "verify-http.ts"), workspace],
+      [
+        contract === "expo-config-contract" ? "node" : process.execPath,
+        join(
+          import.meta.dir,
+          contract === "http-response-contract"
+            ? "verify-http.ts"
+            : "verify-expo-config.ts",
+        ),
+        workspace,
+        fixture,
+      ],
       {
         cwd: workspace,
         env: { PATH: process.env.PATH ?? "" },
@@ -86,10 +97,7 @@ export async function checkOutcomes(
         rows.length !== 3 ||
         rows.some(
           (row, index) =>
-            row.id !==
-              ["http-error-no-parse", "http-success-data", "network-error"][
-                index
-              ] ||
+            row.id !== ids[index] ||
             !["passed", "failed"].includes(row.status) ||
             typeof row.evidence !== "string",
         )
@@ -98,7 +106,7 @@ export async function checkOutcomes(
       checks.push(...rows);
     } catch (error) {
       checks.push({
-        id: "http-response-contract",
+        id: contract,
         status: "unavailable",
         evidence: String(error),
       });
@@ -108,3 +116,16 @@ export async function checkOutcomes(
   }
   return checks;
 }
+
+export const OUTCOME_CHECKS = {
+  "http-response-contract": [
+    "http-error-no-parse",
+    "http-success-data",
+    "network-error",
+  ],
+  "expo-config-contract": [
+    "expo-config-default",
+    "expo-config-empty",
+    "expo-config-environment",
+  ],
+} as const;

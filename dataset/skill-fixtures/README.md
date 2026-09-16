@@ -31,3 +31,5 @@ validation and holdout are never selected by the default development run.
 
 These initial cases are maintainer-reviewable seed cases, not a calibrated benchmark.
 Review the labels and outcome assertions before relying on them for release decisions.
+
+- `expo-config-broken-v1` and `expo-config-correct-v1`: dynamic Expo configuration with static identity, platform settings, and nested extras. A trusted Node verifier uses the harness-pinned Expo config loader to check environment handling and preservation. No app dependencies or native runtime are installed.

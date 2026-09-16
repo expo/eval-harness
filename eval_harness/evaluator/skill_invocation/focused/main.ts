@@ -1,3 +1,4 @@
+import { gradeSigning } from "./advice-judge.ts";
 import { parseArgs } from "node:util";
 import { resolve, join } from "node:path";
 import { loadCases } from "./cases.ts";
@@ -9,11 +10,13 @@ const HELP = `Focused skill evaluations
   validate --plugin PATH [--cases FILE] [--fixtures DIR]
   run --plugin PATH --out DIR --model MODEL [--case ID] [--split development|validation|holdout]
       [--repetitions 3] [--timeout 300] [--max-turns 20]
-      [--skill-mode with-expo|without-expo|both]
+      [--skill-mode with-expo|without-expo|both] [--judge-model MODEL]
   compare --baseline METRICS --candidate METRICS --out DIR
 
 run is CI-only. validate and compare make no model calls.
 The default split is development. Holdout must be explicitly selected.
+--case signal selects signing-diagnosis, expo-config-repair, expo-config-correct, fetch-error.
+--judge-model enables provisional signing review after a synthetic calibration gate.
 --case pilot selects native-form-advice, signing-diagnosis, fetch-error, fetch-correct.
 `;
 export async function main(argv: string[]): Promise<number> {
@@ -39,6 +42,7 @@ export async function main(argv: string[]): Promise<number> {
         "baseline",
         "candidate",
         "skill-mode",
+        "judge-model",
       ].map((key) => [key, { type: "string" as const }]),
     ),
     strict: true,
@@ -82,6 +86,13 @@ export async function main(argv: string[]): Promise<number> {
       item.split === split &&
       (values.case === undefined ||
         item.id === values.case ||
+        (values.case === "signal" &&
+          [
+            "signing-diagnosis",
+            "expo-config-repair",
+            "expo-config-correct",
+            "fetch-error",
+          ].includes(item.id)) ||
         (values.case === "pilot" &&
           [
             "native-form-advice",
@@ -112,8 +123,18 @@ export async function main(argv: string[]): Promise<number> {
     maxTurns: positive("max-turns", 20),
     skillMode: skillMode as "with-expo" | "without-expo" | "both",
   });
+  const judgeOK = values["judge-model"]
+    ? await gradeSigning(
+        attempts,
+        resolve(required("out")),
+        String(values["judge-model"]),
+      )
+    : true;
   // Behavioral failures are advisory. Infrastructure failure makes the job red.
-  return attempts.some((run) => run.status === "infrastructure_error") ? 1 : 0;
+  return !judgeOK ||
+    attempts.some((run) => run.status === "infrastructure_error")
+    ? 1
+    : 0;
 }
 if (import.meta.main) {
   try {

@@ -218,7 +218,7 @@ test("focused cases have valid fixtures, skills, labels and family splits", () =
       join(harness, "dataset/skill-fixtures"),
       join(plugin, "skills"),
     ).length,
-  ).toBe(17);
+  ).toBe(19);
 });
 
 test("reports escape trace content and comparisons reject changed conditions", () => {

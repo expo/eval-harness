@@ -26,9 +26,9 @@ review assertions. Case files and manifests remain outside the working directory
 ## Run in CI
 
 In the Expo skills repository, submit `.eas/workflows/skill-eval-focused.yml`. It uses
-that project's `production` credentials and runs main and the candidate with the same
-pinned Claude CLI, model selection, fixtures and tools. Start with its default one-case
-smoke comparison. The `case_id=all` input runs a complete selected split. Increase
+that project's `production` credentials and defaults to four `signal` cases, with and
+without the candidate Expo catalog, at three trials per condition. The optional catalog-change
+experiment compares main against the candidate with the same pinned runtime and fixtures. The `case_id=all` input runs a complete selected split. Increase
 `repetitions` explicitly; counts are descriptive, not reliability guarantees.
 
 The underlying CI-only command (normally called by the workflow):
@@ -84,7 +84,7 @@ Changed task, fixture, runtime, model, tool settings or limits make a comparison
 inconclusive. Skill content may differ. Unequal attempt counts and infrastructure or
 observation gaps are inconclusive. Routing changes are reported separately from failed
 source checks; pending reviews cannot become task-success claims. This version
-has no LLM judge or automatic description rewriting. The older
+has no automatic description rewriting. The optional signing-only judge is described below. The older
 `skills_unavailable` scenario disables both skills and MCP and measures that combined
 intervention, not an isolated skill effect.
 
@@ -122,3 +122,35 @@ release benchmark. These file-edit tasks intentionally retain the restricted
 Read/Glob/Grep/Skill/Write/Edit profile. They do not test agent-run shell checks,
 dependency installation, or native execution. Those require a later pinned runnable
 fixture and tool profile, held constant across conditions.
+
+## Signal experiment
+
+`--case signal --skill-mode both --judge-model 'sonnet[1m]'` runs signing diagnosis,
+Expo config repair, the already-correct config control, and HTTP repair (24 author attempts
+at three trials). `pilot` still selects the original four cases for replay.
+
+The config verifier resolves `app.config.js` through pinned `@expo/config` in a bounded
+Node child without CI API-key environment variables. It tests unset, empty, and supplied
+API URL values and preserves every fixture-owned config key except the requested changes.
+Known-good, no-op, shallow-merge, missing-fallback and hardcoded-environment variants test
+the verifier. This is a config-loader test, not a native build or UI runtime test. The
+fixture has no installed Expo app runtime. Verifier Node and dependency-lock identity are
+included in the comparison condition. Authored config execution is not security sandboxing.
+
+Signing review uses three explicit criteria grounded in the synthetic diagnostic: cause,
+corrective action, and no invented execution. One fixed Claude judge receives only the
+rubric, diagnostic and answer, with no tools, skills, condition labels or routing traces.
+Before grading, it must correctly classify three hand-authored calibration answers (correct,
+generic wrong advice, and fabricated execution). Calibration failure leaves advice pending
+and fails the invocation. This tiny gate is not expert validation; all model judgments are
+provisional. Other advice tasks still require review. Invalid/missing judgments stay pending;
+unknown is never a pass. Quoted evidence must exist verbatim in the answer. No candidate
+skill text is used as ground truth. Judge input, raw output, model identity, per-answer cost
+and calibration results are retained. Calibration cost lives in `judge-calibration.json`;
+per-answer judge costs are in `summary.json`, separate from author cost.
+
+`findings.json` and the HTML report explain graded coverage, observed with/without counts,
+failed criteria, delivered/missing required skills and suggested next investigations. They
+never turn a small sample into a causal claim or automatically rewrite a skill. Do not tune
+against these cases and present them as unseen validation. Current cases are synthetic
+and the restricted author tool profile remains a controlled file-edit experiment.

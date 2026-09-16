@@ -13,7 +13,7 @@ export type Case = {
   unchanged: string[];
   review: string[];
   read_only?: boolean;
-  checks?: Array<"http-response-contract">;
+  checks?: Array<"http-response-contract" | "expo-config-contract">;
 };
 
 export function inside(root: string, name: string): string {
@@ -69,7 +69,10 @@ export function loadCases(
     if (
       row.checks !== undefined &&
       (!Array.isArray(row.checks) ||
-        row.checks.some((id) => id !== "http-response-contract") ||
+        row.checks.some(
+          (id) =>
+            !["http-response-contract", "expo-config-contract"].includes(id),
+        ) ||
         new Set(row.checks).size !== row.checks.length)
     )
       throw new Error("Unknown or duplicate outcome check");
