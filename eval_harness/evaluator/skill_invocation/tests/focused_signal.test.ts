@@ -173,7 +173,14 @@ console.log(JSON.stringify({subtype:'success',is_error:false,total_cost_usd:0.01
     run = make();
     expect(await gradeSigning([run], root, "fake-model")).toBe(false);
     expect(run.judgment?.status).toBe("uncalibrated");
-    expect(outcomeVerdict(run)).toBe("pending");
+    expect(outcomeVerdict(run)).toBe("unavailable");
+    expect(findings([run])[0]?.next_step).toContain("Grader errors");
+    run.judgment = {
+      ...run.judgment!,
+      status: "unavailable",
+      evidence: "Judge quote is not in the answer",
+    };
+    expect(outcomeVerdict(run)).toBe("unavailable");
   } finally {
     for (const [key, value] of Object.entries(saved)) {
       if (value === undefined) delete process.env[key];

@@ -224,7 +224,7 @@ export async function gradeSigning(
       resolved_models: [],
       cost_usd: null,
       evidence:
-        "Calibration failed; advice remains pending. See judge-calibration.json.",
+        "Calibration failed; advice grading is unavailable. See judge-calibration.json.",
     };
     if (calibrated) {
       try {

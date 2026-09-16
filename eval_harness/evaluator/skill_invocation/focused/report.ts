@@ -50,6 +50,8 @@ export function outcomeVerdict(
   if (attempt.status !== "complete") return "unavailable";
   if (attempt.checks.some((check) => check.status === "failed"))
     return "failed";
+  if (attempt.judgment && attempt.judgment.status !== "graded")
+    return "unavailable";
   if (attempt.checks.some((check) => check.status === "unavailable"))
     return "unavailable";
   if (attempt.checks.some((check) => check.status === "pending"))
@@ -114,6 +116,13 @@ export function summarize(attempts: Attempt[]) {
       grading: runs.some((run) => run.judgment)
         ? "provisional-model"
         : "executable",
+      judge_errors: runs
+        .filter((run) => run.judgment && run.judgment.status !== "graded")
+        .map((run) => ({
+          attempt: run.attempt,
+          status: run.judgment!.status,
+          reason: run.judgment!.evidence,
+        })),
       judge_cost_usd: runs.every(
         (run) => !run.judgment || typeof run.judgment.cost_usd === "number",
       )
@@ -166,8 +175,9 @@ export function findings(attempts: Attempt[]) {
       "Compare matched with/without conditions before attributing a result to skills.";
     if (graded !== attempted) {
       message = `${graded}/${attempted} outcomes graded; comparison incomplete.`;
-      next =
-        "Resolve pending reviews or unavailable evidence before claiming a benefit.";
+      next = rows.some((row) => row.judge_errors.length)
+        ? "Grader errors prevented this comparison. Inspect the reported errors and replay grading of the saved answers; do not interpret missing grades as inconsistent answers."
+        : "Resolve pending reviews or unavailable evidence before claiming a benefit.";
     } else if (rows.some((row) => row.paired_conditions !== "matched")) {
       message = "Conditions are unmatched; no catalog benefit comparison.";
     } else if (withExpo && withoutExpo) {

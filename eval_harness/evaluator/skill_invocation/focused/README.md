@@ -141,10 +141,10 @@ Signing review uses three explicit criteria grounded in the synthetic diagnostic
 corrective action, and no invented execution. One fixed Claude judge receives only the
 rubric, diagnostic and answer, with no tools, skills, condition labels or routing traces.
 Before grading, it must correctly classify three hand-authored calibration answers (correct,
-generic wrong advice, and fabricated execution). Calibration failure leaves advice pending
+generic wrong advice, and fabricated execution). Calibration failure makes advice grading unavailable
 and fails the invocation. This tiny gate is not expert validation; all model judgments are
-provisional. Other advice tasks still require review. Invalid/missing judgments stay pending;
-unknown is never a pass. Quoted evidence must exist verbatim in the answer. No candidate
+provisional. Other advice tasks still require review. Invalid/missing judgments are unavailable and their error reasons appear in the summary;
+semantic unknown judgments stay pending. Neither is a pass. Quoted evidence must exist verbatim in the answer. No candidate
 skill text is used as ground truth. Judge input, raw output, model identity, per-answer cost
 and calibration results are retained. Calibration cost lives in `judge-calibration.json`;
 per-answer judge costs are in `summary.json`, separate from author cost.
