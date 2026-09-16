@@ -1,0 +1,65 @@
+Bitwarden — Local Password Vault (MVP)
+
+## Overview
+
+Bitwarden is a local password manager for unlocking, searching, creating, and
+organizing vault items. The vault begins locked and contains seeded logins,
+cards, and secure notes after successful unlock.
+
+The app must work on iOS and Android with Expo SDK 57.x. Vault changes persist
+encrypted or equivalently protected in local app storage. The unlocked session
+does not survive a cold restart. There is no account, server, cloud sync,
+browser extension, or real third-party credential autofill.
+
+The fixed master password is `correct-horse-battery-staple` and cannot be
+changed.
+
+## Unlock And Session
+
+The initial screen contains one masked `Master password` field and `Unlock`.
+Unlock is disabled for blank input. An incorrect password shows `Incorrect
+master password`, clears the field, and remains locked. The correct password
+opens the Vault without revealing the password.
+
+While unlocked, `Lock now` immediately removes vault content from view and
+returns to Unlock. Backgrounding for longer than the user-selected timeout also
+locks. Navigating within an unlocked session does not require another password.
+
+## Vault
+
+A bottom tab bar contains `Vault`, `Generator`, and `Settings`. Vault groups
+items into `Logins`, `Cards`, and `Secure notes`; each row shows name, type, and
+favorite state without exposing a password or card number.
+
+Search matches name, username, URI, and note text case-insensitively. Type and
+Favorites filters compose with search. No matches show `No vault items found`.
+Tapping a row opens only that item.
+
+Login detail shows name, username, masked password, URI, notes, favorite state,
+and labelled actions to reveal, hide, copy username, copy password, edit, and
+delete. Password starts hidden on every visit. Copy shows a visible confirmation
+without rendering the copied secret elsewhere.
+
+## Create, Edit, Delete, And Generate
+
+`New item` presents a type picker and form. Login requires name, username, and
+password; Card requires name, cardholder, number, expiry, and security code;
+Secure note requires name and note text. Sensitive fields are masked where
+appropriate. Save is disabled until required data is valid and creates one
+item. Edit updates only the selected stable item.
+
+Delete requires confirmation naming the item. Cancel changes nothing; Delete
+removes only it permanently. Generator creates a visible password from length,
+uppercase, lowercase, numbers, and symbols options. `Use password` returns it
+to an open Login form; `Copy password` shows confirmation.
+
+## Settings, Accessibility, And Out Of Scope
+
+Settings provides lock timeout (`Immediately`, `1 minute`, or `5 minutes`) and
+appearance (`System`, `Light`, or `Dark`). Both persist while secrets remain
+hidden on relaunch.
+
+- Masking, revealed state, selected filters, validation, lock state, and copy
+  confirmations are accessible without speaking secret values by default.
+- Out of scope: biometrics, passkeys, TOTP, QR scanning, autofill extensions,
+  attachments, organizations, breach reports, imports, exports, and networking.

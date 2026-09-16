@@ -1,0 +1,62 @@
+Eventbrite — Local Event Discovery And Tickets (MVP)
+
+## Overview
+
+Eventbrite is a mobile app for discovering nearby events, registering, and
+keeping tickets ready for entry. It begins with at least 30 stable events across
+music, food, business, arts, sports, and community categories, plus two upcoming
+tickets and one past event.
+
+The app must work on iOS and Android with Expo SDK 57.x. Likes, follows,
+registrations, tickets, and profile data persist locally. Orders are simulated;
+there is no account, organizer backend, live inventory, payment, or ticket
+validation service.
+
+## Navigation And Discover
+
+A bottom tab bar contains `Discover`, `Search`, `Tickets`, and `Profile`.
+Discover shows a recommended event feed for the selected city. Each card exposes
+title, date/time, venue or `Online`, category, price or `Free`, organizer, and
+liked state. Scrolling progressively reveals the full catalog.
+
+The city selector lists three stable cities and offers `Use current location`,
+which requests location permission only when chosen. Denial leaves manual city
+selection usable. Changing city updates the event feed and remains selected.
+
+Search matches event title, venue, organizer, and category case-insensitively.
+Date, category, price (`Free` or `Paid`), and format (`Online` or `In person`)
+filters compose with AND logic. Results sort by relevance or date. No matches
+show `No events found` with clear actions.
+
+## Event Detail And Registration
+
+Event detail shows title, date/time, location, map preview when in person,
+organizer, description, accessibility information, remaining ticket types,
+Like, Share, and `Get tickets`. Like persists and Share opens the native share
+surface. Following the organizer updates its state and Profile list.
+
+Get tickets presents ticket types with price, availability, and quantity.
+Continue is disabled until at least one available ticket is chosen. Registration
+collects attendee name and email and displays an itemized total. `Place order`
+is disabled until valid; submitting creates one order and one ticket per chosen
+quantity, without reducing inventory below zero.
+
+The confirmation shows event, attendee, total, and `View tickets`. Cancelling
+before Place order creates nothing.
+
+## Tickets And Profile
+
+Tickets groups `Upcoming` and `Past`. A ticket detail exposes event title,
+attendee, date/time, venue, order number, ticket type, and a deterministic QR
+visual with accessible text `Entry QR code`. It offers `Add to calendar`,
+`Share`, `Download`, and `Cancel registration` for free upcoming tickets.
+Cancellation requires confirmation and removes the ticket from Upcoming.
+
+Profile lists liked events, followed organizers, and registration history.
+
+## Accessibility And Out Of Scope
+
+- Filter selections, inventory, price totals, form validation, ticket state,
+  and QR purpose are accessible without requiring visual inspection.
+- Out of scope: authentication, real payments/refunds, Wallet integration,
+  organizer tools, attendee check-in, live maps, friends, and dynamic inventory.

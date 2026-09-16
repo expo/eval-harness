@@ -1,0 +1,204 @@
+Twilight — Sleep Tracking Dashboard (MVP)
+
+## Overview
+
+Twilight is a local-first sleep tracker that helps a single user understand
+their recent sleep, inspect trends, and maintain a history of sleep logs. It
+combines a dashboard, an analytics view, an editable log, and a small settings
+area in a native mobile experience.
+
+The app starts with deterministic sample history so its dashboard is immediately
+useful and its time-range comparisons are meaningful. All edits persist locally;
+Twilight does not depend on HealthKit, a wearable, an account, or a server.
+
+## Target Platforms And Persistence
+
+- Must work on iOS and Android with Expo SDK 57.x.
+- Onboarding choices, sleep logs, and settings persist locally across cold app
+  restarts.
+- The app has no account, sign-in screen, cloud sync, or server database.
+- Layouts respect the status bar, screen cutouts, home indicator, tab bar,
+  system font sizing, and the soft keyboard.
+
+## First-Launch Onboarding
+
+On the first launch only, show a short onboarding flow that collects:
+
+1. a nightly sleep goal, defaulting to 8 hours;
+2. a preferred bedtime, defaulting to 11:00 PM;
+3. a preferred wake time, defaulting to 7:00 AM.
+
+The user can move backward and forward without losing entered values. The final
+action is labelled `Start tracking`. Completing onboarding opens the Home tab
+and prevents onboarding from appearing on later cold launches. The saved goal
+and schedule remain editable in Settings.
+
+## Deterministic Seed History
+
+When the local data store is initialized for the first time, create exactly 54
+complete sleep logs at deterministic day offsets from the current local date:
+
+- 30 nightly logs from the previous 30 complete nights;
+- 12 additional logs between 31 and 90 days ago;
+- 8 additional logs between 91 and 365 days ago;
+- 4 additional logs more than 365 days ago.
+
+Use varied durations between 6 hours 30 minutes and 9 hours, with stable values
+for a given day offset. No seeded log may overlap another. The seed must make
+the Metrics ranges visibly distinct: `30D` contains 30 nights, `90D` contains
+42, `1Y` contains 50, and `All` contains 54 before the user edits anything.
+
+Seeding happens only when the app creates its data store, not whenever the log
+list is empty. If the user deletes or resets data, those records must not return
+after restart.
+
+## Main Navigation
+
+After onboarding, a persistent bottom tab bar contains four labelled tabs:
+
+- `Home`
+- `Metrics`
+- `Logs`
+- `Settings`
+
+Selecting a tab updates the selected state and shows the corresponding screen.
+Switching away and back preserves meaningful screen state, including the
+selected Metrics range and the Logs scroll position, until the app is closed.
+
+## Home Dashboard
+
+Home greets the user and presents an accessible summary of the most recent
+complete sleep log:
+
+- date;
+- bedtime and wake time;
+- total duration;
+- whether the duration met the saved nightly goal.
+
+It also shows:
+
+- the current nightly goal;
+- the current streak of consecutive logs that met the goal;
+- the average duration for the most recent seven complete nights;
+- a labelled action `Add sleep log`.
+
+All values must be available as accessible text rather than communicated only
+by color or a chart. When no logs exist, Home shows `No sleep data yet`, a short
+explanation, and `Add sleep log` instead of fabricated summary values.
+
+## Metrics
+
+Metrics contains a range selector with `30D`, `90D`, `1Y`, and `All`. `30D` is
+selected initially. Selecting a range updates the visible summaries and charts
+without navigating away, and the selected range remains selected after visiting
+another tab.
+
+For the selected range, show accessible numeric summaries for:
+
+- number of included nights, formatted as `<N> nights`;
+- average sleep duration;
+- shortest and longest duration;
+- percentage of nights that met the saved goal.
+
+Include a duration trend chart and a bedtime/wake-time chart. Charts may use any
+clear native-compatible visual treatment, but their title, selected range, and
+numeric summary must be represented in the accessibility tree. Exact chart
+geometry, animation, and pixel matching are not required.
+
+When no logs fall within the selected range, show `No sleep data for this
+range` and an `Add sleep log` action instead of empty chart axes.
+
+## Sleep Logs
+
+The Logs tab lists sleep records newest first. Each row exposes:
+
+- its full calendar date;
+- bedtime and wake time;
+- total duration;
+- whether the nightly goal was met.
+
+Tapping a row opens that exact record in the editor with all saved values.
+Adding, editing, or deleting a record immediately updates Logs, Home, and
+Metrics and remains correct after a cold restart.
+
+The Logs header contains `Add sleep log`. When no records exist, the screen
+shows `No sleep logs`, a short explanation, and the same add action.
+
+## Add And Edit Form Sheet
+
+`Add sleep log` and tapping an existing row present a native-style form sheet.
+On platforms that support sheet detents, it initially occupies a large partial
+height and can be dismissed with the native downward drag gesture. On other
+platforms, use the closest native modal treatment.
+
+The editor contains:
+
+- a date value;
+- a bedtime date and time;
+- a wake date and time;
+- a calculated duration that updates as values change;
+- `Cancel` and `Save` actions.
+
+The add form defaults to the previous night using the saved preferred bedtime
+and wake time. The edit form is populated from the selected record and retains
+that record's stable identifier.
+
+`Save` is disabled when required values are missing, wake time is not after
+bedtime, or the duration is less than 5 minutes or greater than 24 hours. An
+accessible inline explanation identifies the invalid field or relationship.
+
+Saving a valid new form inserts exactly one log in chronological order. Saving
+a valid edit updates only the selected log. `Cancel` or a native drag dismissal
+makes no data changes.
+
+## Delete And Reset
+
+Swiping a log row toward the leading edge exposes a destructive `Delete`
+action. Long-pressing a row may expose the same action as an alternative.
+
+Choosing Delete presents a confirmation modal that names the selected date and
+offers `Cancel` and `Delete sleep log`. Cancel restores the unchanged list.
+Confirming removes only the selected log, updates every summary, and does not
+allow the record to return after restart.
+
+Settings also contains `Reset all sleep data`. It opens a separate confirmation
+that explains all sleep logs will be removed and offers `Cancel` and
+`Reset sleep data`. Confirming clears the log store but retains onboarding and
+preferences, then exposes the Home, Metrics, and Logs empty states. Seed data
+must not return after this reset.
+
+## Settings
+
+Settings allows the user to edit and persist:
+
+- nightly sleep goal;
+- preferred bedtime;
+- preferred wake time;
+- appearance: `System`, `Light`, or `Dark`.
+
+Appearance changes apply immediately to all visible surfaces and persist across
+restart. `System` follows the device appearance. The selected option is exposed
+as selected in the accessibility tree, and content remains legible in every
+mode.
+
+## Accessibility And Interaction
+
+- Dashboard values, metric summaries, log content, validation errors, and
+  empty states are readable through accessible text and roles.
+- Tabs, range options, add, save, cancel, delete, reset, and appearance controls
+  have visible and accessible labels.
+- Selected tab, selected range, selected appearance, disabled Save, and
+  destructive actions expose their state semantically.
+- Primary tap targets are at least 44 by 44 points.
+- Durations use human-readable hours and minutes; dates and times use the
+  device locale consistently.
+
+## Out Of Scope
+
+- Automatic sleep detection, HealthKit, wearable, or sensor integration
+- Live Activities, Dynamic Island, home-screen widgets, or watch apps
+- Notifications, alarms, background tracking, or scheduled tasks
+- Accounts, authentication, cloud synchronization, or social features
+- AI-generated coaching or live network data
+- Exact reproduction of Swift Charts, Apple Health, or another existing app
+- Import, export, or sharing

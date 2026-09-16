@@ -21,7 +21,7 @@ runner plus uploaded artifacts.
   optional evaluator outcomes. `scripts/` holds `eval-skill-use.sh`.
 - `eval_harness/utils/`: shared artifacts, iOS, shell, and telemetry helpers
   used by both app_builder and evaluator.
-- `dataset/prds/`: Notes/Hot Chocolate/Wiki Reader PRDs — shared between
+- `dataset/prds/`: shared app PRDs — used by
   app_builder (authoring input) and evaluator/ios_agentic (injected scoring
   context via `--prd`). Lives at the repo root rather than under
   `eval_harness/` since it's a dataset, not runtime code.

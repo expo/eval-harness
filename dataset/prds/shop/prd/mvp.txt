@@ -1,0 +1,60 @@
+Shop — Shopping And Order Tracker (MVP)
+
+## Overview
+
+Shop is a personal shopping app for discovering products from followed stores,
+saving items, building a cart, and tracking orders. It begins with six stores,
+at least 36 products, two collections, and four orders in different states.
+
+The app must work on iOS and Android with Expo SDK 57.x. Follows, saves, cart,
+collections, and orders persist locally. Catalog refresh uses standard `fetch`
+with a bundled last-known catalog, while checkout and delivery updates are
+simulated and require no account, email access, or payment provider.
+
+## Navigation And Feed
+
+A bottom tab bar contains `Home`, `Search`, `Orders`, and `You`. Home is a
+relevance-ordered feed of products and store updates. Rows expose store, product
+name, current price, prior price when discounted, saved state, and availability.
+Scrolling loads the catalog in pages without replacing earlier products. Pull
+to refresh shows progress and retains usable content on failure.
+
+Tapping a product opens images, name, store, description, price, variants,
+availability, shipping estimate, `Save`, `Add to cart`, and `Share`. Required
+variants must be selected before Add to cart is enabled. Save and share update
+or open their expected native states.
+
+## Search, Stores, And Collections
+
+Search matches product, store, and description case-insensitively. Filters for
+category, price range, in stock, and on sale compose with AND logic; sort offers
+relevance, lowest price, and highest price. No matches show `No products found`
+with clear-search and clear-filter actions.
+
+Store detail shows description, follow state, and products. Follow/unfollow
+updates Home once and persists. You lists saved products and named collections.
+Users can create, rename, and delete collections, and add or remove products
+through a sheet. Deleting a collection never unsaves its products.
+
+## Cart, Checkout, And Orders
+
+Cart shows configured lines, quantities, subtotal, shipping, tax, and total.
+Users can edit a variant, change quantity, or remove a line. Empty cart shows
+`Your cart is empty` and `Keep shopping`.
+
+Checkout collects name, shipping address, and delivery option. A fixed `Demo
+payment` is shown as selected. Place order is disabled until required fields are
+valid. Submitting creates exactly one order, clears the cart, and shows its
+stable number and itemized total.
+
+Orders lists `Ordered`, `Shipped`, `Out for delivery`, and `Delivered` items.
+Order detail exposes a text timeline, carrier, tracking number, delivery
+estimate, and items. A labelled demo action advances the new order one state at
+a time. `Buy again` adds available items to cart without placing an order.
+
+## Accessibility And Out Of Scope
+
+- Prices, variants, saved/followed state, filters, totals, validation, and order
+  milestones are semantic and accessible.
+- Out of scope: authentication, Shop Pay, real payments, email scanning, live
+  package maps, messaging stores, returns, and personalized AI recommendations.

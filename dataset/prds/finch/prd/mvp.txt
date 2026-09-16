@@ -1,0 +1,59 @@
+Finch — Self-Care Goals And Companion (MVP)
+
+## Overview
+
+Finch is a self-care app in which completing small daily goals gives energy to
+a virtual companion. It starts with a named companion `Pip`, five daily goals,
+three completed history days, 20 energy, 35 stones, and a two-day streak.
+
+The app must work on iOS and Android with Expo SDK 57.x. Goals, check-ins,
+currency, streak, companion progress, and settings persist locally. There are
+no accounts, subscriptions, AI conversations, social features, or servers.
+
+## Navigation And Today
+
+A bottom tab bar contains `Today`, `Journeys`, `Insights`, and `Bag`. Today
+shows Pip's current level, energy, stones, streak, and today's goals. Companion
+animation may enhance the screen, but every status is also accessible text.
+
+Each goal row shows title, optional time, journey, completion state, and energy
+reward. Completing an unfinished goal marks it done, adds exactly 5 energy,
+updates progress, and provides a brief labelled celebration. Undo reverses only
+that completion and reward. A completed goal cannot award energy twice.
+
+`Add goal` presents a form for title, journey, repeat choice, and optional time.
+Blank titles cannot save. Saving inserts one goal. Editing changes only the
+selected goal; deleting requires confirmation and does not change prior history.
+
+## Daily Check-In And Adventure
+
+`How are you feeling?` opens five labelled mood choices from `Very low` to
+`Great` plus an optional reflection. Saving creates one check-in for today and
+updates the visible state; editing the same day's check-in does not duplicate it.
+
+When energy reaches 25, `Start adventure` becomes enabled. Starting spends 25
+energy once and changes Pip to `Adventuring`. `Finish adventure` awards 10
+stones and one progress point, records the result, and restores `Ready` state.
+The current adventure state survives restart.
+
+## Journeys, Insights, And Bag
+
+Journeys groups goals into seeded journeys and shows completed/total counts.
+Users can create and rename a journey and open it to see exact member goals.
+Deleting an empty journey requires confirmation; a journey with goals cannot be
+deleted until its goals are moved.
+
+Insights shows accessible seven-day values for mood check-ins, goals completed,
+streak, and energy earned plus a newest-first history list. Charts are optional
+and cannot replace numeric text.
+
+Bag lists four seeded cosmetic items. Owned state and price are visible.
+Buying an unowned affordable item requires confirmation, subtracts stones once,
+and marks it owned. Insufficient stones disables Buy with an explanation.
+
+## Accessibility And Out Of Scope
+
+- Goal completion, rewards, currency, selected mood, adventure state, purchase
+  state, and progress are semantic rather than animation- or color-only.
+- Out of scope: health claims, crisis support, friend trees, push reminders,
+  cloud backup, paid content, real-time clocks, and free-form companion chat.
