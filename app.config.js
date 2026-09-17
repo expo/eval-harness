@@ -6,7 +6,7 @@ module.exports = ({ config }) => {
 
   return {
     ...config,
-    name: process.env.EXPO_APP_NAME || config.name || "eval-experiments",
+    name: process.env.EXPO_APP_NAME || config.name || "eval-harness",
     slug: process.env.EXPO_SLUG || DEFAULT_SLUG,
     owner,
     version: config.version || "1.0.0",

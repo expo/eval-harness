@@ -1,4 +1,4 @@
-# eval-experiments
+# eval-harness
 
 EAS-native evaluation harness for comparing coding agents on Expo app-building
 tasks. The normal path is one Workflow run: a coding agent authors an Expo app
