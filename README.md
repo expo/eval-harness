@@ -1,4 +1,4 @@
-# eval-experiments
+# eval-harness
 
 EAS-native evaluation harness for comparing coding agents on Expo app-building
 tasks. The normal path is one Workflow run: a coding agent authors an Expo app
@@ -54,11 +54,11 @@ dataset/
   prd_test_plans.json         # app -> relevant test-plan filenames (iOS-eval ground truth)
 ```
 
-## One-time Collaborator Setup
+## One-time setup
 
-The shared harness is already linked to Georgian's Expo project and its EAS
-`production` environment already contains the required credentials. If your
-Expo account has been invited to that project, install the EAS CLI and sign in:
+Link this repository to your own EAS project before running workflows. The
+committed config has no project ID, slug, or owner, so a public checkout cannot
+submit jobs against someone else's Expo account.
 
 ```bash
 npm install -g eas-cli
@@ -66,27 +66,32 @@ eas login
 eas whoami
 ```
 
-From the repository root, verify that EAS resolves the shared project:
+Copy `.env.default` to `.env` and set these to your project:
+
+```bash
+EAS_PROJECT_ID=<project-uuid>
+EXPO_SLUG=<project-slug>
+EXPO_OWNER=<account-name>
+```
+
+`app.config.js` reads those variables. You can also run `eas init` to create or
+link a project. If that writes `extra.eas.projectId` locally, keep the change
+out of git when contributing to a public fork.
+
+Confirm EAS resolves your project:
 
 ```bash
 eas project:info
 ```
 
-It should show:
-
-- owner: `georgian-team`
-- slug: `adi-test-project`
-- project ID: `338f6455-57a3-49c9-a2e0-36e5a0577c77`
-
 You do not need to install this repository's Bun, TypeScript, or Python
 dependencies locally to submit a Workflow. EAS uploads the current checkout and
 installs the required runtimes and dependencies on its remote workers.
 
-### Project secret setup (maintainers only)
+### Project secret setup
 
-Invited collaborators can skip this subsection. When configuring a new EAS
-project, copy `.env.default` to `.env` and push the required values to the EAS
-`production` environment:
+Fill in the rest of `.env`, then push it to the EAS `production` environment so
+workers see the same routing and credentials:
 
 ```bash
 eas env:push production --path .env
@@ -99,7 +104,7 @@ subscription OAuth, and the harness rejects them to prevent accidentally
 bypassing the intended Claude subscription. Codex authoring requires
 `OPENAI_API_KEY`. Muse Code authoring uses `META_API_KEY` with provider `meta`
 and defaults to `muse-spark-1.2`. Create that EAS secret with the interactive
-prompt—never an inline value:
+prompt, never an inline value:
 
 ```bash
 eas env:create production --name META_API_KEY --visibility secret --scope project
@@ -112,15 +117,6 @@ self-verification and use Expo MCP. `BRAINTRUST_API_KEY` and
 Muse author-only runs need `META_API_KEY`. A Muse E2E run that enables iOS
 evaluation (`-F run_eval_ios=true`) also needs `CLAUDE_CODE_OAUTH_TOKEN`, because
 the downstream iOS evaluator is always Claude-based.
-
-Expo project routing is controlled by `app.config.js`. Override these variables
-when running the same branch under another Expo account:
-
-```bash
-EAS_PROJECT_ID=<project-uuid>
-EXPO_SLUG=<project-slug>
-EXPO_OWNER=<account-name>
-```
 
 ## Run The Full Flow
 
@@ -496,8 +492,10 @@ PYTHONPATH=. uv run python -m unittest eval_harness.evaluator.ios_agentic.tests.
 To add static uptake coverage for another Expo skill, follow the
 [uptake-check contributor guide](eval_harness/evaluator/skill_invocation/uptake_checks/README.md#contributor-guide-add-coverage-for-another-skill).
 
-Validate EAS workflows:
+Validate EAS workflows. This needs a logged-in EAS CLI and a linked project:
 
 ```bash
-node /Users/adityashukla/.codex/plugins/cache/openai-curated-remote/expo/1.0.2/skills/expo-cicd-workflows/scripts/validate.js .eas/workflows/*.yml
+npx -y eas-cli@latest workflow:validate .eas/workflows/eval-e2e.yml --non-interactive
 ```
+
+Repeat for the other files under `.eas/workflows/`.

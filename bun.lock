@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "eval-experiments",
+      "name": "eval-harness",
       "dependencies": {
         "@babel/parser": "7.29.8",
         "tar": "^7.5.22",

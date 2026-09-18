@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "test_properties.schema.json",
-  "title": "eval-experiments natural property catalog",
+  "title": "eval-harness natural property catalog",
   "description": "Language-independent behavioral properties used to guide the Python-to-TypeScript migration.",
   "type": "object",
   "additionalProperties": false,
@@ -18,7 +18,7 @@
       "const": 1
     },
     "project": {
-      "const": "eval-experiments"
+      "const": "eval-harness"
     },
     "source": {
       "enum": [
