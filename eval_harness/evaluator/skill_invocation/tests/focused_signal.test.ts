@@ -1,3 +1,4 @@
+import { signingContext, SIGNING_CASE } from "../focused/signing-case.ts";
 import { test, expect } from "bun:test";
 import {
   cpSync,
@@ -25,6 +26,19 @@ const item: Case = {
   review: [],
   checks: ["expo-config-contract"],
 };
+test("signing context freezes the supplied case and original fixture diagnostic", () => {
+  const root = mkdtempSync(join(tmpdir(), "signing-context-"));
+  try {
+    cpSync(join(fixtures, "expo-settings-v1"), root, { recursive: true });
+    const custom = { ...SIGNING_CASE, prompt: "A different task", review: ["Cause", "Action", "Execution"] } as Case;
+    writeFileSync(join(root, "diagnostics/ios-build.txt"), "Custom diagnostic");
+    const frozen = signingContext(custom, root);
+    writeFileSync(join(root, "diagnostics/ios-build.txt"), "Changed by author");
+    expect(frozen).toEqual({ task: custom.prompt, log: "Custom diagnostic", criteria: custom.review.map((criterion, i) => ({ id: `review:${i + 1}`, criterion })) });
+    expect(() => signingContext({ ...custom, review: [] }, root)).toThrow("cause");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test("Expo config oracle rejects no-op, shallow merge, missing fallback and hardcoded environment", async () => {
   const root = mkdtempSync(join(tmpdir(), "expo-config-oracle-"));
   const fixture = join(fixtures, "expo-config-correct-v1");
@@ -134,6 +148,13 @@ console.log(JSON.stringify({subtype:'success',is_error:false,total_cost_usd:0.01
     process.env.PATH = `${bin}:${saved.PATH}`;
     process.env.CI = "1";
     process.env.SKILL_EVAL_REMOTE = "1";
+    const context = signingContext(SIGNING_CASE as Case, join(fixtures, SIGNING_CASE.fixture));
+    context.task = "Use this frozen task";
+    context.log = "Use this frozen diagnostic, not a hardcoded copy";
+    mkdirSync(join(root, "signing-diagnosis/1"), { recursive: true });
+    writeFileSync(join(root, "signing-diagnosis/1/manifest.json"), JSON.stringify({
+      case: { prompt: context.task, review: SIGNING_RUBRIC }, signing_context: context,
+    }));
     const make = (): Attempt => ({
       id: "signing-diagnosis",
       family: "build-signing",
@@ -162,6 +183,9 @@ console.log(JSON.stringify({subtype:'success',is_error:false,total_cost_usd:0.01
     let run = make();
     expect(await gradeSigning([run], root, "fake-model")).toBe(true);
     expect(run.judgment?.status).toBe("graded");
+    for (const path of ["signing-diagnosis/1/judge/input.json", "judge-calibration/correct/input.json"]) {
+      expect(JSON.parse(readFileSync(join(root, path), "utf8"))).toMatchObject(context);
+    }
     expect(outcomeVerdict(run)).toBe("passed");
     expect(run.condition).not.toBe("fixed");
     expect(findings([run])[0]?.grading).toBe("provisional-model");
@@ -175,6 +199,11 @@ console.log(JSON.stringify({subtype:'success',is_error:false,total_cost_usd:0.01
     expect(run.judgment?.status).toBe("uncalibrated");
     expect(outcomeVerdict(run)).toBe("unavailable");
     expect(findings([run])[0]?.next_step).toContain("Grader errors");
+    delete process.env.FAKE_JUDGE_FAIL;
+    rmSync(join(root, "signing-diagnosis/1/manifest.json"));
+    const missingContext = make();
+    expect(await gradeSigning([missingContext], root, "fake-model")).toBe(false);
+    expect(outcomeVerdict(missingContext)).toBe("unavailable");
     run.judgment = {
       ...run.judgment!,
       status: "unavailable",
@@ -227,7 +256,7 @@ test("saved signing quote regression: bold and whitespace are presentation, alte
 
 import { createHash } from "node:crypto";
 import { replayJudgments } from "../focused/replay-judgments.ts";
-import { CALIBRATION, SIGNING_RUBRIC } from "../focused/advice-judge.ts";
+import { CALIBRATION, SIGNING_RUBRIC } from "../focused/signing-case.ts";
 
 test("offline replay preserves source evidence, recovers formatting-only failures and rejects altered answers", () => {
   const root = mkdtempSync(join(tmpdir(), "replay-judge-"));
@@ -339,6 +368,16 @@ test("offline replay preserves source evidence, recovers formatting-only failure
     expect(() => replayJudgments(source, join(root, "bad"))).toThrow(
       "mismatch",
     );
+    const context = { task: "Frozen task", log: "Frozen diagnostic", criteria: input.criteria };
+    const frozenManifest = { ...manifest, signing_context: context };
+    write(`${run.artifact_path}/manifest.json`, frozenManifest);
+    write(`${run.artifact_path}/judge/input.json`, { ...context, answer: observation.final });
+    write("judge-calibration.json", { calibrated: true, model: "fake", rubric: SIGNING_RUBRIC, context });
+    run.condition = hash({ author: hash({ ...frozenManifest, resolved_model: observation.model }), judge_model: "fake", resolved_models: [], rubric: SIGNING_RUBRIC, calibrated: true });
+    write("metrics.json", { schema_version: 2, attempts: [run] });
+    replayJudgments(source, join(root, "frozen-derived"));
+    write(`${run.artifact_path}/judge/input.json`, { ...context, log: "Wrong diagnostic", answer: observation.final });
+    expect(() => replayJudgments(source, join(root, "wrong-log"))).toThrow("context mismatch");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

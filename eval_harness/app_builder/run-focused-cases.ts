@@ -1,3 +1,4 @@
+import { SIGNING_CASE, signingContext } from "../evaluator/skill_invocation/focused/signing-case.ts";
 import { createHash } from "node:crypto";
 import {
   cpSync,
@@ -97,6 +98,7 @@ export async function runFocusedCases(args: {
         .replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, "")
         .trim();
     }
+    if (!Object.keys(bodies).length) throw new Error("Expo plugin has no skills");
     for (const item of args.cases) {
       const fixture = inside(args.fixtures, item.fixture);
       const fixtureHash = hashTree(fixture);
@@ -141,6 +143,9 @@ export async function runFocusedCases(args: {
             runtime: runtimeVersion,
             case: item,
             fixture_hash: fixtureHash,
+            ...(item.id === SIGNING_CASE.id
+              ? { signing_context: signingContext(item, fixture) }
+              : {}),
             tools: TOOLS,
             settings: SETTINGS,
             mcp: "disabled",
@@ -251,6 +256,19 @@ export async function runFocusedCases(args: {
             observation.errors.push(
               "Without-Expo catalog absence is unverified or Expo skills were exposed",
             );
+          }
+          if (mode === "with-expo") {
+            const advertised = observation.advertised_skills;
+            const missing = Object.keys(bodies).filter(
+              (name) =>
+                !advertised?.includes(`expo:${name}`) && !advertised?.includes(name),
+            );
+            if (!advertised || missing.length) {
+              observation.complete = false;
+              observation.errors.push(
+                `With-Expo catalog registration is unverified; ${advertised ? `missing skills: ${missing.join(", ")}` : "init skill list unavailable"}`,
+              );
+            }
           }
           const syntax = await checkSyntax(workspace);
           const checks: Attempt["checks"] = [

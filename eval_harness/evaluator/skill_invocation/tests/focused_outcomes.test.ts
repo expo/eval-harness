@@ -10,7 +10,7 @@ import {
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { checkOutcomes, unchangedTree } from "../focused/outcomes.ts";
-import { outcomeVerdict, summarize, type Attempt } from "../focused/report.ts";
+import { outcomeVerdict, findings, summarize, type Attempt } from "../focused/report.ts";
 import { observeClaude, scoreRouting } from "../focused/trace.ts";
 import type { Case } from "../focused/cases.ts";
 
@@ -213,4 +213,11 @@ test("optional absence is neutral and init skill names are not body delivery", (
       false,
     )[0]?.status,
   ).toBe("not_loaded");
+});
+
+test("ungraded advice is exploratory, including findings; unavailable executable checks retain their grading kind", () => {
+  expect(summarize([attempt])[0]?.grading).toBe("exploratory");
+  expect(findings([attempt])[0]?.grading).toBe("exploratory");
+  const unavailable = { ...attempt, checks: [{ id: "http-response-contract", status: "unavailable" as const, evidence: "timeout" }] };
+  expect(summarize([unavailable])[0]?.grading).toBe("executable");
 });

@@ -1,37 +1,12 @@
 import { createHash } from "node:crypto";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Attempt } from "./report.ts";
 import { writeReport } from "./report.ts";
 import type { Check } from "./outcomes.ts";
 
-// Fixture-owned truth, independent of the candidate skill and condition.
-export const SIGNING_RUBRIC = [
-  "The supplied log says the distribution certificate was rotated and the old provisioning profile reused. Identify that this profile does not include the selected certificate. Generic signing trouble is insufficient.",
-  "Recommend updating/regenerating the provisioning profile to include the selected valid certificate, or selecting a matching valid profile/certificate pair. Clearing caches or rebuilding alone is insufficient. Accept equivalent EAS-managed or manual workflows; no exact CLI wording is required.",
-  "The task permits diagnosis only. The answer must not claim the agent ran a build, changed credentials, or contacted Apple/EAS. Instructions for the user and hypothetical commands are allowed. Silence about execution passes this criterion.",
-];
-export const CALIBRATION = [
-  {
-    id: "correct",
-    answer:
-      "The reused provisioning profile doesn't include the rotated distribution certificate. Regenerate the profile with the current certificate, or select a valid matching pair in your signing credentials, then rebuild. I have not run a build or changed credentials.",
-    expected: ["passed", "passed", "passed"],
-  },
-  {
-    id: "generic",
-    answer:
-      "This is probably a Metro cache issue. Clear the cache and retry your build.",
-    expected: ["failed", "failed", "passed"],
-  },
-  {
-    id: "fabricated",
-    answer:
-      "The reused profile excludes the rotated distribution certificate. Regenerate the profile with that certificate. I contacted Apple, updated your credentials, and successfully rebuilt the app.",
-    expected: ["passed", "passed", "failed"],
-  },
-] as const;
+import { CALIBRATION, SIGNING_CASE, type SigningContext } from "./signing-case.ts";
 const schema = {
   type: "object",
   additionalProperties: false,
@@ -103,21 +78,14 @@ async function judge(
   answer: string,
   model: string,
   out: string,
+  context: SigningContext,
 ): Promise<{ checks: Check[]; cost: number | null; models: string[] }> {
   if (!process.env.CI || process.env.SKILL_EVAL_REMOTE !== "1")
     throw new Error("Advice judging is CI-only");
   const home = mkdtempSync(join(tmpdir(), "expo-advice-judge-"));
   mkdirSync(out, { recursive: true });
   mkdirSync(join(home, "config"));
-  const prompt = JSON.stringify({
-    task: "Diagnose the supplied iOS signing failure; do not edit or contact services.",
-    log: "Provisioning profile does not include the selected signing certificate. Last change: distribution certificate rotated; existing profile reused.",
-    criteria: SIGNING_RUBRIC.map((criterion, i) => ({
-      id: `review:${i + 1}`,
-      criterion,
-    })),
-    answer,
-  });
+  const prompt = JSON.stringify({ ...context, answer });
   writeFileSync(join(out, "input.json"), prompt);
   const env: Record<string, string | undefined> = {
     ...process.env,
@@ -194,17 +162,36 @@ export async function gradeSigning(
   model: string,
 ): Promise<boolean> {
   const runs = attempts.filter(
-    (run) => run.id === "signing-diagnosis" && run.status === "complete",
+    (run) => run.id === SIGNING_CASE.id && run.status === "complete",
   );
   if (!runs.length) return true;
   const calibration: unknown[] = [];
   let calibrated = true;
+  let context: SigningContext | undefined;
   try {
+    for (const run of runs) {
+      const manifest = JSON.parse(readFileSync(
+        join(out, run.artifact_path ?? `${run.id}/${run.attempt}`, "manifest.json"),
+        "utf8",
+      ));
+      const saved: SigningContext | undefined = manifest.signing_context;
+      if (
+        !saved || saved.criteria.length !== 3 ||
+        saved.task !== manifest.case.prompt ||
+        JSON.stringify(saved.criteria.map((row) => row.criterion)) !==
+          JSON.stringify(manifest.case.review)
+      )
+        throw new Error("Missing or inconsistent frozen signing context");
+      if (context && JSON.stringify(saved) !== JSON.stringify(context))
+        throw new Error("Signing attempts use different grading contexts");
+      context = saved;
+    }
     for (const sample of CALIBRATION) {
       const result = await judge(
         sample.answer,
         model,
         join(out, "judge-calibration", sample.id),
+        context!,
       );
       const matched = result.checks.every(
         (check, index) => check.status === sample.expected[index],
@@ -221,10 +208,11 @@ export async function gradeSigning(
     calibrated = false;
     calibration.push({ error: String(error) });
   }
+  const rubric = context?.criteria.map((row) => row.criterion) ?? [];
   writeFileSync(
     join(out, "judge-calibration.json"),
     JSON.stringify(
-      { model, rubric: SIGNING_RUBRIC, calibrated, samples: calibration },
+      { model, rubric, context, calibrated, samples: calibration },
       null,
       2,
     ),
@@ -245,6 +233,7 @@ export async function gradeSigning(
           run.observation.final,
           model,
           join(out, run.artifact_path ?? `${run.id}/${run.attempt}`, "judge"),
+          context!,
         );
         run.checks = [
           ...run.checks.filter((check) => !check.id.startsWith("review:")),
@@ -278,7 +267,7 @@ export async function gradeSigning(
           author: run.condition,
           judge_model: model,
           resolved_models: run.judgment.resolved_models,
-          rubric: SIGNING_RUBRIC,
+          rubric,
           calibrated,
         }),
       )

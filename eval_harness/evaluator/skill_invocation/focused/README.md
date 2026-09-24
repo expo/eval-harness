@@ -36,7 +36,8 @@ The underlying CI-only command (normally called by the workflow):
 ```sh
 bun eval_harness/evaluator/skill_invocation/focused/main.ts run \
   --plugin /path/to/plugin --out /path/to/report --model 'sonnet[1m]' \
-  --case pilot --split development --repetitions 3 --skill-mode both
+  --case signal --split development --repetitions 3 --skill-mode both \
+  --judge-model 'sonnet[1m]'
 ```
 
 `run` requires `CI` and `SKILL_EVAL_REMOTE=1`. Authentication comes from the CI environment.
@@ -44,6 +45,9 @@ Every attempt gets a fresh workspace, plugin copy and Claude config directory. T
 frozen once, tool/MCP/hook settings are explicit, and attempts are sequential. No user
 configuration or credentials are copied into artifacts. Parent catalog visibility is
 recorded as unverified: installation alone does not prove descriptions were exposed.
+Runtime registration is checked separately: with-Expo runs must advertise every intended
+Expo skill; without-Expo runs must advertise none. Missing init evidence or an incomplete
+catalog invalidates the comparison, rather than becoming an apparent tie.
 
 ## Interpret results
 
@@ -87,6 +91,14 @@ source checks; pending reviews cannot become task-success claims. This version
 has no automatic description rewriting. The optional signing-only judge is described below. The older
 `skills_unavailable` scenario disables both skills and MCP and measures that combined
 intervention, not an isolated skill effect.
+
+## Scored coverage and exploratory cases
+
+Five cases have automated outcome grading: the four `signal` cases and `fetch-correct`.
+The other fourteen are exploratory routing/source probes. Reports label them `exploratory`;
+a clean run remains pending until its review assertions are evaluated. `case_id=all`
+includes these probes and is not a fully scored benchmark. The CLI has no manual-review
+import yet; use the default signal suite for automated outcome comparisons.
 
 ## Outcome pilot
 
@@ -139,7 +151,11 @@ included in the comparison condition. Authored config execution is not security 
 
 Signing review uses three explicit criteria grounded in the synthetic diagnostic: cause,
 corrective action, and no invented execution. One fixed Claude judge receives only the
-rubric, diagnostic and answer, with no tools, skills, condition labels or routing traces.
+task, rubric, original diagnostic and answer, with no tools, skills, condition labels or routing traces.
+The rubric is the signing case's `review` list in `dataset/skill-cases.json`. Before
+authoring, the runner freezes the case prompt, rubric and fixture diagnostic in the
+manifest. Both calibration and judging use that frozen context, never the authored log
+or a second hardcoded diagnostic. Missing or inconsistent contexts make grading unavailable.
 Before grading, it must correctly classify three hand-authored calibration answers (correct,
 generic wrong advice, and fabricated execution). Calibration failure makes advice grading unavailable
 and fails the invocation. This tiny gate is not expert validation; all model judgments are
@@ -166,7 +182,9 @@ bun eval_harness/evaluator/skill_invocation/focused/main.ts replay-judgments \
 
 This reads calibration, answers, raw judge output and manifests; it does not execute authored
 code or run a model. Calibration, input-answer correspondence and original condition hashes
-must validate. The source artifact is preserved. `replay.json` records its metrics hash,
+must validate. New artifacts also verify the frozen task, diagnostic and rubric against
+the saved judge input. Original artifacts without that context remain replayable with
+the original rubric. The source artifact is preserved. `replay.json` records its metrics hash,
 recovered attempts and quote-validation version. Recovered judge model/cost metadata restores
 matched comparisons. The derived report does not change the original workflow's error status.
 

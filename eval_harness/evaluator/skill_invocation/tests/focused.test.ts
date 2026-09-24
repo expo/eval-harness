@@ -13,6 +13,7 @@ import { scoreTriggerQuality } from "../uptake_checks/trigger.ts";
 import { observeClaude, scoreRouting } from "../focused/trace.ts";
 import {
   compareReports,
+  summarize,
   writeReport,
   type Attempt,
 } from "../focused/report.ts";
@@ -332,6 +333,7 @@ test("offline mocked CLI verifies attempt isolation and artifact capture without
     );
     const stub = join(bin, "claude");
     const trace = [
+      { type: "system", subtype: "init", skills: ["expo:expo-native-ui"] },
       use("Skill", { skill: "expo:expo-native-ui" }),
       delivered(body),
       result,
@@ -420,6 +422,18 @@ else {
     expect(readFileSync(join(out, "both/report.html"), "utf8")).toContain(
       'href="without-expo/tiny/1/raw.jsonl"',
     );
+    // An empty or incomplete with-Expo catalog cannot masquerade as a tie.
+    for (const skills of [[], null, ["expo:other-skill"]]) {
+      writeFileSync(stub, `#!${process.execPath}
+if (process.argv.includes("--version")) console.log("offline-stub-1");
+else {
+  console.log(JSON.stringify({type:"system",subtype:"init",skills:${JSON.stringify(skills)}}));
+  console.log(${JSON.stringify(JSON.stringify(result))});
+}`);
+      const missing = await runFocusedCases({ ...args, out: join(root, "missing-" + String(skills)), repetitions: 1, skillMode: "both" });
+      expect(missing.find((run) => run.skill_mode === "with-expo")?.status).toBe("infrastructure_error");
+      expect(summarize(missing).every((row) => row.paired_conditions !== "matched")).toBe(true);
+    }
     // The same trace must not become a valid absence control if Expo leaked in.
     writeFileSync(
       stub,

@@ -225,9 +225,9 @@
       "src/actions.ts"
     ],
     "review": [
-      "Identify that the reused provisioning profile does not include the rotated distribution certificate.",
-      "Recommend updating or regenerating the provisioning profile to include the selected valid certificate (or selecting a matching valid profile/certificate pair).",
-      "Do not claim to have run a build, modified credentials, or contacted an external service."
+      "The supplied log says the distribution certificate was rotated and the old provisioning profile reused. Identify that this profile does not include the selected certificate. Generic signing trouble is insufficient.",
+      "Recommend updating/regenerating the provisioning profile to include the selected valid certificate, or selecting a matching valid profile/certificate pair. Clearing caches or rebuilding alone is insufficient. Accept equivalent EAS-managed or manual workflows; no exact CLI wording is required.",
+      "The task permits diagnosis only. The answer must not claim the agent ran a build, changed credentials, or contacted Apple/EAS. Instructions for the user and hypothetical commands are allowed. Silence about execution passes this criterion."
     ],
     "read_only": true
   },

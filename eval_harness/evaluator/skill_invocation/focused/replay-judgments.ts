@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 import { cpSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
-import { CALIBRATION, SIGNING_RUBRIC, parseJudgment } from "./advice-judge.ts";
+import { parseJudgment } from "./advice-judge.ts";
+import { CALIBRATION, SIGNING_RUBRIC } from "./signing-case.ts";
 import { inside } from "./cases.ts";
 import { writeReport, type Attempt } from "./report.ts";
 
@@ -28,7 +29,9 @@ export function replayJudgments(source: string, destination: string): void {
   const calibration = read(join(source, "judge-calibration.json"));
   if (
     !calibration.calibrated ||
-    JSON.stringify(calibration.rubric) !== JSON.stringify(SIGNING_RUBRIC)
+    JSON.stringify(calibration.rubric) !== JSON.stringify(
+      calibration.context?.criteria.map((row: { criterion: string }) => row.criterion) ?? SIGNING_RUBRIC,
+    )
   )
     throw new Error("Saved calibration did not pass or uses another rubric");
   for (const sample of CALIBRATION) {
@@ -57,7 +60,7 @@ export function replayJudgments(source: string, destination: string): void {
     if (
       JSON.stringify(input.criteria) !==
         JSON.stringify(
-          SIGNING_RUBRIC.map((criterion, i) => ({
+          calibration.rubric.map((criterion: string, i: number) => ({
             id: `review:${i + 1}`,
             criterion,
           })),
@@ -73,6 +76,13 @@ export function replayJudgments(source: string, destination: string): void {
     const manifest = read(join(path, "manifest.json"));
     if (manifest.adapter !== "claude-focused-v2")
       throw new Error("Unsupported author manifest");
+    if (
+      calibration.context && (
+        JSON.stringify(manifest.signing_context) !== JSON.stringify(calibration.context) ||
+        JSON.stringify({ task: input.task, log: input.log, criteria: input.criteria }) !==
+          JSON.stringify(calibration.context)
+      )
+    ) throw new Error("Saved signing context mismatch");
     // The author manifest includes config plus these per-attempt fields. Verify
     // reconstruction against the original condition before changing judge metadata.
     const config = { ...manifest };
@@ -91,7 +101,7 @@ export function replayJudgments(source: string, destination: string): void {
         author,
         judge_model: calibration.model,
         resolved_models: models,
-        rubric: SIGNING_RUBRIC,
+        rubric: calibration.rubric,
         calibrated: true,
       });
     if (

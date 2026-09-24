@@ -115,7 +115,13 @@ export function summarize(attempts: Attempt[]) {
       outcome_passed: count("passed"),
       grading: runs.some((run) => run.judgment)
         ? "provisional-model"
-        : "executable",
+        : runs.some((run) => run.checks.some((check) =>
+            Object.entries(OUTCOME_CHECKS).some(([contract, ids]) =>
+              check.id === contract || (ids as readonly string[]).includes(check.id),
+            ),
+          ))
+          ? "executable"
+          : "exploratory",
       judge_errors: runs
         .filter((run) => run.judgment && run.judgment.status !== "graded")
         .map((run) => ({
@@ -228,24 +234,13 @@ export function findings(attempts: Attempt[]) {
           ),
         ],
       }));
-    if (failures.length && graded === attempted) {
-      if (id === "expo-config-repair")
-        next =
-          "Inspect the resolved-config differences: nested ios/extra merges and unset/empty environment fallback. Check whether relevant delivered guidance covers that failure before proposing a skill edit.";
-      if (id === "expo-config-correct")
-        next =
-          "Inspect unnecessary edits to already-correct config. Test narrower instructions that preserve working configuration if the trace links those edits to skill guidance.";
-      if (id === "signing-diagnosis")
-        next =
-          "Review the quoted cause/action/execution failures against the supplied log. If eas-app-stores was absent, test explicit loading; if delivered, inspect its diagnostic guidance. These are hypotheses, not established causes.";
-    }
     return {
       id,
       graded,
       attempted,
       grading: rows.some((row) => row.grading === "provisional-model")
         ? "provisional-model"
-        : "executable",
+        : rows[0]!.grading,
       message,
       next_step: next,
       failures,
