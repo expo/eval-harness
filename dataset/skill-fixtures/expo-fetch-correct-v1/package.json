@@ -1,0 +1,7 @@
+{
+  "name": "expo-fetch-fixture",
+  "private": true,
+  "dependencies": {
+    "expo": "55.0.31"
+  }
+}

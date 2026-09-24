@@ -126,7 +126,7 @@ eval::install_uv_and_evaluator "$EVAL" "$OUT"
 
 case "$AGENT" in
   claude-code)
-    npm install -g @anthropic-ai/claude-code >"$OUT/a-cc-install.log" 2>&1
+    npm install -g "@anthropic-ai/claude-code@${AGENT_CLI_VERSION:-latest}" >"$OUT/a-cc-install.log" 2>&1
     claude --version >/dev/null 2>&1; eval::gate $? "claude-code CLI install"
     claude auth status --text >"$OUT/a-cc-auth.log" 2>&1
     eval::gate $? "claude-code OAuth auth status"

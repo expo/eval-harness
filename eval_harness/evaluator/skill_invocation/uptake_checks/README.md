@@ -224,3 +224,17 @@ helpers can run checks against small temporary app trees.
 - Document known proxy limitations in the check description.
 - Use `dataset/prd_skills.json` only to change which skills a PRD is expected
   to trigger; it is separate from uptake-check configuration.
+
+### Routing expectations and evidence
+
+`dataset/prd_skills.json` now accepts objects with `required`, `optional`, `forbidden`,
+and `unlisted` (`observe` by default). Legacy arrays retain closed-set scoring.
+The shared Expo router is required for implicit Expo tasks; complementary loads must
+not lower precision merely because they are absent from an exhaustive answer key.
+Code checks are resolved from required task skills even in unavailable-skill controls.
+
+The historical trace detector remains a request detector: it does not prove successful
+body delivery. Reports label it `requests_only`. Missing traces produce null trigger
+scores and `trigger_status=unavailable`, including in aggregation. The focused evaluator
+adds stricter delivery and edit-timing evidence using raw Claude streams; see
+[`../focused/README.md`](../focused/README.md).

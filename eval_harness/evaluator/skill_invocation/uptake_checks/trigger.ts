@@ -1,3 +1,4 @@
+import type { Expectations } from "../expectations.ts";
 import { dedupe, readJson, roundRatio } from "../utils.ts";
 
 export type ToolCall = {
@@ -24,8 +25,8 @@ export type TriggerQuality = {
   matchedSkills: string[];
   extraSkills: string[];
   missingSkills: string[];
-  recall: number;
-  precision: number;
+  recall: number | null;
+  precision: number | null;
   anyExpoSkillTriggered: boolean;
 };
 
@@ -73,13 +74,18 @@ export function skillsFromToolCall(agent: string, call: ToolCall): string[] {
 export function scoreTriggerQuality(
   expectedSkills: Iterable<string>,
   triggeredSkills: Iterable<string>,
+  expectations?: Expectations,
+  evidenceAvailable = true,
 ): TriggerQuality {
   const expected = dedupe([...expectedSkills]);
   const triggered = dedupe([...triggeredSkills]);
   const expectedSet = new Set(expected);
   const triggeredSet = new Set(triggered);
   const matched = expected.filter((skill) => triggeredSet.has(skill));
-  const extra = triggered.filter((skill) => !expectedSet.has(skill));
+  const extra = triggered.filter((skill) => !expectedSet.has(skill) && (
+    expectations === undefined || expectations.forbidden.includes(skill) ||
+    (expectations.unlisted === "forbid" && !expectations.optional.includes(skill))
+  ));
   const missing = expected.filter((skill) => !triggeredSet.has(skill));
   const recall = expected.length === 0
     ? 1
@@ -89,15 +95,15 @@ export function scoreTriggerQuality(
       ? expected.length === 0
         ? 1
         : 0
-      : roundRatio(matched.length, triggered.length);
+      : matched.length + extra.length === 0 ? 1 : roundRatio(matched.length, matched.length + extra.length);
   return {
     expectedSkills: expected,
     triggeredSkills: triggered,
     matchedSkills: matched,
     extraSkills: extra,
     missingSkills: missing,
-    recall,
-    precision,
+    recall: evidenceAvailable ? recall : null,
+    precision: evidenceAvailable ? precision : null,
     anyExpoSkillTriggered: triggered.length > 0,
   };
 }
