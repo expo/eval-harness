@@ -1,7 +1,7 @@
 [project]
 name = "expo-evals"
 version = "0.1.0"
-description = "EAS-native evaluation harness for Expo coding-agent experiments"
+description = "EAS-native evaluation harness for Expo coding-agent"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [

@@ -101,11 +101,13 @@ PROMPT_VARIANT="$resolved_prompt_variant"
 export AGENT AGENT_MODEL AGENT_REASONING_EFFORT METRO_MODE PRD SCENARIO SKILL_MENTION PROMPT_VARIANT PROMPT_FILE
 write_author_env
 
-# Lets the agent's own `eas init --id "$EAS_PROJECT_ID"` (see the prompt) link its freshly
-# authored project to the same EAS project the harness itself uses, rather than needing to mint
-# a new one per run. Same default/override convention as app.config.js.
-EAS_PROJECT_ID="${EAS_PROJECT_ID:-338f6455-57a3-49c9-a2e0-36e5a0577c77}"
-export EAS_PROJECT_ID
+# Lets the agent's own `eas init --id "$EAS_PROJECT_ID"` (see the prompt) link
+# its freshly authored project to the same EAS project the harness uses, rather
+# than minting a new one per run. There is no committed project id; set this in
+# `.env` and the EAS `production` environment (see .env.default).
+if [ -n "${EAS_PROJECT_ID:-}" ]; then
+  export EAS_PROJECT_ID
+fi
 
 ANTHROPIC_PROXY_PORT=8082
 OPENAI_PROXY_PORT=8083
@@ -148,6 +150,7 @@ esac
 npm install -g eas-cli >"$OUT/a-eas-cli-install.log" 2>&1
 eas --version >/dev/null 2>&1; eval::gate $? "eas-cli install"
 if [ -n "${EXPO_TOKEN:-}" ]; then echo "  EXPO_TOKEN bound (len ${#EXPO_TOKEN}); eas build available to the agent"; else echo "  EXPO_TOKEN unset: agent's own eas build self-verification step will fail"; fi
+if [ -n "${EAS_PROJECT_ID:-}" ]; then echo "  EAS_PROJECT_ID bound; agent can eas init against this project"; else echo "  EAS_PROJECT_ID unset: agent's eas init self-verification will fail"; fi
 
 echo "================= STAGE B: telemetry sidecars ================="
 case "$AGENT" in

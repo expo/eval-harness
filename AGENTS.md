@@ -72,8 +72,9 @@ runner plus uploaded artifacts.
   or `eval_harness/utils/`. `dataset/` (PRDs, test plans, `prd_skills.json`
   and `prd_test_plans.json` ground truth) is the one intentional exception,
   since it's data/fixtures rather than runtime code.
-- Expo project routing belongs in `app.config.js` and should remain configurable
-  through `EAS_PROJECT_ID`, `EXPO_SLUG`, `EXPO_OWNER`, and `EXPO_APP_NAME`.
+- Expo project routing belongs in `app.config.js` via `EAS_PROJECT_ID`,
+  `EXPO_SLUG`, `EXPO_OWNER`, and `EXPO_APP_NAME`. Do not commit a real EAS
+  project ID, slug, or owner; those are required local/EAS env configuration.
 - Authoring always uses a direct `prd` input, passed straight to `author-app.sh`.
   `skill_scenario` (default `skills_available_unmentioned`) is an *authoring-time
   enforced config*, not just an analysis label: it controls whether
@@ -207,5 +208,5 @@ Run focused and configuration checks when working in the corresponding area:
 find eval_harness -name '*.sh' -print0 | xargs -0 bash -n
 bun test eval_harness/evaluator/skill_invocation/tests
 PYTHONPATH=. uv run python -m unittest eval_harness.evaluator.ios_agentic.tests.test_test_plan_resolution
-node /Users/adityashukla/.codex/plugins/cache/openai-curated-remote/expo/1.0.2/skills/expo-cicd-workflows/scripts/validate.js .eas/workflows/*.yml
+for f in .eas/workflows/*.yml; do npx -y eas-cli@latest workflow:validate "$f" --non-interactive; done
 ```
