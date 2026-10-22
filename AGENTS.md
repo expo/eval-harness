@@ -12,8 +12,9 @@ runner plus uploaded artifacts.
 - `packages/`: Bun workspaces. `source-scan/` is private and supplies the shared
   parser, AST walk, and lexical comment stripper used by the skill analyzer.
   `agent-eval-vitest/` adds provider-injectable agent runs, fixture lifecycle,
-  and ordinary Vitest checks. Its tests must use fake runners, never live model
-  calls by default. Keep task outcomes distinct from check counts.
+  and ordinary Vitest checks. Its default tests must use fake runners. Explicit
+  `test:e2e` runs use real Ollama inference in the separate advisory GitHub Actions
+  workflow. Keep task outcomes distinct from check counts.
   The kit bundles private source-scan JavaScript with Bun and its declarations
   with rollup-plugin-dts. Source-scan is a dev dependency only; Babel and Vitest
   stay external. Published runtime dependencies must not include source-scan.

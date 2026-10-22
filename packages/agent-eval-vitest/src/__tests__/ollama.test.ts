@@ -86,6 +86,7 @@ test('sends the prompt, explicit model, and reproducible JSON settings', async (
   const transcript = await readFile(join(context.artifactsDir, 'ollama.jsonl'), 'utf8');
   expect(transcript).toContain('finished');
   expect(result.artifacts).toEqual(['ollama.jsonl']);
+  expect(requests[0]).not.toHaveProperty('think');
 });
 
 test('passes argv and workspace context to the handler and feeds back its result', async () => {
@@ -237,4 +238,19 @@ test('validates model, URL, and numeric limits before any requests', () => {
   expect(() => runner({ maxTurns: 0 })).toThrow('maxTurns');
   expect(() => runner({ requestTimeoutMs: Infinity })).toThrow('requestTimeoutMs');
   expect(() => runner({ maxOutputChars: -1 })).toThrow('maxOutputChars');
+});
+
+test('forwards an explicit thinking preference', async () => {
+  await runner({ think: false })(context);
+  expect(requests[0]).toMatchObject({ think: false });
+});
+
+test('forwards a caller-supplied action schema for structured generation', async () => {
+  const actionSchema = {
+    type: 'object',
+    properties: { done: { const: true } },
+    required: ['done'],
+  };
+  await runner({ actionSchema })(context);
+  expect(requests[0]).toMatchObject({ format: actionSchema });
 });
