@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { c as createArchive, Header } from "tar";
 
-import { materializeArtifact } from "../artifacts/materialize.ts";
+import { materializeArtifact } from "@expo/skill-analyzer/artifacts";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -77,7 +77,8 @@ test("materializes canonical direct tar and EAS archive directory", () => {
   const easOut = join(base, "eas-out");
   const cli = Bun.spawnSync([
     process.execPath,
-    join(import.meta.dir, "../artifacts/materialize.ts"),
+    join(import.meta.dir, "../../../node_modules/.bin/skill-analyzer"),
+    "materialize",
     "--artifact", easDirectory,
     "--dest", easOut,
     "--root-name", "authored-app",

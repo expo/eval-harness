@@ -413,14 +413,14 @@ class WorkflowContractTests(unittest.TestCase):
             body,
         )
         self.assertGreaterEqual(body.count("if: ${{ always() }}"), 3)
-        self.assertGreaterEqual(contents.count("artifacts/materialize.ts"), 2)
+        self.assertGreaterEqual(contents.count("skill-analyzer materialize"), 2)
         self.assertIn("artifacts/create_diagnostic_artifact.py", contents)
 
     def test_ios_workflows_materialize_before_auth_and_emit_truthful_diagnostics(self) -> None:
         for name in ("eval-e2e.yml", "eval-ios-app.yml"):
             with self.subTest(workflow=name):
                 contents = workflow(name)
-                materialize = contents.index("artifacts/materialize.ts")
+                materialize = contents.index("skill-analyzer materialize")
                 auth = contents.index("utils/shell/check_claude_auth.sh")
                 evaluate = contents.index("ios_agentic/scripts/eval-ios-app.sh")
                 diagnostic = contents.index("artifacts/create_diagnostic_artifact.py")
@@ -448,7 +448,7 @@ class WorkflowContractTests(unittest.TestCase):
                 ios_job = workflow_job(name, "eval_ios")
                 checkout = ios_job.index("uses: eas/checkout")
                 install = ios_job.find("uses: eas/install_node_modules")
-                materialize = ios_job.index("artifacts/materialize.ts")
+                materialize = ios_job.index("skill-analyzer materialize")
                 evaluate = ios_job.index("ios_agentic/scripts/eval-ios-app.sh")
                 self.assertLess(checkout, install)
                 self.assertLess(install, materialize)

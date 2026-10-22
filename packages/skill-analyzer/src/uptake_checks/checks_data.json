@@ -13,8 +13,13 @@
       "category": "lexical",
       "kind": "text_any",
       "target": [
-        "<Link[\\s/>]", "<Redirect[\\s/>]", "useRouter\\(", "useLocalSearchParams\\(",
-        "useSegments\\(", "usePathname\\(", "useNavigation\\("
+        "<Link[\\s/>]",
+        "<Redirect[\\s/>]",
+        "useRouter\\(",
+        "useLocalSearchParams\\(",
+        "useSegments\\(",
+        "usePathname\\(",
+        "useNavigation\\("
       ],
       "description": "Uses a real expo-router navigation API -- declarative (<Link>, <Redirect>) or imperative (useRouter/useLocalSearchParams/useSegments/usePathname/useNavigation) -- all are valid per the skill, not just the <Link> tag. Verified against a real authored app that legitimately uses only useRouter()."
     },
@@ -22,7 +27,13 @@
       "id": "router_navigator_jsx_tag",
       "category": "lexical",
       "kind": "text_any",
-      "target": ["<Stack[\\s/>]", "<Tabs[\\s/>]", "<NativeTabs[\\s/>]", "<Drawer[\\s/>]", "<Slot[\\s/>]"],
+      "target": [
+        "<Stack[\\s/>]",
+        "<Tabs[\\s/>]",
+        "<NativeTabs[\\s/>]",
+        "<Drawer[\\s/>]",
+        "<Slot[\\s/>]"
+      ],
       "description": "Uses a real Stack/Tabs/NativeTabs/Drawer/Slot JSX element, not a bare word match. Drawer confirmed necessary against a real wiki_reader app using expo-router/drawer -- a Stack/Tabs/NativeTabs-only list would have false-negatived on legitimate code."
     },
     {
@@ -51,10 +62,26 @@
       "category": "structural",
       "kind": "path_absent",
       "target": [
-        "app/utils", "app/helpers", "app/constants", "app/hooks", "app/components", "app/context",
-        "app/lib", "app/services", "app/shared", "app/types",
-        "src/app/utils", "src/app/helpers", "src/app/constants", "src/app/hooks", "src/app/components", "src/app/context",
-        "src/app/lib", "src/app/services", "src/app/shared", "src/app/types"
+        "app/utils",
+        "app/helpers",
+        "app/constants",
+        "app/hooks",
+        "app/components",
+        "app/context",
+        "app/lib",
+        "app/services",
+        "app/shared",
+        "app/types",
+        "src/app/utils",
+        "src/app/helpers",
+        "src/app/constants",
+        "src/app/hooks",
+        "src/app/components",
+        "src/app/context",
+        "src/app/lib",
+        "src/app/services",
+        "src/app/shared",
+        "src/app/types"
       ],
       "description": "Anti-pattern the skill calls out by name: never co-locate components/types/utilities in the app directory. This is a denylist heuristic, not exhaustive -- it can miss the anti-pattern under an unlisted name, and could in principle false-positive if an app has a genuine *route* literally named one of these (not observed in any real app checked so far)."
     },
@@ -91,8 +118,14 @@
       "category": "structural",
       "kind": "path_absent",
       "target": [
-        "app/**/*[A-Z]*.tsx", "app/**/*[A-Z]*.ts", "app/**/*[A-Z]*.jsx", "app/**/*[A-Z]*.js",
-        "src/app/**/*[A-Z]*.tsx", "src/app/**/*[A-Z]*.ts", "src/app/**/*[A-Z]*.jsx", "src/app/**/*[A-Z]*.js"
+        "app/**/*[A-Z]*.tsx",
+        "app/**/*[A-Z]*.ts",
+        "app/**/*[A-Z]*.jsx",
+        "app/**/*[A-Z]*.js",
+        "src/app/**/*[A-Z]*.tsx",
+        "src/app/**/*[A-Z]*.ts",
+        "src/app/**/*[A-Z]*.jsx",
+        "src/app/**/*[A-Z]*.js"
       ],
       "description": "expo-router rule: kebab-case file names in app/, no special characters (which includes no uppercase letters). Route-group names like (tabs), dynamic segments like [id], and _layout/index are all lowercase already, so this only flags a genuine PascalCase/camelCase route filename."
     },
@@ -101,8 +134,14 @@
       "category": "structural",
       "kind": "path_absent",
       "target": [
-        "app/**/(*)*.tsx", "app/**/(*)*.ts", "app/**/(*)*.jsx", "app/**/(*)*.js",
-        "src/app/**/(*)*.tsx", "src/app/**/(*)*.ts", "src/app/**/(*)*.jsx", "src/app/**/(*)*.js"
+        "app/**/(*)*.tsx",
+        "app/**/(*)*.ts",
+        "app/**/(*)*.jsx",
+        "app/**/(*)*.js",
+        "src/app/**/(*)*.tsx",
+        "src/app/**/(*)*.ts",
+        "src/app/**/(*)*.jsx",
+        "src/app/**/(*)*.js"
       ],
       "description": "expo-router rule: a route group can never be a file named (foo).tsx -- it must be a (foo)/index.tsx directory. Distinct from router_no_colocated_non_route_files_in_app_dir (that's about non-route files under a denylisted name, this is about the illegal group-as-file shape)."
     },
@@ -118,8 +157,10 @@
       "category": "lexical",
       "kind": "text_any",
       "target": [
-        "from ['\"]@expo/ui['\"]", "from ['\"]@expo/ui/swift-ui['\"]",
-        "from ['\"]@expo/ui/jetpack-compose['\"]", "from ['\"]@expo/ui/community/"
+        "from ['\"]@expo/ui['\"]",
+        "from ['\"]@expo/ui/swift-ui['\"]",
+        "from ['\"]@expo/ui/jetpack-compose['\"]",
+        "from ['\"]@expo/ui/community/"
       ],
       "description": "Actually imports from @expo/ui (root, a platform-specific subpackage, or a community drop-in), not just declares it as a package.json dependency. A dependency-only check (an earlier version of this check) has a real loophole: an app can declare @expo/ui and never import or render anything from it, and still pass every expo-ui check, since the other two are absence checks -- confirmed live against both real hot_chocolate/wiki_reader apps, which declare the dependency but never import it anywhere in src/."
     },
@@ -176,7 +217,10 @@
       "id": "app_clip_aasa_file_exists",
       "category": "structural",
       "kind": "path_exists",
-      "target": ["public/.well-known/apple-app-site-association", "web/.well-known/apple-app-site-association"],
+      "target": [
+        "public/.well-known/apple-app-site-association",
+        "web/.well-known/apple-app-site-association"
+      ],
       "description": "expo-app-clip rule: the Apple App Site Association file is hosted at .well-known/apple-app-site-association. Existence-only, not content-verified (needs its appclips/webcredentials/activitycontinuation blocks for real correctness, deferred)."
     }
   ]

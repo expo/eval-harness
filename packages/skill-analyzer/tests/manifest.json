@@ -1,0 +1,9 @@
+{
+  "artifact_type": "skill-eval-report",
+  "artifacts": {
+    "metrics": "metrics.json",
+    "report": "report.html"
+  },
+  "run_id": "run-1",
+  "schema_version": 2
+}

@@ -1,0 +1,637 @@
+{
+  "app": "test-app",
+  "artifacts": {
+    "app_dir": "<fixture>/authored/author-agent-workspace/run-1",
+    "author_manifest": "<fixture>/authored/manifest.json",
+    "author_trace": "<fixture>/authored/author-agent-metadata/run-1/telemetry/traces/claude-code-authoring.json",
+    "authored_root": "<fixture>/authored",
+    "eval_manifest": null,
+    "eval_result": null,
+    "eval_root": null
+  },
+  "braintrust_refs": [],
+  "build_health": {
+    "bundle": null,
+    "syntax": {
+      "checked_files": 2,
+      "failed_files": [],
+      "ok": true,
+      "skipped_unavailable": 0,
+      "total_files": 2
+    }
+  },
+  "check_category_breakdown": {
+    "lexical": {
+      "passed": 3,
+      "total": 4
+    },
+    "structural": {
+      "passed": 6,
+      "total": 8
+    }
+  },
+  "expected_skills": [
+    "expo-router"
+  ],
+  "outcome_status": "pending",
+  "runs": [
+    {
+      "app": "test-app",
+      "build_success": null,
+      "detected_skills": [
+        "expo-router"
+      ],
+      "evaluator_pct": null,
+      "scenario": "skills_available_unmentioned",
+      "skill_id": "expo-router",
+      "skills": {
+        "expo-router": {
+          "checks": [
+            {
+              "category": "lexical",
+              "evidence": "app/_layout.tsx: imports expo-router",
+              "id": "router_import",
+              "kind": "import",
+              "passed": true,
+              "status": "passed",
+              "target": "expo-router"
+            },
+            {
+              "category": "lexical",
+              "evidence": "No source file matches any of ['<Link[\\\\s/>]', '<Redirect[\\\\s/>]', 'useRouter\\\\(', 'useLocalSearchParams\\\\(', 'useSegments\\\\(', 'usePathname\\\\(', 'useNavigation\\\\(']",
+              "id": "router_navigation_api_used",
+              "kind": "text_any",
+              "passed": false,
+              "status": "failed",
+              "target": [
+                "<Link[\\s/>]",
+                "<Redirect[\\s/>]",
+                "useRouter\\(",
+                "useLocalSearchParams\\(",
+                "useSegments\\(",
+                "usePathname\\(",
+                "useNavigation\\("
+              ]
+            },
+            {
+              "category": "lexical",
+              "evidence": "app/_layout.tsx: matches '<Stack[\\\\s/>]'",
+              "id": "router_navigator_jsx_tag",
+              "kind": "text_any",
+              "passed": true,
+              "status": "passed",
+              "target": [
+                "<Stack[\\s/>]",
+                "<Tabs[\\s/>]",
+                "<NativeTabs[\\s/>]",
+                "<Drawer[\\s/>]",
+                "<Slot[\\s/>]"
+              ]
+            },
+            {
+              "category": "lexical",
+              "evidence": "no file imports @react-navigation/* directly",
+              "id": "router_no_direct_react_navigation_import",
+              "kind": "code",
+              "passed": true,
+              "status": "passed",
+              "target": null
+            },
+            {
+              "category": "structural",
+              "evidence": "found app",
+              "id": "router_app_dir_exists",
+              "kind": "path_exists",
+              "passed": true,
+              "status": "passed",
+              "target": [
+                "app",
+                "src/app"
+              ]
+            },
+            {
+              "category": "structural",
+              "evidence": "found app/index.tsx",
+              "id": "router_has_index_route",
+              "kind": "path_exists",
+              "passed": true,
+              "status": "passed",
+              "target": [
+                "app/index.*",
+                "app/**/index.*",
+                "src/app/index.*",
+                "src/app/**/index.*"
+              ]
+            },
+            {
+              "category": "structural",
+              "evidence": "found app/_layout.tsx",
+              "id": "router_has_layout_file",
+              "kind": "path_exists",
+              "passed": true,
+              "status": "passed",
+              "target": [
+                "app/**/_layout.*",
+                "src/app/**/_layout.*"
+              ]
+            },
+            {
+              "category": "structural",
+              "evidence": "no path matched any of ['app/utils', 'app/helpers', 'app/constants', 'app/hooks', 'app/components', 'app/context', 'app/lib', 'app/services', 'app/shared', 'app/types', 'src/app/utils', 'src/app/helpers', 'src/app/constants', 'src/app/hooks', 'src/app/components', 'src/app/context', 'src/app/lib', 'src/app/services', 'src/app/shared', 'src/app/types']",
+              "id": "router_no_colocated_non_route_files_in_app_dir",
+              "kind": "path_absent",
+              "passed": true,
+              "status": "passed",
+              "target": [
+                "app/utils",
+                "app/helpers",
+                "app/constants",
+                "app/hooks",
+                "app/components",
+                "app/context",
+                "app/lib",
+                "app/services",
+                "app/shared",
+                "app/types",
+                "src/app/utils",
+                "src/app/helpers",
+                "src/app/constants",
+                "src/app/hooks",
+                "src/app/components",
+                "src/app/context",
+                "src/app/lib",
+                "src/app/services",
+                "src/app/shared",
+                "src/app/types"
+              ]
+            },
+            {
+              "category": "structural",
+              "evidence": "no path matched any of ['app/**/*[A-Z]*.tsx', 'app/**/*[A-Z]*.ts', 'app/**/*[A-Z]*.jsx', 'app/**/*[A-Z]*.js', 'src/app/**/*[A-Z]*.tsx', 'src/app/**/*[A-Z]*.ts', 'src/app/**/*[A-Z]*.jsx', 'src/app/**/*[A-Z]*.js']",
+              "id": "router_kebab_case_filenames_in_app_dir",
+              "kind": "path_absent",
+              "passed": true,
+              "status": "passed",
+              "target": [
+                "app/**/*[A-Z]*.tsx",
+                "app/**/*[A-Z]*.ts",
+                "app/**/*[A-Z]*.jsx",
+                "app/**/*[A-Z]*.js",
+                "src/app/**/*[A-Z]*.tsx",
+                "src/app/**/*[A-Z]*.ts",
+                "src/app/**/*[A-Z]*.jsx",
+                "src/app/**/*[A-Z]*.js"
+              ]
+            },
+            {
+              "category": "structural",
+              "evidence": "no path matched any of ['app/**/(*)*.tsx', 'app/**/(*)*.ts', 'app/**/(*)*.jsx', 'app/**/(*)*.js', 'src/app/**/(*)*.tsx', 'src/app/**/(*)*.ts', 'src/app/**/(*)*.jsx', 'src/app/**/(*)*.js']",
+              "id": "router_no_illegal_group_only_file",
+              "kind": "path_absent",
+              "passed": true,
+              "status": "passed",
+              "target": [
+                "app/**/(*)*.tsx",
+                "app/**/(*)*.ts",
+                "app/**/(*)*.jsx",
+                "app/**/(*)*.js",
+                "src/app/**/(*)*.tsx",
+                "src/app/**/(*)*.ts",
+                "src/app/**/(*)*.jsx",
+                "src/app/**/(*)*.js"
+              ]
+            },
+            {
+              "category": "structural",
+              "evidence": "no path matched any of ['app/+not-found.*', 'src/app/+not-found.*']",
+              "id": "router_not_found_route_exists",
+              "kind": "path_exists",
+              "passed": false,
+              "status": "failed",
+              "target": [
+                "app/+not-found.*",
+                "src/app/+not-found.*"
+              ]
+            },
+            {
+              "category": "structural",
+              "evidence": "no tsconfig.json/jsconfig.json compilerOptions.paths entry for '@/*'",
+              "id": "tsconfig_path_alias_configured",
+              "kind": "tsconfig_path_alias",
+              "passed": false,
+              "status": "failed",
+              "target": "@/*"
+            }
+          ],
+          "expected": true,
+          "passed": 9,
+          "total": 12,
+          "trigger_status": "observed",
+          "triggered": true,
+          "uptake_rate": 0.75,
+          "uptake_status": "measured"
+        }
+      },
+      "trigger_exact_match": true,
+      "trigger_precision": 1,
+      "trigger_recall": 1,
+      "uptake_rate": 0.75
+    }
+  ],
+  "scenario": "skills_available_unmentioned",
+  "score": {
+    "context_uptake": {
+      "passed": 9,
+      "skipped_reason": null,
+      "total": 12,
+      "uptake_rate": 0.75
+    },
+    "outcome_delta": {
+      "build_success": null,
+      "evaluator_pct": null
+    },
+    "trigger_quality": {
+      "any_expo_skill_triggered": true,
+      "expected_skills": [
+        "expo-router"
+      ],
+      "extra_skills": [],
+      "matched_skills": [
+        "expo-router"
+      ],
+      "missing_skills": [],
+      "precision": 1,
+      "recall": 1,
+      "triggered_skills": [
+        "expo-router"
+      ]
+    }
+  },
+  "skills": {
+    "expo-router": {
+      "checks": [
+        {
+          "category": "lexical",
+          "evidence": "app/_layout.tsx: imports expo-router",
+          "id": "router_import",
+          "kind": "import",
+          "passed": true,
+          "status": "passed",
+          "target": "expo-router"
+        },
+        {
+          "category": "lexical",
+          "evidence": "No source file matches any of ['<Link[\\\\s/>]', '<Redirect[\\\\s/>]', 'useRouter\\\\(', 'useLocalSearchParams\\\\(', 'useSegments\\\\(', 'usePathname\\\\(', 'useNavigation\\\\(']",
+          "id": "router_navigation_api_used",
+          "kind": "text_any",
+          "passed": false,
+          "status": "failed",
+          "target": [
+            "<Link[\\s/>]",
+            "<Redirect[\\s/>]",
+            "useRouter\\(",
+            "useLocalSearchParams\\(",
+            "useSegments\\(",
+            "usePathname\\(",
+            "useNavigation\\("
+          ]
+        },
+        {
+          "category": "lexical",
+          "evidence": "app/_layout.tsx: matches '<Stack[\\\\s/>]'",
+          "id": "router_navigator_jsx_tag",
+          "kind": "text_any",
+          "passed": true,
+          "status": "passed",
+          "target": [
+            "<Stack[\\s/>]",
+            "<Tabs[\\s/>]",
+            "<NativeTabs[\\s/>]",
+            "<Drawer[\\s/>]",
+            "<Slot[\\s/>]"
+          ]
+        },
+        {
+          "category": "lexical",
+          "evidence": "no file imports @react-navigation/* directly",
+          "id": "router_no_direct_react_navigation_import",
+          "kind": "code",
+          "passed": true,
+          "status": "passed",
+          "target": null
+        },
+        {
+          "category": "structural",
+          "evidence": "found app",
+          "id": "router_app_dir_exists",
+          "kind": "path_exists",
+          "passed": true,
+          "status": "passed",
+          "target": [
+            "app",
+            "src/app"
+          ]
+        },
+        {
+          "category": "structural",
+          "evidence": "found app/index.tsx",
+          "id": "router_has_index_route",
+          "kind": "path_exists",
+          "passed": true,
+          "status": "passed",
+          "target": [
+            "app/index.*",
+            "app/**/index.*",
+            "src/app/index.*",
+            "src/app/**/index.*"
+          ]
+        },
+        {
+          "category": "structural",
+          "evidence": "found app/_layout.tsx",
+          "id": "router_has_layout_file",
+          "kind": "path_exists",
+          "passed": true,
+          "status": "passed",
+          "target": [
+            "app/**/_layout.*",
+            "src/app/**/_layout.*"
+          ]
+        },
+        {
+          "category": "structural",
+          "evidence": "no path matched any of ['app/utils', 'app/helpers', 'app/constants', 'app/hooks', 'app/components', 'app/context', 'app/lib', 'app/services', 'app/shared', 'app/types', 'src/app/utils', 'src/app/helpers', 'src/app/constants', 'src/app/hooks', 'src/app/components', 'src/app/context', 'src/app/lib', 'src/app/services', 'src/app/shared', 'src/app/types']",
+          "id": "router_no_colocated_non_route_files_in_app_dir",
+          "kind": "path_absent",
+          "passed": true,
+          "status": "passed",
+          "target": [
+            "app/utils",
+            "app/helpers",
+            "app/constants",
+            "app/hooks",
+            "app/components",
+            "app/context",
+            "app/lib",
+            "app/services",
+            "app/shared",
+            "app/types",
+            "src/app/utils",
+            "src/app/helpers",
+            "src/app/constants",
+            "src/app/hooks",
+            "src/app/components",
+            "src/app/context",
+            "src/app/lib",
+            "src/app/services",
+            "src/app/shared",
+            "src/app/types"
+          ]
+        },
+        {
+          "category": "structural",
+          "evidence": "no path matched any of ['app/**/*[A-Z]*.tsx', 'app/**/*[A-Z]*.ts', 'app/**/*[A-Z]*.jsx', 'app/**/*[A-Z]*.js', 'src/app/**/*[A-Z]*.tsx', 'src/app/**/*[A-Z]*.ts', 'src/app/**/*[A-Z]*.jsx', 'src/app/**/*[A-Z]*.js']",
+          "id": "router_kebab_case_filenames_in_app_dir",
+          "kind": "path_absent",
+          "passed": true,
+          "status": "passed",
+          "target": [
+            "app/**/*[A-Z]*.tsx",
+            "app/**/*[A-Z]*.ts",
+            "app/**/*[A-Z]*.jsx",
+            "app/**/*[A-Z]*.js",
+            "src/app/**/*[A-Z]*.tsx",
+            "src/app/**/*[A-Z]*.ts",
+            "src/app/**/*[A-Z]*.jsx",
+            "src/app/**/*[A-Z]*.js"
+          ]
+        },
+        {
+          "category": "structural",
+          "evidence": "no path matched any of ['app/**/(*)*.tsx', 'app/**/(*)*.ts', 'app/**/(*)*.jsx', 'app/**/(*)*.js', 'src/app/**/(*)*.tsx', 'src/app/**/(*)*.ts', 'src/app/**/(*)*.jsx', 'src/app/**/(*)*.js']",
+          "id": "router_no_illegal_group_only_file",
+          "kind": "path_absent",
+          "passed": true,
+          "status": "passed",
+          "target": [
+            "app/**/(*)*.tsx",
+            "app/**/(*)*.ts",
+            "app/**/(*)*.jsx",
+            "app/**/(*)*.js",
+            "src/app/**/(*)*.tsx",
+            "src/app/**/(*)*.ts",
+            "src/app/**/(*)*.jsx",
+            "src/app/**/(*)*.js"
+          ]
+        },
+        {
+          "category": "structural",
+          "evidence": "no path matched any of ['app/+not-found.*', 'src/app/+not-found.*']",
+          "id": "router_not_found_route_exists",
+          "kind": "path_exists",
+          "passed": false,
+          "status": "failed",
+          "target": [
+            "app/+not-found.*",
+            "src/app/+not-found.*"
+          ]
+        },
+        {
+          "category": "structural",
+          "evidence": "no tsconfig.json/jsconfig.json compilerOptions.paths entry for '@/*'",
+          "id": "tsconfig_path_alias_configured",
+          "kind": "tsconfig_path_alias",
+          "passed": false,
+          "status": "failed",
+          "target": "@/*"
+        }
+      ],
+      "expected": true,
+      "passed": 9,
+      "total": 12,
+      "trigger_status": "observed",
+      "triggered": true,
+      "uptake_rate": 0.75,
+      "uptake_status": "measured"
+    }
+  },
+  "static_checks": [
+    {
+      "category": "lexical",
+      "evidence": "app/_layout.tsx: imports expo-router",
+      "id": "router_import",
+      "kind": "import",
+      "passed": true,
+      "status": "passed",
+      "target": "expo-router"
+    },
+    {
+      "category": "lexical",
+      "evidence": "No source file matches any of ['<Link[\\\\s/>]', '<Redirect[\\\\s/>]', 'useRouter\\\\(', 'useLocalSearchParams\\\\(', 'useSegments\\\\(', 'usePathname\\\\(', 'useNavigation\\\\(']",
+      "id": "router_navigation_api_used",
+      "kind": "text_any",
+      "passed": false,
+      "status": "failed",
+      "target": [
+        "<Link[\\s/>]",
+        "<Redirect[\\s/>]",
+        "useRouter\\(",
+        "useLocalSearchParams\\(",
+        "useSegments\\(",
+        "usePathname\\(",
+        "useNavigation\\("
+      ]
+    },
+    {
+      "category": "lexical",
+      "evidence": "app/_layout.tsx: matches '<Stack[\\\\s/>]'",
+      "id": "router_navigator_jsx_tag",
+      "kind": "text_any",
+      "passed": true,
+      "status": "passed",
+      "target": [
+        "<Stack[\\s/>]",
+        "<Tabs[\\s/>]",
+        "<NativeTabs[\\s/>]",
+        "<Drawer[\\s/>]",
+        "<Slot[\\s/>]"
+      ]
+    },
+    {
+      "category": "lexical",
+      "evidence": "no file imports @react-navigation/* directly",
+      "id": "router_no_direct_react_navigation_import",
+      "kind": "code",
+      "passed": true,
+      "status": "passed",
+      "target": null
+    },
+    {
+      "category": "structural",
+      "evidence": "found app",
+      "id": "router_app_dir_exists",
+      "kind": "path_exists",
+      "passed": true,
+      "status": "passed",
+      "target": [
+        "app",
+        "src/app"
+      ]
+    },
+    {
+      "category": "structural",
+      "evidence": "found app/index.tsx",
+      "id": "router_has_index_route",
+      "kind": "path_exists",
+      "passed": true,
+      "status": "passed",
+      "target": [
+        "app/index.*",
+        "app/**/index.*",
+        "src/app/index.*",
+        "src/app/**/index.*"
+      ]
+    },
+    {
+      "category": "structural",
+      "evidence": "found app/_layout.tsx",
+      "id": "router_has_layout_file",
+      "kind": "path_exists",
+      "passed": true,
+      "status": "passed",
+      "target": [
+        "app/**/_layout.*",
+        "src/app/**/_layout.*"
+      ]
+    },
+    {
+      "category": "structural",
+      "evidence": "no path matched any of ['app/utils', 'app/helpers', 'app/constants', 'app/hooks', 'app/components', 'app/context', 'app/lib', 'app/services', 'app/shared', 'app/types', 'src/app/utils', 'src/app/helpers', 'src/app/constants', 'src/app/hooks', 'src/app/components', 'src/app/context', 'src/app/lib', 'src/app/services', 'src/app/shared', 'src/app/types']",
+      "id": "router_no_colocated_non_route_files_in_app_dir",
+      "kind": "path_absent",
+      "passed": true,
+      "status": "passed",
+      "target": [
+        "app/utils",
+        "app/helpers",
+        "app/constants",
+        "app/hooks",
+        "app/components",
+        "app/context",
+        "app/lib",
+        "app/services",
+        "app/shared",
+        "app/types",
+        "src/app/utils",
+        "src/app/helpers",
+        "src/app/constants",
+        "src/app/hooks",
+        "src/app/components",
+        "src/app/context",
+        "src/app/lib",
+        "src/app/services",
+        "src/app/shared",
+        "src/app/types"
+      ]
+    },
+    {
+      "category": "structural",
+      "evidence": "no path matched any of ['app/**/*[A-Z]*.tsx', 'app/**/*[A-Z]*.ts', 'app/**/*[A-Z]*.jsx', 'app/**/*[A-Z]*.js', 'src/app/**/*[A-Z]*.tsx', 'src/app/**/*[A-Z]*.ts', 'src/app/**/*[A-Z]*.jsx', 'src/app/**/*[A-Z]*.js']",
+      "id": "router_kebab_case_filenames_in_app_dir",
+      "kind": "path_absent",
+      "passed": true,
+      "status": "passed",
+      "target": [
+        "app/**/*[A-Z]*.tsx",
+        "app/**/*[A-Z]*.ts",
+        "app/**/*[A-Z]*.jsx",
+        "app/**/*[A-Z]*.js",
+        "src/app/**/*[A-Z]*.tsx",
+        "src/app/**/*[A-Z]*.ts",
+        "src/app/**/*[A-Z]*.jsx",
+        "src/app/**/*[A-Z]*.js"
+      ]
+    },
+    {
+      "category": "structural",
+      "evidence": "no path matched any of ['app/**/(*)*.tsx', 'app/**/(*)*.ts', 'app/**/(*)*.jsx', 'app/**/(*)*.js', 'src/app/**/(*)*.tsx', 'src/app/**/(*)*.ts', 'src/app/**/(*)*.jsx', 'src/app/**/(*)*.js']",
+      "id": "router_no_illegal_group_only_file",
+      "kind": "path_absent",
+      "passed": true,
+      "status": "passed",
+      "target": [
+        "app/**/(*)*.tsx",
+        "app/**/(*)*.ts",
+        "app/**/(*)*.jsx",
+        "app/**/(*)*.js",
+        "src/app/**/(*)*.tsx",
+        "src/app/**/(*)*.ts",
+        "src/app/**/(*)*.jsx",
+        "src/app/**/(*)*.js"
+      ]
+    },
+    {
+      "category": "structural",
+      "evidence": "no path matched any of ['app/+not-found.*', 'src/app/+not-found.*']",
+      "id": "router_not_found_route_exists",
+      "kind": "path_exists",
+      "passed": false,
+      "status": "failed",
+      "target": [
+        "app/+not-found.*",
+        "src/app/+not-found.*"
+      ]
+    },
+    {
+      "category": "structural",
+      "evidence": "no tsconfig.json/jsconfig.json compilerOptions.paths entry for '@/*'",
+      "id": "tsconfig_path_alias_configured",
+      "kind": "tsconfig_path_alias",
+      "passed": false,
+      "status": "failed",
+      "target": "@/*"
+    }
+  ],
+  "summary": "Skill eval artifact analysis for test-app",
+  "warnings": []
+}

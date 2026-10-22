@@ -11,7 +11,7 @@ EVAL_ARTIFACT="${EVAL_ARTIFACT:-}"
 # Which skill(s) are expected is resolved automatically from the artifact's
 # authored PRD; each expected skill's uptake checks are resolved from
 # uptake_checks/skill_map.json. Override only for local debugging.
-PRD_SKILLS="${PRD_SKILLS:-}"
+PRD_SKILLS="${PRD_SKILLS:-$ROOT/dataset/prd_skills.json}"
 CHECKS_DIR="${CHECKS_DIR:-}"
 
 if [ -z "$AUTHORED_ARTIFACT" ]; then
@@ -59,6 +59,6 @@ if [ -n "$CHECKS_DIR" ]; then
   args+=(--checks-dir "$CHECKS_DIR")
 fi
 
-bun "$ROOT/eval_harness/evaluator/skill_invocation/main.ts" \
+bun "$ROOT/node_modules/.bin/skill-analyzer" \
   analyze-artifacts "${args[@]}"
 find "$OUT_DIR" -maxdepth 3 -type f -print | sort
