@@ -1,0 +1,15 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "printWidth": 100,
+  "tabWidth": 2,
+  "singleQuote": true,
+  "trailingComma": "es5",
+  "sortPackageJson": false,
+  "ignorePatterns": [
+    "**/build/**",
+    "**/dist/**",
+    "**/.vitest-integration-*/**",
+    "packages/skill-analyzer/tests/metrics.json",
+    "packages/skill-analyzer/tests/manifest.json"
+  ]
+}

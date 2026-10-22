@@ -9,7 +9,9 @@ skill analyzer. Compiled ESM and TypeScript declarations run under Node and Bun.
 import { parseSource, stripComments, walk } from '@expo/source-scan';
 
 const ast = parseSource('const value: number = 1;', 'app.ts');
-walk(ast, (node) => { console.log(node.type); });
+walk(ast, (node) => {
+  console.log(node.type);
+});
 stripComments("const url = 'https://expo.dev'; // comment");
 ```
 
