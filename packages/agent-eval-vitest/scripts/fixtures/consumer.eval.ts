@@ -1,5 +1,6 @@
 import { expect, createAgentEval, loadAstSupport, stripComments } from '@expo/agent-eval-vitest';
 import { claudeRunner } from '@expo/agent-eval-vitest/claude';
+import { createExpoProject } from '@expo/agent-eval-vitest/expo';
 
 const agentEval = createAgentEval({
   runner: async () => ({
@@ -25,6 +26,7 @@ agentEval(
       expect(fixture.observed).toBe(true);
       expect(execution.finalAnswer).toBe('done');
       expect(typeof claudeRunner()).toBe('function');
+      expect(typeof createExpoProject).toBe('function');
 
       const ast = await loadAstSupport();
       const parsed = ast.parse('const n: number = 1');

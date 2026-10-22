@@ -25,6 +25,10 @@
     "./ollama": {
       "types": "./build/ollama.d.ts",
       "default": "./build/ollama.js"
+    },
+    "./expo": {
+      "types": "./build/expo.d.ts",
+      "default": "./build/expo.js"
     }
   },
   "main": "./build/index.js",
