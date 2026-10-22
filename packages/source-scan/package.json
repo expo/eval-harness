@@ -1,0 +1,42 @@
+{
+  "name": "@expo/source-scan",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Internal shared source-scanning helpers for Expo evaluation packages",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/expo/eval-experiments.git",
+    "directory": "packages/source-scan"
+  },
+  "files": [
+    "build"
+  ],
+  "main": "./build/index.js",
+  "exports": {
+    ".": {
+      "types": "./build/index.d.ts",
+      "import": "./build/index.js"
+    },
+    "./strip-comments": {
+      "types": "./build/strip-comments.d.ts",
+      "import": "./build/strip-comments.js"
+    },
+    "./walk": {
+      "types": "./build/walk.d.ts",
+      "import": "./build/walk.js"
+    }
+  },
+  "scripts": {
+    "build": "node -e \"require('node:fs').rmSync('build', { recursive: true, force: true })\" && tsc -p tsconfig.build.json",
+    "test": "bun test src"
+  },
+  "dependencies": {
+    "@babel/parser": "catalog:"
+  },
+  "devDependencies": {
+    "typescript": "catalog:"
+  },
+  "types": "./build/index.d.ts",
+  "private": true
+}

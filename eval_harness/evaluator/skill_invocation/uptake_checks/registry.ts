@@ -1,3 +1,4 @@
+import { stripComments } from "@expo/source-scan/strip-comments";
 import {
   existsSync,
   readFileSync,
@@ -381,9 +382,7 @@ export async function runCheck(
   }
 }
 
-export function stripComments(text: string): string {
-  return text.replace(/\/\*[\s\S]*?\*\//gu, "").replace(/\/\/.*$/gmu, "");
-}
+export { stripComments };
 
 function isLineTerminator(character: string): boolean {
   return (

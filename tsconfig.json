@@ -18,6 +18,6 @@
     "noUnusedParameters": true,
     "exactOptionalPropertyTypes": true
   },
-  "include": ["eval_harness/**/*.ts"],
+  "include": ["eval_harness/**/*.ts", "packages/*/src/**/*.ts"],
   "exclude": ["eval_harness/legacy/**", "**/node_modules/**"]
 }

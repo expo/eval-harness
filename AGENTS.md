@@ -9,8 +9,14 @@ runner plus uploaded artifacts.
 
 ## Current Shape
 
-- `packages/`: reusable npm libraries managed as Bun workspaces. The root
-  package stays private; each published package owns its exports and build.
+- `packages/`: Bun workspaces. `source-scan/` is private and supplies the shared
+  parser, AST walk, and lexical comment stripper used by the skill analyzer.
+  Shared versions live in the root catalog; declare actual dependencies in each
+  package with `catalog:` and use `workspace:*` for internal packages.
+  Package exports point to compiled ESM and declarations under `build/`; run
+  `bun install` (which builds the workspace foundation) before harness commands,
+  and `bun run build` after editing package source. Keep publication paths in
+  `exports` directly, without `publishConfig` remapping.
 
 - `eval_harness/app_builder/`: authoring side. `scripts/` holds its workflow
   entrypoint (`author-app.sh`). The coding-agent prompt itself lives in
