@@ -54,3 +54,6 @@ agent-workspace/
 
 # local worktrees
 .worktrees/
+
+# compiled workspace packages
+packages/*/build/
