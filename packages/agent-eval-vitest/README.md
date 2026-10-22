@@ -123,6 +123,54 @@ calls/results, and waits for process termination and artifact flushing. This
 release targets POSIX hosts for subprocess-tree cancellation; Windows child
 process trees are not covered by that guarantee.
 
+## Ollama command runner
+
+`ollamaRunner` runs a bounded JSON command loop against Ollama's
+[`/api/chat` API](https://docs.ollama.com/api/chat). The model emits `{"run": ["command", "arg"]}` or
+`{"done": true, "summary": "..."}`. This uses JSON output, not native Ollama tool
+calling. The caller supplies the command executor and describes its CLI in the
+system prompt; the runner never implicitly exposes a shell or reads workspace files.
+
+```ts
+import { ollamaRunner } from '@expo/agent-eval-vitest/ollama';
+
+const runner = ollamaRunner({
+  model: 'qwen3:4b', // provision this model before the evaluation
+  systemPrompt: 'Use the agent CLI to inspect the project. Start with status --json.',
+  maxTurns: 8,
+  async runCommand(args, { root, signal }) {
+    // Your executor validates argv, runs the fixed CLI in root, forwards signal,
+    // and returns { exitCode, stdout, stderr }. It must settle after cancellation.
+    return executeAgentCli(args, { cwd: root, signal });
+  },
+});
+const agentEval = createAgentEval({ runner, timeoutMs: 20 * 60_000 });
+```
+
+`executeAgentCli` above is consumer-owned: validate arguments, select the executable,
+forward cancellation, and capture stdout/stderr. Describe available commands in the
+system prompt; the runner adds JSON action instructions. Put grading in Vitest checks.
+
+The host defaults to `OLLAMA_HOST` or `http://127.0.0.1:11434`; `host` overrides it.
+The model is always explicit. The runner does not start Ollama or pull models.
+Defaults are 8 chat requests, temperature 0, seed 42, and a 15-minute deadline per
+HTTP request. Configure the evaluation's total `timeoutMs` separately; the default
+kit deadline may be shorter than local inference. Node HTTP avoids fetch's shorter
+headers timeout, and the runner cancels pending HTTP requests on abort.
+
+Each command receives the workspace context and abort signal. Nonzero command
+exits are fed back to the model; thrown executor errors reject as infrastructure
+failures. Stdout/stderr feedback is limited to `maxOutputChars` (800 per field by
+default), while full results remain in `execution.toolCalls` and `ollama.jsonl`.
+The transcript also records requests, responses, and errors in `artifactsDir`.
+It contains prompts and command output, so treat it as evaluation evidence.
+
+Malformed model actions receive corrective feedback and count toward `maxTurns`.
+Exhausting turns or generation length returns `budget-exhausted`; HTTP deadlines
+return `timeout`; cancellation returns `cancelled`. HTTP/protocol failures reject.
+There are no live-model calls in the package tests: they use a local fake HTTP
+server, including the packed consumer test under Node.
+
 ## Workspace helpers
 
 Workspace helpers (`read`, `exists`, `sourceFiles`, `source`, `packageJson`, `glob`)
