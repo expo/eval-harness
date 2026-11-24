@@ -48,6 +48,10 @@
     "tailwind_postcss_uses_official_plugin",
     "tailwind_global_css_exists"
   ],
+  "expo-hosting": [
+    "hosting_api_routes_use_typescript",
+    "hosting_no_banned_node_imports_in_api_routes"
+  ],
   "eas-hosting": [
     "hosting_api_routes_use_typescript",
     "hosting_no_banned_node_imports_in_api_routes"
