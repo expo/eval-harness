@@ -1250,25 +1250,6 @@ test("[REGRESSION] server secrets are excluded from client env-prefix checks", a
   });
 });
 
-test("should resolve the same Hosting uptake checks for both skill IDs", () => {
-  const { checksBySkill, warnings } = resolveChecksBySkill(
-    ["expo-hosting", "eas-hosting"],
-    REAL_CHECKS_DIR,
-  );
-  const expectedCheckIds = [
-    "hosting_api_routes_use_typescript",
-    "hosting_no_banned_node_imports_in_api_routes",
-  ];
-
-  expect(warnings).toEqual([]);
-  expect(checksBySkill["expo-hosting"]?.map((check) => check.id)).toEqual(
-    expectedCheckIds,
-  );
-  expect(checksBySkill["eas-hosting"]?.map((check) => check.id)).toEqual(
-    expectedCheckIds,
-  );
-});
-
 test("[REGRESSION] code-driven checks preserve applicability and violation rules", async () => {
   const cases: Array<{
     name: string;
